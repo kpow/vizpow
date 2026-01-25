@@ -13,10 +13,18 @@
 #define WIFI_SSID "LED-Matrix"
 #define WIFI_PASSWORD "12345678"
 
+// Display modes
+#define MODE_MOTION 0
+#define MODE_AMBIENT 1
+#define MODE_EMOJI 2
+
 // Effect counts
 #define NUM_MOTION_EFFECTS 12
-#define NUM_AMBIENT_EFFECTS 15
+#define NUM_AMBIENT_EFFECTS 16
 #define NUM_PALETTES 15
+
+// Emoji settings
+#define MAX_EMOJI_QUEUE 8
 
 // XY mapping for serpentine matrix layout
 inline uint16_t XY(uint8_t x, uint8_t y) {

@@ -29,6 +29,7 @@
 #include "palettes.h"
 #include "effects_motion.h"
 #include "effects_ambient.h"
+#include "effects_emoji.h"
 #include "web_server.h"
 
 // Global objects
@@ -42,7 +43,7 @@ uint8_t paletteIndex = 0;
 uint8_t brightness = 15;
 uint8_t speed = 20;
 bool autoCycle = false;
-bool motionMode = true;
+uint8_t currentMode = MODE_MOTION;
 unsigned long lastChange = 0;
 unsigned long lastPaletteChange = 0;
 
@@ -75,7 +76,7 @@ void setup() {
   Serial.begin(115200);
   
   // Initialize LEDs
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
   FastLED.setBrightness(brightness);
   
   // Run color test
@@ -126,28 +127,38 @@ void readIMU() {
 void loop() {
   server.handleClient();
   readIMU();
-  
-  int maxEffects = motionMode ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
-  
-  // Auto cycle effects
-  if (autoCycle && millis() - lastChange > 10000) {
-    lastChange = millis();
-    effectIndex = (effectIndex + 1) % maxEffects;
-    FastLED.clear();
-  }
-  
-  // Auto cycle palettes
-  if (autoCycle && millis() - lastPaletteChange > 5000) {
-    lastPaletteChange = millis();
-    paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
-    currentPalette = palettes[paletteIndex];
+
+  // Only do effect/palette cycling for Motion and Ambient modes
+  if (currentMode != MODE_EMOJI) {
+    int maxEffects = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
+
+    // Auto cycle effects (ambient effects get double time)
+    unsigned long cycleTime = (currentMode == MODE_MOTION) ? 10000 : 20000;
+    if (autoCycle && millis() - lastChange > cycleTime) {
+      lastChange = millis();
+      effectIndex = (effectIndex + 1) % maxEffects;
+      FastLED.clear();
+    }
+
+    // Auto cycle palettes
+    if (autoCycle && millis() - lastPaletteChange > 5000) {
+      lastPaletteChange = millis();
+      paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
+      currentPalette = palettes[paletteIndex];
+    }
   }
 
-  // Run current effect
-  if (motionMode) {
-    runMotionEffect(effectIndex);
-  } else {
-    runAmbientEffect(effectIndex);
+  // Run current effect based on mode
+  switch (currentMode) {
+    case MODE_MOTION:
+      runMotionEffect(effectIndex);
+      break;
+    case MODE_AMBIENT:
+      runAmbientEffect(effectIndex);
+      break;
+    case MODE_EMOJI:
+      runEmojiEffect();
+      break;
   }
 
   FastLED.show();
