@@ -79,10 +79,11 @@ bool addEmojiToQueue(const char* hexData) {
 }
 
 // Display single emoji using XY() mapping
+// Mirror horizontally to correct for matrix orientation
 void displayEmoji(EmojiFrame* frame) {
   for (uint8_t y = 0; y < HEIGHT; y++) {
     for (uint8_t x = 0; x < WIDTH; x++) {
-      int srcIndex = y * WIDTH + x;
+      int srcIndex = y * WIDTH + (WIDTH - 1 - x);  // Mirror X axis
       leds[XY(x, y)] = frame->pixels[srcIndex];
     }
   }
@@ -92,7 +93,7 @@ void displayEmoji(EmojiFrame* frame) {
 void blendEmojis(EmojiFrame* from, EmojiFrame* to, uint8_t blendAmount) {
   for (uint8_t y = 0; y < HEIGHT; y++) {
     for (uint8_t x = 0; x < WIDTH; x++) {
-      int srcIndex = y * WIDTH + x;
+      int srcIndex = y * WIDTH + (WIDTH - 1 - x);  // Mirror X axis
       leds[XY(x, y)] = blend(from->pixels[srcIndex], to->pixels[srcIndex], blendAmount);
     }
   }
