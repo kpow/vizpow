@@ -3,6 +3,7 @@
 
 #include <FastLED.h>
 #include "config.h"
+#include "emoji_sprites.h"
 
 // External references to globals defined in main sketch
 extern CRGB leds[];
@@ -65,7 +66,7 @@ void clearEmojiQueue() {
   emojiLastChange = millis();
 }
 
-// Add emoji to queue
+// Add emoji to queue from hex data (legacy method)
 bool addEmojiToQueue(const char* hexData) {
   if (emojiQueueCount >= MAX_EMOJI_QUEUE) {
     return false;
@@ -76,6 +77,25 @@ bool addEmojiToQueue(const char* hexData) {
     return true;
   }
   return false;
+}
+
+// Add emoji to queue from sprite index
+bool addEmojiByIndex(uint8_t spriteIndex) {
+  if (emojiQueueCount >= MAX_EMOJI_QUEUE) {
+    return false;
+  }
+  if (spriteIndex >= NUM_EMOJI_SPRITES) {
+    return false;
+  }
+
+  // Get pointer to sprite data and copy to queue
+  const CRGB* spritePtr = emojiSprites[spriteIndex];
+  for (int i = 0; i < 64; i++) {
+    emojiQueue[emojiQueueCount].pixels[i] = spritePtr[i];
+  }
+  emojiQueue[emojiQueueCount].active = true;
+  emojiQueueCount++;
+  return true;
 }
 
 // Display single emoji using XY() mapping

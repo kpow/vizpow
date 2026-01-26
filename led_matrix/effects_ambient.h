@@ -190,7 +190,7 @@ void ambientGalaxy() {
 void ambientHeart() {
   static uint8_t t = 0;
   t++;
-  
+
   // Heart shape for 8x8 matrix (1 = lit pixel)
   const uint8_t heart[] = {
     0b01100110,
@@ -202,22 +202,55 @@ void ambientHeart() {
     0b00011000,
     0b00000000
   };
-  
+
   // Pulsing brightness (heartbeat effect)
   uint8_t beat = sin8(t * 4);
   uint8_t bright = 80 + (beat >> 1);
-  
+
   // Quick double-beat pattern
   if ((t % 60) < 5 || ((t % 60) > 10 && (t % 60) < 15)) {
     bright = 255;
   }
-  
+
   FastLED.clear();
-  
+
   for (uint8_t y = 0; y < HEIGHT; y++) {
     for (uint8_t x = 0; x < WIDTH; x++) {
       if (heart[y] & (1 << (7 - x))) {
         leds[XY(x, y)] = ColorFromPalette(currentPalette, t, bright);
+      }
+    }
+  }
+}
+
+void ambientDonut() {
+  static uint8_t t = 0;
+  t++;
+
+  // Smaller donut/ring shape centered in 8x8 matrix (1 = donut pixel)
+  const uint8_t donut[] = {
+    0b00000000,
+    0b00111100,
+    0b01000010,
+    0b01000010,
+    0b01000010,
+    0b01000010,
+    0b00111100,
+    0b00000000
+  };
+
+  // Alternate colors faster (~1 second cycle)
+  bool phase = (t / 50) % 2;
+
+  CRGB bgColor = phase ? CRGB::Blue : CRGB::Red;
+  CRGB donutColor = phase ? CRGB::Red : CRGB::Blue;
+
+  for (uint8_t y = 0; y < HEIGHT; y++) {
+    for (uint8_t x = 0; x < WIDTH; x++) {
+      if (donut[y] & (1 << (7 - x))) {
+        leds[XY(x, y)] = donutColor;
+      } else {
+        leds[XY(x, y)] = bgColor;
       }
     }
   }
@@ -241,6 +274,7 @@ void runAmbientEffect(uint8_t index) {
     case 12: ambientComet(); break;
     case 13: ambientGalaxy(); break;
     case 14: ambientHeart(); break;
+    case 15: ambientDonut(); break;
   }
 }
 

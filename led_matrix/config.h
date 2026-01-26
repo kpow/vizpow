@@ -24,7 +24,7 @@
 #define NUM_PALETTES 15
 
 // Emoji settings
-#define MAX_EMOJI_QUEUE 8
+#define MAX_EMOJI_QUEUE 16
 
 // XY mapping for serpentine matrix layout
 inline uint16_t XY(uint8_t x, uint8_t y) {

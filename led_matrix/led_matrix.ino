@@ -42,8 +42,8 @@ uint8_t effectIndex = 0;
 uint8_t paletteIndex = 0;
 uint8_t brightness = 15;
 uint8_t speed = 20;
-bool autoCycle = false;
-uint8_t currentMode = MODE_MOTION;
+bool autoCycle = true;
+uint8_t currentMode = MODE_AMBIENT;
 unsigned long lastChange = 0;
 unsigned long lastPaletteChange = 0;
 
@@ -54,20 +54,16 @@ float gyroX = 0, gyroY = 0, gyroZ = 0;
 // Current palette
 CRGBPalette16 currentPalette;
 
-// Color test at startup
-void colorTest() {
-  fill_solid(leds, NUM_LEDS, CRGB::Red);
-  FastLED.show();
-  delay(500);
-  
-  fill_solid(leds, NUM_LEDS, CRGB::Green);
-  FastLED.show();
-  delay(500);
-  
-  fill_solid(leds, NUM_LEDS, CRGB::Blue);
-  FastLED.show();
-  delay(500);
-  
+// Sparkle intro animation at startup
+void introAnimation() {
+  unsigned long startTime = millis();
+  while (millis() - startTime < 2000) {  // Run for 2 seconds
+    fadeToBlackBy(leds, NUM_LEDS, 20);
+    int pos = random16(NUM_LEDS);
+    leds[pos] = CHSV(random8(), 255, 255);  // Random rainbow colors
+    FastLED.show();
+    delay(20);
+  }
   FastLED.clear();
   FastLED.show();
 }
@@ -79,8 +75,8 @@ void setup() {
   FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
   FastLED.setBrightness(brightness);
   
-  // Run color test
-  colorTest();
+  // Run intro animation
+  introAnimation();
   
   // Initialize IMU
   Wire.begin(I2C_SDA, I2C_SCL);
