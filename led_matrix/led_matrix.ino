@@ -57,8 +57,57 @@ uint8_t shakeIndex = 0;
 unsigned long lastModeChange = 0;
 bool wasShaking = false;  // Track if we were above threshold last frame
 
+// Shuffle bags for random-without-repeats cycling
+uint8_t effectShuffleBag[max(NUM_MOTION_EFFECTS, NUM_AMBIENT_EFFECTS)];
+uint8_t effectShufflePos = 0;
+uint8_t effectShuffleSize = 0;
+
+uint8_t paletteShuffleBag[NUM_PALETTES];
+uint8_t paletteShufflePos = 0;
+
 // Current palette
 CRGBPalette16 currentPalette;
+
+// Fisher-Yates shuffle
+void shuffleArray(uint8_t* arr, uint8_t size) {
+  for (uint8_t i = size - 1; i > 0; i--) {
+    uint8_t j = random(i + 1);
+    uint8_t tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+}
+
+void resetEffectShuffle() {
+  effectShuffleSize = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
+  for (uint8_t i = 0; i < effectShuffleSize; i++) {
+    effectShuffleBag[i] = i;
+  }
+  shuffleArray(effectShuffleBag, effectShuffleSize);
+  effectShufflePos = 0;
+}
+
+void resetPaletteShuffle() {
+  for (uint8_t i = 0; i < NUM_PALETTES; i++) {
+    paletteShuffleBag[i] = i;
+  }
+  shuffleArray(paletteShuffleBag, NUM_PALETTES);
+  paletteShufflePos = 0;
+}
+
+uint8_t nextShuffledEffect() {
+  if (effectShufflePos >= effectShuffleSize) {
+    resetEffectShuffle();
+  }
+  return effectShuffleBag[effectShufflePos++];
+}
+
+uint8_t nextShuffledPalette() {
+  if (paletteShufflePos >= NUM_PALETTES) {
+    resetPaletteShuffle();
+  }
+  return paletteShuffleBag[paletteShufflePos++];
+}
 
 // Sparkle intro animation at startup
 void introAnimation() {
@@ -112,6 +161,10 @@ void setup() {
   for (uint8_t i = 0; i < SHAKE_COUNT; i++) {
     shakeTimestamps[i] = 0;
   }
+
+  // Initialize shuffle bags
+  resetEffectShuffle();
+  resetPaletteShuffle();
 
   // Start WiFi AP
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
@@ -172,6 +225,7 @@ void checkModeShake() {
       effectIndex = 0;
       lastChange = now;
       lastModeChange = now;
+      resetEffectShuffle();  // Reshuffle for the new mode's effect count
       FastLED.clear();
 
       // Clear shake timestamps to prevent immediate re-trigger
@@ -205,14 +259,14 @@ void loop() {
     unsigned long cycleTime = (currentMode == MODE_MOTION) ? 10000 : 20000;
     if (autoCycle && millis() - lastChange > cycleTime) {
       lastChange = millis();
-      effectIndex = (effectIndex + 1) % maxEffects;
+      effectIndex = nextShuffledEffect();
       FastLED.clear();
     }
 
     // Auto cycle palettes
     if (autoCycle && millis() - lastPaletteChange > 5000) {
       lastPaletteChange = millis();
-      paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
+      paletteIndex = nextShuffledPalette();
       currentPalette = palettes[paletteIndex];
     }
   }

@@ -13,6 +13,7 @@ extern uint8_t paletteIndex;
 extern uint8_t brightness;
 extern uint8_t speed;
 extern bool autoCycle;
+extern void resetEffectShuffle();
 extern uint8_t currentMode;
 extern CRGBPalette16 currentPalette;
 
@@ -388,6 +389,7 @@ void handleMode() {
   if (server.hasArg("v")) {
     currentMode = constrain(server.arg("v").toInt(), 0, 2);
     effectIndex = 0;
+    resetEffectShuffle();
     FastLED.clear();
   }
   server.send(200, "text/plain", "OK");
