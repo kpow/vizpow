@@ -13,8 +13,19 @@ extern uint8_t paletteIndex;
 extern uint8_t brightness;
 extern uint8_t speed;
 extern bool autoCycle;
-extern bool motionMode;
+extern uint8_t currentMode;
 extern CRGBPalette16 currentPalette;
+
+// Emoji-related externs (defined in effects_emoji.h)
+extern uint8_t emojiQueueCount;
+extern uint16_t emojiCycleTime;
+extern uint16_t emojiFadeDuration;
+extern bool emojiAutoCycle;
+void clearEmojiQueue();
+bool addEmojiToQueue(const char* hexData);
+bool addEmojiByIndex(uint8_t spriteIndex);
+void setEmojiSettings(uint16_t cycleTime, uint16_t fadeDuration, bool autoCycle);
+
 
 // Web interface HTML
 const char webpage[] PROGMEM = R"rawliteral(
@@ -25,19 +36,19 @@ const char webpage[] PROGMEM = R"rawliteral(
   <title>LED Matrix</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { 
-      font-family: -apple-system, sans-serif; 
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
-      color: #fff; 
+    body {
+      font-family: -apple-system, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
       min-height: 100vh;
       padding: 20px;
     }
     h1 { text-align: center; margin-bottom: 20px; font-size: 24px; }
     h2 { font-size: 14px; color: #888; margin-bottom: 10px; text-transform: uppercase; }
-    .card { 
-      background: rgba(255,255,255,0.1); 
-      border-radius: 16px; 
-      padding: 20px; 
+    .card {
+      background: rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 20px;
       margin-bottom: 16px;
       backdrop-filter: blur(10px);
     }
@@ -108,24 +119,77 @@ const char webpage[] PROGMEM = R"rawliteral(
     }
     .toggle.on::after { transform: translateX(20px); }
     .status { text-align: center; color: #888; font-size: 12px; margin-top: 10px; }
+    .hidden { display: none; }
+    #emojiGrid {
+      max-height: 300px;
+      overflow-y: auto;
+      margin-bottom: 15px;
+    }
+    #emojiQueue {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 15px;
+      min-height: 40px;
+    }
+    .queueItem {
+      background: rgba(99, 102, 241, 0.5);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+    .queueEmpty {
+      color: #666;
+      font-style: italic;
+      padding: 10px;
+    }
+    .btn-row { display: flex; gap: 10px; margin-top: 10px; }
+    .btn-row button { flex: 1; }
+    .btn-danger { background: rgba(239, 68, 68, 0.3); }
   </style>
 </head>
 <body>
   <h1>LED Matrix Control</h1>
-  
+
   <div class="card">
     <div class="tab-row">
-      <button class="tab active" id="tabMotion" onclick="setMode(true)">Motion</button>
-      <button class="tab" id="tabAmbient" onclick="setMode(false)">Ambient</button>
+      <button class="tab active" id="tabMotion" onclick="setMode(0)">Motion</button>
+      <button class="tab" id="tabAmbient" onclick="setMode(1)">Ambient</button>
+      <button class="tab" id="tabEmoji" onclick="setMode(2)">Emoji</button>
     </div>
-    <div class="grid" id="effects"></div>
+
+    <div id="effectsPanel">
+      <div class="grid" id="effects"></div>
+    </div>
+
+    <div id="emojiPanel" class="hidden">
+      <h2>Select Emoji</h2>
+      <div class="grid4" id="emojiGrid"></div>
+      <h2>Queue (<span id="queueCount">0</span>/16)</h2>
+      <div id="emojiQueue"><span class="queueEmpty">Click an emoji above to add</span></div>
+      <div class="btn-row">
+        <button class="btn-danger" onclick="clearQueue()">Clear Queue</button>
+      </div>
+      <div class="slider-container">
+        <div class="slider-label"><span>Cycle Time</span><span id="cycleVal">3s</span></div>
+        <input type="range" id="cycleTime" min="1" max="10" value="3">
+      </div>
+      <div class="slider-container">
+        <div class="slider-label"><span>Fade Duration</span><span id="fadeVal">500ms</span></div>
+        <input type="range" id="fadeDuration" min="100" max="2000" value="500" step="100">
+      </div>
+      <div class="toggle-row">
+        <span>Auto Cycle</span>
+        <div class="toggle on" id="emojiAutoCycle"></div>
+      </div>
+    </div>
   </div>
-  
-  <div class="card">
+
+  <div class="card" id="paletteCard">
     <h2>Palettes</h2>
     <div class="grid4" id="palettes"></div>
   </div>
-  
+
   <div class="card">
     <h2>Settings</h2>
     <div class="slider-container">
@@ -141,24 +205,51 @@ const char webpage[] PROGMEM = R"rawliteral(
       <div class="toggle" id="autoCycle"></div>
     </div>
   </div>
-  
+
   <div class="status">Connected to LED-Matrix</div>
 
   <script>
     const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Spin Trails", "Gravity Pixels", "Motion Noise", "Tilt Ripple", "Gyro Swirl", "Shake Explode", "Tilt Fire", "Motion Rainbow"];
-    const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Wave", "Spiral", "Breathe", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart"];
+    const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Wave", "Spiral", "Breathe", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
-    
-    let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, motionMode: true };
-    
+
+    let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };
+    let emojiQueue = [];
+    let emojiAutoCycle = true;
+
+    // Icon names matching emoji_sprites.h (32 icons)
+    const emojiNames = [
+      "Heart", "Star", "Smiley", "Check",
+      "X", "Question", "Exclaim", "Sun",
+      "Moon", "Cloud", "Rain", "Lightning",
+      "Fire", "Snow", "Tree", "Coin",
+      "Key", "Gem", "Potion", "Sword",
+      "Shield", "ArrowUp", "ArrowDown", "ArrowLeft",
+      "ArrowRight", "Skull", "Ghost", "Alien",
+      "Pacman", "Music", "WiFi", "Rainbow"
+    ];
+
     function render() {
-      const effects = state.motionMode ? motionEffects : ambientEffects;
-      document.getElementById('tabMotion').className = 'tab ' + (state.motionMode ? 'active' : '');
-      document.getElementById('tabAmbient').className = 'tab ' + (!state.motionMode ? 'active' : '');
-      document.getElementById('effects').innerHTML = effects.map((e, i) => 
-        `<button class="${state.effect === i ? 'active' : ''}" onclick="setEffect(${i})">${e}</button>`
-      ).join('');
-      document.getElementById('palettes').innerHTML = palettes.map((p, i) => 
+      const effects = state.currentMode === 0 ? motionEffects : ambientEffects;
+      document.getElementById('tabMotion').className = 'tab ' + (state.currentMode === 0 ? 'active' : '');
+      document.getElementById('tabAmbient').className = 'tab ' + (state.currentMode === 1 ? 'active' : '');
+      document.getElementById('tabEmoji').className = 'tab ' + (state.currentMode === 2 ? 'active' : '');
+
+      document.getElementById('effectsPanel').className = state.currentMode === 2 ? 'hidden' : '';
+      document.getElementById('emojiPanel').className = state.currentMode === 2 ? '' : 'hidden';
+      document.getElementById('paletteCard').className = state.currentMode === 2 ? 'card hidden' : 'card';
+
+      if (state.currentMode !== 2) {
+        document.getElementById('effects').innerHTML = effects.map((e, i) =>
+          `<button class="${state.effect === i ? 'active' : ''}" onclick="setEffect(${i})">${e}</button>`
+        ).join('');
+      } else {
+        document.getElementById('emojiGrid').innerHTML = emojiNames.map((name, i) =>
+          `<button onclick="addEmoji(${i})">${name}</button>`
+        ).join('');
+      }
+
+      document.getElementById('palettes').innerHTML = palettes.map((p, i) =>
         `<button class="${state.palette === i ? 'active' : ''}" onclick="setPalette(${i})">${p}</button>`
       ).join('');
       document.getElementById('brightness').value = state.brightness;
@@ -167,38 +258,102 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('speedVal').textContent = state.speed;
       document.getElementById('autoCycle').className = 'toggle ' + (state.autoCycle ? 'on' : '');
     }
-    
+
+    function renderEmojiQueue() {
+      const container = document.getElementById('emojiQueue');
+      document.getElementById('queueCount').textContent = emojiQueue.length;
+
+      if (emojiQueue.length === 0) {
+        container.innerHTML = '<span class="queueEmpty">Click an emoji above to add</span>';
+        return;
+      }
+
+      container.innerHTML = emojiQueue.map((idx, i) =>
+        `<button class="queueItem" onclick="removeFromQueue(${i})">${emojiNames[idx]}</button>`
+      ).join('');
+    }
+
+    function removeFromQueue(index) {
+      emojiQueue.splice(index, 1);
+      renderEmojiQueue();
+      api('/emoji/clear');
+      emojiQueue.forEach(idx => api('/emoji/add?v=' + idx));
+    }
+
+    function addEmoji(index) {
+      if (emojiQueue.length >= 16) {
+        alert('Queue full (max 16)');
+        return;
+      }
+      emojiQueue.push(index);
+      renderEmojiQueue();
+      api('/emoji/add?v=' + index);
+    }
+
     async function api(endpoint) {
       try { await fetch(endpoint); } catch(e) {}
     }
-    
-    function setMode(isMotion) { 
-      state.motionMode = isMotion; 
+
+    function setMode(mode) {
+      state.currentMode = mode;
       state.effect = 0;
-      render(); 
-      api('/mode?v=' + (isMotion ? 1 : 0)); 
+      render();
+      api('/mode?v=' + mode);
     }
     function setEffect(i) { state.effect = i; render(); api('/effect?v=' + i); }
     function setPalette(i) { state.palette = i; render(); api('/palette?v=' + i); }
-    
+
     document.getElementById('brightness').oninput = function() {
       state.brightness = this.value;
       document.getElementById('brightnessVal').textContent = this.value;
     };
     document.getElementById('brightness').onchange = function() { api('/brightness?v=' + this.value); };
-    
+
     document.getElementById('speed').oninput = function() {
       state.speed = this.value;
       document.getElementById('speedVal').textContent = this.value;
     };
     document.getElementById('speed').onchange = function() { api('/speed?v=' + this.value); };
-    
+
     document.getElementById('autoCycle').onclick = function() {
       state.autoCycle = !state.autoCycle;
       render();
       api('/autocycle?v=' + (state.autoCycle ? 1 : 0));
     };
-    
+
+    // Emoji-specific controls
+    document.getElementById('cycleTime').oninput = function() {
+      document.getElementById('cycleVal').textContent = this.value + 's';
+    };
+    document.getElementById('cycleTime').onchange = function() {
+      updateEmojiSettings();
+    };
+
+    document.getElementById('fadeDuration').oninput = function() {
+      document.getElementById('fadeVal').textContent = this.value + 'ms';
+    };
+    document.getElementById('fadeDuration').onchange = function() {
+      updateEmojiSettings();
+    };
+
+    document.getElementById('emojiAutoCycle').onclick = function() {
+      emojiAutoCycle = !emojiAutoCycle;
+      this.className = 'toggle ' + (emojiAutoCycle ? 'on' : '');
+      updateEmojiSettings();
+    };
+
+    function updateEmojiSettings() {
+      const cycleTime = document.getElementById('cycleTime').value * 1000;
+      const fadeDuration = document.getElementById('fadeDuration').value;
+      api('/emoji/settings?cycle=' + cycleTime + '&fade=' + fadeDuration + '&auto=' + (emojiAutoCycle ? 1 : 0));
+    }
+
+    function clearQueue() {
+      emojiQueue = [];
+      renderEmojiQueue();
+      api('/emoji/clear');
+    }
+
     async function getState() {
       try {
         const r = await fetch('/state');
@@ -206,8 +361,9 @@ const char webpage[] PROGMEM = R"rawliteral(
         render();
       } catch(e) {}
     }
-    
+
     getState();
+    renderEmojiQueue();
   </script>
 </body>
 </html>
@@ -219,18 +375,18 @@ void handleRoot() {
 }
 
 void handleState() {
-  String json = "{\"effect\":" + String(effectIndex) + 
-                ",\"palette\":" + String(paletteIndex) + 
-                ",\"brightness\":" + String(brightness) + 
-                ",\"speed\":" + String(speed) + 
+  String json = "{\"effect\":" + String(effectIndex) +
+                ",\"palette\":" + String(paletteIndex) +
+                ",\"brightness\":" + String(brightness) +
+                ",\"speed\":" + String(speed) +
                 ",\"autoCycle\":" + (autoCycle ? "true" : "false") +
-                ",\"motionMode\":" + (motionMode ? "true" : "false") + "}";
+                ",\"currentMode\":" + String(currentMode) + "}";
   server.send(200, "application/json", json);
 }
 
 void handleMode() {
   if (server.hasArg("v")) {
-    motionMode = server.arg("v").toInt() == 1;
+    currentMode = constrain(server.arg("v").toInt(), 0, 2);
     effectIndex = 0;
     FastLED.clear();
   }
@@ -239,7 +395,7 @@ void handleMode() {
 
 void handleEffect() {
   if (server.hasArg("v")) {
-    int maxEffects = motionMode ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
+    int maxEffects = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
     effectIndex = server.arg("v").toInt() % maxEffects;
     FastLED.clear();
   }
@@ -276,6 +432,39 @@ void handleAutoCycle() {
   server.send(200, "text/plain", "OK");
 }
 
+// Emoji handlers
+void handleEmojiAdd() {
+  if (server.hasArg("v")) {
+    uint8_t spriteIndex = server.arg("v").toInt();
+    addEmojiByIndex(spriteIndex);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleEmojiSettings() {
+  uint16_t cycleTime = emojiCycleTime;
+  uint16_t fadeDuration = emojiFadeDuration;
+  bool autoCycleVal = emojiAutoCycle;
+
+  if (server.hasArg("cycle")) {
+    cycleTime = server.arg("cycle").toInt();
+  }
+  if (server.hasArg("fade")) {
+    fadeDuration = server.arg("fade").toInt();
+  }
+  if (server.hasArg("auto")) {
+    autoCycleVal = server.arg("auto").toInt() == 1;
+  }
+
+  setEmojiSettings(cycleTime, fadeDuration, autoCycleVal);
+  server.send(200, "text/plain", "OK");
+}
+
+void handleEmojiClear() {
+  clearEmojiQueue();
+  server.send(200, "text/plain", "OK");
+}
+
 // Setup all web server routes
 void setupWebServer() {
   server.on("/", handleRoot);
@@ -286,6 +475,12 @@ void setupWebServer() {
   server.on("/brightness", handleBrightness);
   server.on("/speed", handleSpeed);
   server.on("/autocycle", handleAutoCycle);
+
+  // Emoji endpoints
+  server.on("/emoji/add", handleEmojiAdd);
+  server.on("/emoji/settings", handleEmojiSettings);
+  server.on("/emoji/clear", handleEmojiClear);
+
   server.begin();
 }
 

@@ -29,6 +29,7 @@
 #include "palettes.h"
 #include "effects_motion.h"
 #include "effects_ambient.h"
+#include "effects_emoji.h"
 #include "web_server.h"
 
 // Global objects
@@ -41,8 +42,8 @@ uint8_t effectIndex = 0;
 uint8_t paletteIndex = 0;
 uint8_t brightness = 15;
 uint8_t speed = 20;
-bool autoCycle = false;
-bool motionMode = true;
+bool autoCycle = true;
+uint8_t currentMode = MODE_AMBIENT;
 unsigned long lastChange = 0;
 unsigned long lastPaletteChange = 0;
 
@@ -53,20 +54,16 @@ float gyroX = 0, gyroY = 0, gyroZ = 0;
 // Current palette
 CRGBPalette16 currentPalette;
 
-// Color test at startup
-void colorTest() {
-  fill_solid(leds, NUM_LEDS, CRGB::Red);
-  FastLED.show();
-  delay(500);
-  
-  fill_solid(leds, NUM_LEDS, CRGB::Green);
-  FastLED.show();
-  delay(500);
-  
-  fill_solid(leds, NUM_LEDS, CRGB::Blue);
-  FastLED.show();
-  delay(500);
-  
+// Sparkle intro animation at startup
+void introAnimation() {
+  unsigned long startTime = millis();
+  while (millis() - startTime < 2000) {  // Run for 2 seconds
+    fadeToBlackBy(leds, NUM_LEDS, 20);
+    int pos = random16(NUM_LEDS);
+    leds[pos] = CHSV(random8(), 255, 255);  // Random rainbow colors
+    FastLED.show();
+    delay(20);
+  }
   FastLED.clear();
   FastLED.show();
 }
@@ -75,11 +72,11 @@ void setup() {
   Serial.begin(115200);
   
   // Initialize LEDs
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
   FastLED.setBrightness(brightness);
   
-  // Run color test
-  colorTest();
+  // Run intro animation
+  introAnimation();
   
   // Initialize IMU
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -126,28 +123,38 @@ void readIMU() {
 void loop() {
   server.handleClient();
   readIMU();
-  
-  int maxEffects = motionMode ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
-  
-  // Auto cycle effects
-  if (autoCycle && millis() - lastChange > 10000) {
-    lastChange = millis();
-    effectIndex = (effectIndex + 1) % maxEffects;
-    FastLED.clear();
-  }
-  
-  // Auto cycle palettes
-  if (autoCycle && millis() - lastPaletteChange > 5000) {
-    lastPaletteChange = millis();
-    paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
-    currentPalette = palettes[paletteIndex];
+
+  // Only do effect/palette cycling for Motion and Ambient modes
+  if (currentMode != MODE_EMOJI) {
+    int maxEffects = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
+
+    // Auto cycle effects (ambient effects get double time)
+    unsigned long cycleTime = (currentMode == MODE_MOTION) ? 10000 : 20000;
+    if (autoCycle && millis() - lastChange > cycleTime) {
+      lastChange = millis();
+      effectIndex = (effectIndex + 1) % maxEffects;
+      FastLED.clear();
+    }
+
+    // Auto cycle palettes
+    if (autoCycle && millis() - lastPaletteChange > 5000) {
+      lastPaletteChange = millis();
+      paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
+      currentPalette = palettes[paletteIndex];
+    }
   }
 
-  // Run current effect
-  if (motionMode) {
-    runMotionEffect(effectIndex);
-  } else {
-    runAmbientEffect(effectIndex);
+  // Run current effect based on mode
+  switch (currentMode) {
+    case MODE_MOTION:
+      runMotionEffect(effectIndex);
+      break;
+    case MODE_AMBIENT:
+      runAmbientEffect(effectIndex);
+      break;
+    case MODE_EMOJI:
+      runEmojiEffect();
+      break;
   }
 
   FastLED.show();
