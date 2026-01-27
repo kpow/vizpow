@@ -4,9 +4,12 @@ A motion-reactive LED matrix controller designed for wearable displays. Built fo
 
 ## Features
 
-- **26 LED Effects**: 12 motion-reactive + 14 ambient effects
-- **15 Color Palettes**: Including custom gradients (Cyber, Vaporwave, Toxic, etc.)
-- **Motion Control**: Accelerometer and gyroscope-driven animations
+- **3 Display Modes**: Motion-reactive, ambient, and emoji
+- **28 LED Effects**: 12 motion-reactive + 16 ambient effects
+- **Emoji Mode**: 32 built-in pixel art sprites with auto-cycling and fade transitions
+- **Shake to Change Mode**: Shake the device 3 times to cycle between modes
+- **15 High-Contrast Palettes**: Custom gradients designed for small LED displays
+- **Motion Control**: Accelerometer and gyroscope-driven animations with tunable sensitivity
 - **Web Interface**: Control via WiFi AP from any phone/browser
 - **Adjustable Settings**: Brightness, speed, auto-cycle mode
 
@@ -56,16 +59,27 @@ Install via Arduino Library Manager (Sketch → Include Library → Manage Libra
 
 ### Connecting
 
-1. Power on the device
+1. Power on the device — a sparkle intro animation plays on startup
 2. On your phone, connect to WiFi network: `LED-Matrix`
 3. Password: `12345678`
 4. Open browser and go to: `http://192.168.4.1`
 
+### Shake to Change Mode
+
+Shake the device 3 times within 1.5 seconds to cycle through modes:
+
+**Motion** → **Ambient** → **Emoji** → **Motion** ...
+
+- A brief white flash confirms the mode change
+- 2-second cooldown prevents accidental re-triggers
+- When entering emoji mode with no queue, 8 random sprites are auto-loaded
+
 ### Web Interface
 
-- **Motion/Ambient tabs**: Switch between motion-reactive and static effects
+- **Mode tabs**: Switch between Motion, Ambient, and Emoji modes
 - **Effect buttons**: Select current effect
 - **Palette buttons**: Choose color scheme
+- **Emoji picker**: Add sprites to the emoji queue (emoji mode)
 - **Brightness slider**: 1-50
 - **Speed slider**: 5-100ms delay
 - **Auto Cycle toggle**: Automatically rotate effects and palettes
@@ -107,20 +121,59 @@ Install via Arduino Library Manager (Sketch → Include Library → Manage Libra
 | Confetti | Colorful bursts |
 | Comet | Traveling dot |
 | Galaxy | Spinning galaxy |
+| Checkerboard | Shifting checkerboard |
+| Diamond Pulse | Expanding diamond |
+
+### Emoji Mode
+
+Display pixel art sprites from a built-in library of 32 icons:
+
+Heart, Star, Smiley, Check, X, Question, Exclaim, Sun, Moon, Cloud, Rain, Lightning, Fire, Snow, Tree, Coin, Key, Gem, Potion, Sword, Shield, Arrow Up/Down/Left/Right, Skull, Ghost, Alien, Pacman, Music, WiFi, Rainbow
+
+- **Queue system**: Add up to 16 sprites to a cycling queue
+- **Fade transitions**: Smooth crossfade between emojis (configurable timing)
+- **Auto-cycle**: Automatically cycle through the queue
+- **Random fill**: Shake into emoji mode to get 8 random unique sprites
 
 ## Project Structure
 
 ```
 esp32-led-matrix/
-├── src/
-│   └── led_matrix.ino    # Main Arduino sketch
+├── led_matrix/
+│   ├── led_matrix.ino       # Main sketch — setup(), loop(), globals, shake detection
+│   ├── config.h             # Hardware pins, constants, XY mapping, shake settings
+│   ├── palettes.h           # 15 color palette definitions
+│   ├── effects_motion.h     # 12 motion-reactive effects
+│   ├── effects_ambient.h    # 16 ambient effects
+│   ├── effects_emoji.h      # Emoji queue, display, transitions, random fill
+│   ├── emoji_sprites.h      # 32 pixel art sprite definitions
+│   ├── web_server.h         # Web UI HTML + API handlers
+│   └── SensorQMI8658.hpp    # IMU driver
 ├── README.md
 ├── LICENSE
 └── .gitignore
 ```
 
+## API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/` | Web interface |
+| `/state` | Current state (JSON) |
+| `/mode?v=0\|1\|2` | Set mode (motion/ambient/emoji) |
+| `/effect?v=N` | Set effect index |
+| `/palette?v=N` | Set palette index |
+| `/brightness?v=N` | Set brightness (1-50) |
+| `/speed?v=N` | Set speed delay (5-100ms) |
+| `/autocycle?v=0\|1` | Toggle auto-cycle |
+| `/emoji/add?v=N` | Add sprite N to emoji queue |
+| `/emoji/clear` | Clear emoji queue |
+| `/emoji/settings?cycle=MS&fade=MS&auto=0\|1` | Configure emoji playback |
+
 ## Roadmap
 
+- [x] Emoji display mode with sprite library
+- [x] Shake-to-change-mode gesture control
 - [ ] Bluetooth Low Energy control
 - [ ] Custom effect creator
 - [ ] Sound reactivity (external mic)
