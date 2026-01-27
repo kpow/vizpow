@@ -178,4 +178,36 @@ void setEmojiSettings(uint16_t cycleTime, uint16_t fadeDuration, bool autoCycle)
   emojiAutoCycle = autoCycle;
 }
 
+// Add random emojis to queue
+// Returns number of emojis actually added
+uint8_t addRandomEmojis(uint8_t count) {
+  // Reset animation state for fresh start
+  currentEmojiIndex = 0;
+  emojiFading = false;
+  emojiLastChange = millis();
+  emojiAutoCycle = true;  // Ensure auto-cycle is enabled
+
+  // Track which sprite indices we've used to avoid duplicates
+  bool usedSprites[NUM_EMOJI_SPRITES] = {false};
+
+  uint8_t added = 0;
+  uint8_t attempts = 0;
+  uint8_t maxAttempts = count * 3;  // Prevent infinite loop
+
+  while (added < count && attempts < maxAttempts && emojiQueueCount < MAX_EMOJI_QUEUE) {
+    uint8_t randomIndex = random(NUM_EMOJI_SPRITES);
+
+    // Skip if we already used this sprite
+    if (!usedSprites[randomIndex]) {
+      usedSprites[randomIndex] = true;
+      if (addEmojiByIndex(randomIndex)) {
+        added++;
+      }
+    }
+    attempts++;
+  }
+
+  return added;
+}
+
 #endif

@@ -10,14 +10,22 @@ extern CRGBPalette16 currentPalette;
 extern float accelX, accelY, accelZ;
 extern float gyroX, gyroY, gyroZ;
 
+// Motion sensitivity settings - adjust these to tune responsiveness
+#define ACCEL_SENSITIVITY 2.5    // Multiplier for accelerometer effects (higher = more responsive)
+#define GYRO_SENSITIVITY 3.0     // Multiplier for gyroscope effects (higher = more responsive)
+#define SHAKE_THRESHOLD_LOW 1.2  // Lower threshold for shake detection (was 1.5)
+#define SHAKE_THRESHOLD_HIGH 1.8 // Higher threshold for big shakes (was 2.5)
+
 void tiltBall() {
   static float ballX = 3.5, ballY = 3.5;
-  
-  float targetX = 3.5 + accelX * 3.5;
-  float targetY = 3.5 - accelY * 3.5;
-  
-  ballX += (targetX - ballX) * 0.3;
-  ballY += (targetY - ballY) * 0.3;
+
+  // More responsive: larger range and faster interpolation
+  // Swapped X/Y axes to match device orientation
+  float targetX = 3.5 + accelY * 5.0 * ACCEL_SENSITIVITY;
+  float targetY = 3.5 + accelX * 5.0 * ACCEL_SENSITIVITY;
+
+  ballX += (targetX - ballX) * 0.5;  // Faster response (was 0.3)
+  ballY += (targetY - ballY) * 0.5;
   
   ballX = constrain(ballX, 0, 7);
   ballY = constrain(ballY, 0, 7);
@@ -43,7 +51,7 @@ void tiltBall() {
 void motionPlasma() {
   static uint16_t t = 0;
   float motion = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ);
-  t += 1 + (motion / 50);
+  t += 1 + (motion / 15 * GYRO_SENSITIVITY);  // Much faster response (was /50)
   
   for (uint8_t x = 0; x < WIDTH; x++) {
     for (uint8_t y = 0; y < HEIGHT; y++) {
@@ -55,10 +63,11 @@ void motionPlasma() {
 
 void shakeSparkle() {
   float shake = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
-  fadeToBlackBy(leds, NUM_LEDS, 20);
-  
-  if (shake > 1.5) {
-    int numSparks = constrain((shake - 1) * 10, 1, 20);
+  fadeToBlackBy(leds, NUM_LEDS, 15);  // Slower fade for longer trails
+
+  if (shake > SHAKE_THRESHOLD_LOW) {
+    // More sparks from less movement
+    int numSparks = constrain((shake - 1) * 25 * ACCEL_SENSITIVITY, 1, 40);
     for (int i = 0; i < numSparks; i++) {
       int pos = random16(NUM_LEDS);
       leds[pos] = ColorFromPalette(currentPalette, random8(), 255);
@@ -84,10 +93,10 @@ void tiltWave() {
 
 void spinTrails() {
   static float angle = 0;
-  angle += gyroZ / 500.0;
-  
-  fadeToBlackBy(leds, NUM_LEDS, 30);
-  
+  angle += gyroZ / 150.0 * GYRO_SENSITIVITY;  // Much faster spin (was /500)
+
+  fadeToBlackBy(leds, NUM_LEDS, 20);  // Longer trails
+
   for (float r = 0; r < 4; r += 0.5) {
     int x = 3.5 + cos(angle + r) * r;
     int y = 3.5 + sin(angle + r) * r;
@@ -100,7 +109,7 @@ void spinTrails() {
 void gravityPixels() {
   static float px[8], py[8], vx[8], vy[8];
   static bool init = false;
-  
+
   if (!init) {
     for (int i = 0; i < 8; i++) {
       px[i] = random8(WIDTH);
@@ -110,14 +119,16 @@ void gravityPixels() {
     }
     init = true;
   }
-  
+
   FastLED.clear();
-  
+
   for (int i = 0; i < 8; i++) {
-    vx[i] += accelX * 0.2;
-    vy[i] -= accelY * 0.2;
-    vx[i] *= 0.95;
-    vy[i] *= 0.95;
+    // More responsive gravity (was 0.2)
+    // Swapped X/Y axes to match device orientation
+    vx[i] += accelY * 0.5 * ACCEL_SENSITIVITY;
+    vy[i] += accelX * 0.5 * ACCEL_SENSITIVITY;
+    vx[i] *= 0.92;  // Less damping for bouncier feel
+    vy[i] *= 0.92;
     
     px[i] += vx[i];
     py[i] += vy[i];
@@ -134,9 +145,10 @@ void gravityPixels() {
 void motionNoise() {
   static uint16_t t = 0;
   t += 3;
-  
-  int offsetX = accelX * 50;
-  int offsetY = accelY * 50;
+
+  // More dramatic offset from tilt (was 50)
+  int offsetX = accelX * 150 * ACCEL_SENSITIVITY;
+  int offsetY = accelY * 150 * ACCEL_SENSITIVITY;
   
   for (uint8_t x = 0; x < WIDTH; x++) {
     for (uint8_t y = 0; y < HEIGHT; y++) {
@@ -149,9 +161,10 @@ void motionNoise() {
 void tiltRipple() {
   static uint8_t t = 0;
   t++;
-  
-  float cx = 3.5 + accelX * 2;
-  float cy = 3.5 - accelY * 2;
+
+  // Larger center movement from tilt (was 2)
+  float cx = 3.5 + accelX * 4.0 * ACCEL_SENSITIVITY;
+  float cy = 3.5 - accelY * 4.0 * ACCEL_SENSITIVITY;
   
   for (uint8_t x = 0; x < WIDTH; x++) {
     for (uint8_t y = 0; y < HEIGHT; y++) {
@@ -166,7 +179,7 @@ void tiltRipple() {
 
 void gyroSwirl() {
   static uint16_t t = 0;
-  t += 2 + abs(gyroZ) / 100;
+  t += 2 + abs(gyroZ) / 30 * GYRO_SENSITIVITY;  // Much faster swirl (was /100)
   
   for (uint8_t x = 0; x < WIDTH; x++) {
     for (uint8_t y = 0; y < HEIGHT; y++) {
@@ -183,10 +196,11 @@ void gyroSwirl() {
 void shakeExplode() {
   static uint8_t explodeFrame = 255;
   static uint8_t explodeHue = 0;
-  
+
   float shake = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
-  
-  if (shake > 2.5 && explodeFrame >= 50) {
+
+  // Lower threshold for explosion trigger (was 2.5)
+  if (shake > SHAKE_THRESHOLD_HIGH && explodeFrame >= 50) {
     explodeFrame = 0;
     explodeHue = random8();
   }
@@ -214,8 +228,9 @@ void shakeExplode() {
 
 void tiltFire() {
   static uint8_t heat[64];
-  
-  int hotSpot = constrain(3.5 + accelX * 2, 0, 7);
+
+  // Hotspot moves more dramatically with tilt (was 2)
+  int hotSpot = constrain(3.5 + accelX * 5.0 * ACCEL_SENSITIVITY, 0, 7);
   
   for (int i = 0; i < NUM_LEDS; i++) {
     heat[i] = qsub8(heat[i], random8(0, 20));
@@ -241,9 +256,11 @@ void tiltFire() {
 
 void motionRainbow() {
   static int16_t hueOffset = 0;
-  
-  hueOffset += gyroZ / 100;
-  float spd = 1 + sqrt(accelX * accelX + accelY * accelY) * 2;
+
+  // Faster rotation from gyro (was /100)
+  hueOffset += gyroZ / 30 * GYRO_SENSITIVITY;
+  // More speed boost from tilt (was *2)
+  float spd = 1 + sqrt(accelX * accelX + accelY * accelY) * 5 * ACCEL_SENSITIVITY;
   
   for (uint8_t x = 0; x < WIDTH; x++) {
     for (uint8_t y = 0; y < HEIGHT; y++) {
