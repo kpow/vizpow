@@ -51,6 +51,12 @@ unsigned long lastPaletteChange = 0;
 float accelX = 0, accelY = 0, accelZ = 0;
 float gyroX = 0, gyroY = 0, gyroZ = 0;
 
+// Shake detection state
+unsigned long shakeTimestamps[SHAKE_COUNT];
+uint8_t shakeIndex = 0;
+unsigned long lastModeChange = 0;
+bool wasShaking = false;  // Track if we were above threshold last frame
+
 // Current palette
 CRGBPalette16 currentPalette;
 
@@ -101,7 +107,12 @@ void setup() {
   
   // Set initial palette
   currentPalette = palettes[0];
-  
+
+  // Initialize shake detection
+  for (uint8_t i = 0; i < SHAKE_COUNT; i++) {
+    shakeTimestamps[i] = 0;
+  }
+
   // Start WiFi AP
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
   Serial.println("Access Point Started");
@@ -120,9 +131,71 @@ void readIMU() {
   }
 }
 
+// Check for shake gesture to change mode
+void checkModeShake() {
+  unsigned long now = millis();
+
+  // Skip if in cooldown period
+  if (now - lastModeChange < SHAKE_COOLDOWN_MS) {
+    return;
+  }
+
+  // Calculate acceleration magnitude (subtract 1g for gravity)
+  float magnitude = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
+  bool isShaking = magnitude > SHAKE_THRESHOLD;
+
+  // Detect shake event (transition from not-shaking to shaking)
+  if (isShaking && !wasShaking) {
+    // Record this shake timestamp
+    shakeTimestamps[shakeIndex] = now;
+    shakeIndex = (shakeIndex + 1) % SHAKE_COUNT;
+
+    // Count shakes within the window
+    uint8_t validShakes = 0;
+    for (uint8_t i = 0; i < SHAKE_COUNT; i++) {
+      if (now - shakeTimestamps[i] < SHAKE_WINDOW_MS) {
+        validShakes++;
+      }
+    }
+
+    // If enough shakes, change mode
+    if (validShakes >= SHAKE_COUNT) {
+      // Cycle to next mode: MOTION -> AMBIENT -> EMOJI -> MOTION
+      uint8_t nextMode = (currentMode + 1) % 3;
+
+      // If entering emoji mode, ensure there's a sequence
+      if (nextMode == MODE_EMOJI && emojiQueueCount == 0) {
+        addRandomEmojis(RANDOM_EMOJI_COUNT);
+      }
+
+      currentMode = nextMode;
+      effectIndex = 0;
+      lastChange = now;
+      lastModeChange = now;
+      FastLED.clear();
+
+      // Clear shake timestamps to prevent immediate re-trigger
+      for (uint8_t i = 0; i < SHAKE_COUNT; i++) {
+        shakeTimestamps[i] = 0;
+      }
+
+      // Brief flash to indicate mode change
+      for (int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = CRGB(50, 50, 50);
+      }
+      FastLED.show();
+      delay(100);
+      FastLED.clear();
+    }
+  }
+
+  wasShaking = isShaking;
+}
+
 void loop() {
   server.handleClient();
   readIMU();
+  checkModeShake();  // Check for shake gesture to change mode
 
   // Only do effect/palette cycling for Motion and Ambient modes
   if (currentMode != MODE_EMOJI) {

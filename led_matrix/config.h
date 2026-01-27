@@ -26,6 +26,13 @@
 // Emoji settings
 #define MAX_EMOJI_QUEUE 16
 
+// Shake-to-change-mode settings
+#define SHAKE_THRESHOLD 2.0      // Acceleration magnitude to count as a shake (g)
+#define SHAKE_COUNT 3            // Number of shakes needed to trigger mode change
+#define SHAKE_WINDOW_MS 1500     // Time window to count shakes (ms)
+#define SHAKE_COOLDOWN_MS 2000   // Cooldown after mode change (ms)
+#define RANDOM_EMOJI_COUNT 8     // Number of random emojis to add when entering emoji mode
+
 // XY mapping for serpentine matrix layout
 inline uint16_t XY(uint8_t x, uint8_t y) {
   if (y & 1) {
