@@ -99,12 +99,12 @@ bool addEmojiByIndex(uint8_t spriteIndex) {
 }
 
 // Display single emoji using XY() mapping
-// Mirror horizontally to correct for matrix orientation
 void displayEmoji(EmojiFrame* frame) {
+  // Icons are stored in visual order (left-to-right, top-to-bottom)
+  // XY() converts visual coordinates to physical LED index for serpentine matrix
   for (uint8_t y = 0; y < HEIGHT; y++) {
     for (uint8_t x = 0; x < WIDTH; x++) {
-      int srcIndex = y * WIDTH + (WIDTH - 1 - x);  // Mirror X axis
-      leds[XY(x, y)] = frame->pixels[srcIndex];
+      leds[XY(x, y)] = frame->pixels[y * WIDTH + x];
     }
   }
 }
@@ -113,7 +113,7 @@ void displayEmoji(EmojiFrame* frame) {
 void blendEmojis(EmojiFrame* from, EmojiFrame* to, uint8_t blendAmount) {
   for (uint8_t y = 0; y < HEIGHT; y++) {
     for (uint8_t x = 0; x < WIDTH; x++) {
-      int srcIndex = y * WIDTH + (WIDTH - 1 - x);  // Mirror X axis
+      int srcIndex = y * WIDTH + x;  // Direct mapping - XY() handles serpentine
       leds[XY(x, y)] = blend(from->pixels[srcIndex], to->pixels[srcIndex], blendAmount);
     }
   }
