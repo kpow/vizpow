@@ -33,13 +33,9 @@
 #define SHAKE_COOLDOWN_MS 2000   // Cooldown after mode change (ms)
 #define RANDOM_EMOJI_COUNT 8     // Number of random emojis to add when entering emoji mode
 
-// XY mapping for serpentine matrix layout
+// XY mapping - trying NO serpentine (straight rows)
 inline uint16_t XY(uint8_t x, uint8_t y) {
-  if (y & 1) {
-    return y * WIDTH + (WIDTH - 1 - x);
-  } else {
-    return y * WIDTH + x;
-  }
+  return y * WIDTH + x;
 }
 
 #endif

@@ -40,6 +40,8 @@
 #define DRD CRGB(180,0,0)
 #define LGR CRGB(0,180,0)
 #define DBL CRGB(0,0,180)
+#define GHO CRGB(249,56,1)   // Ghost orange
+#define EYE CRGB(1,119,251)  // Eye blue
 
 // ==================== SYMBOLS ====================
 
@@ -395,6 +397,19 @@ const CRGB ICON_PACMAN[64] = {
   ___, ___, ___, YEL, YEL, YEL, ___, ___
 };
 
+// Pacman Ghost (Orange)
+const CRGB ICON_PACMAN_GHOST[64] = {
+  ___, GHO, GHO, GHO, GHO, GHO, GHO, ___,
+  WHT, WHT, GHO, GHO, WHT, WHT, GHO, GHO,
+  EYE, EYE, WHT, GHO, EYE, EYE, WHT, GHO,
+  EYE, EYE, WHT, GHO, EYE, EYE, WHT, GHO,
+  GHO, GHO, GHO, GHO, GHO, GHO, GHO, GHO,
+  GHO, GHO, GHO, GHO, GHO, GHO, GHO, GHO,
+  GHO, GHO, GHO, GHO, GHO, GHO, GHO, GHO,
+  GHO, ___, GHO, ___, GHO, ___, GHO, ___
+};
+
+
 // ==================== MUSIC ====================
 
 // Music note
@@ -474,7 +489,7 @@ const CRGB ICON_RAINBOW[64] = {
 };
 
 // ==================== ICON COUNT ====================
-#define ICON_COUNT 32
+#define ICON_COUNT 33
 
 // Array of all icons for easy iteration
 const CRGB* ALL_ICONS[ICON_COUNT] = {
@@ -485,7 +500,7 @@ const CRGB* ALL_ICONS[ICON_COUNT] = {
   ICON_KEY, ICON_GEM, ICON_POTION, ICON_SWORD,
   ICON_SHIELD, ICON_ARROW_UP, ICON_ARROW_DOWN, ICON_ARROW_LEFT,
   ICON_ARROW_RIGHT, ICON_SKULL, ICON_GHOST, ICON_ALIEN,
-  ICON_PACMAN, ICON_MUSIC, ICON_WIFI, ICON_RAINBOW
+  ICON_PACMAN, ICON_PACMAN_GHOST, ICON_MUSIC, ICON_WIFI, ICON_RAINBOW
 };
 
 // Icon names for debugging
@@ -497,7 +512,7 @@ const char* ICON_NAMES[ICON_COUNT] = {
   "Key", "Gem", "Potion", "Sword",
   "Shield", "ArrowUp", "ArrowDown", "ArrowLeft",
   "ArrowRight", "Skull", "Ghost", "Alien",
-  "Pacman", "Music", "WiFi", "Rainbow"
+  "Pacman", "PacGhost", "Music", "WiFi", "Rainbow"
 };
 
 // Compatibility aliases for emoji system
