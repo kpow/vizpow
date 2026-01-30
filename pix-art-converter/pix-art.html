@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<!-- saved from url=(0071)file:///Users/kevinpower/Downloads/Pixel%20Art%20Conversion%20Guide.htm -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>WLED Pixel Art Converter - Editable</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #111;
+            color: #ddd;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 1.8em;
+            color: #ddd;
+            margin-bottom: 5px;
+        }
+        h2 {
+            font-size: 1em;
+            color: rgba(221, 221, 221, 0.61);
+            margin-top: 0;
+        }
+        .top-section {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .controls {
+            flex: 1;
+            min-width: 300px;
+        }
+        .control-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            gap: 10px;
+        }
+        .control-row label {
+            min-width: 100px;
+            color: #999;
+        }
+        input[type="number"], input[type="text"] {
+            background-color: #222;
+            border: 1px solid #333;
+            color: #ddd;
+            padding: 8px;
+            border-radius: 5px;
+            width: 80px;
+        }
+        input[type="text"] {
+            width: 200px;
+        }
+        input[type="range"] {
+            flex: 1;
+            appearance: none;
+            background: linear-gradient(to right, #bbb 50%, #333 50%);
+            height: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #fff;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        #drop-zone {
+            border: 3px dashed #444;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            color: #777;
+            transition: border-color 0.3s;
+        }
+        #drop-zone:hover, #drop-zone.drag-over {
+            border-color: #0cf;
+        }
+        #file-picker {
+            display: none;
+        }
+        #preview {
+            max-width: 200px;
+            max-height: 200px;
+            margin-top: 10px;
+            display: none;
+        }
+        button {
+            background-color: #222;
+            border: 1px solid #333;
+            color: #ddd;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #333;
+        }
+        button.primary {
+            background-color: #0a6;
+            border-color: #0a6;
+        }
+        button.primary:hover {
+            background-color: #0b7;
+        }
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+            flex-wrap: wrap;
+        }
+        #grid-container {
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+        #pixel-grid {
+            display: inline-grid;
+            gap: 1px;
+            background-color: #333;
+            padding: 1px;
+            border-radius: 5px;
+        }
+        .pixel {
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            border: none;
+            transition: transform 0.1s;
+            position: relative;
+        }
+        .pixel:hover {
+            transform: scale(1.1);
+            z-index: 1;
+        }
+        .pixel.selected {
+            outline: 2px solid #0cf;
+            outline-offset: -2px;
+        }
+        #color-picker-container {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #222;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #444;
+            display: none;
+            z-index: 1000;
+        }
+        #color-picker-container.visible {
+            display: block;
+        }
+        #overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            z-index: 999;
+        }
+        #overlay.visible {
+            display: block;
+        }
+        #color-input {
+            width: 150px;
+            height: 150px;
+            border: none;
+            cursor: pointer;
+            background: none;
+        }
+        .color-picker-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        textarea {
+            width: 100%;
+            height: 150px;
+            background-color: #222;
+            border: 1px solid #333;
+            color: #ddd;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 10px;
+            border-radius: 5px;
+            resize: vertical;
+        }
+        .tool-bar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #1a1a1a;
+            border-radius: 5px;
+        }
+        .tool-bar label {
+            color: #999;
+        }
+        #brush-color {
+            width: 40px;
+            height: 30px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            cursor: pointer;
+            background: none;
+        }
+        .tool-btn {
+            padding: 8px 15px;
+            font-size: 0.9em;
+        }
+        .tool-btn.active {
+            background-color: #0a6;
+            border-color: #0a6;
+        }
+        #index-display {
+            color: #666;
+            font-size: 0.8em;
+            margin-left: auto;
+        }
+        .section-title {
+            color: #888;
+            font-size: 0.9em;
+            margin: 20px 0 10px 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body style="overscroll-behavior-x: auto;">
+    <div class="container">
+        <h1>WLED Pixel Art Converter</h1>
+        <h2>With Editable Grid</h2>
+
+        <div class="top-section">
+            <div class="controls">
+                <div id="drop-zone">
+                    Drop image here or click to select
+                    <input type="file" id="file-picker" accept="image/*">
+                </div>
+                <img id="preview" alt="Preview">
+                
+                <div class="control-row" style="margin-top: 15px;">
+                    <label>Grid Width:</label>
+                    <input type="number" id="grid-width" value="8" min="1" max="64">
+                </div>
+                <div class="control-row">
+                    <label>Grid Height:</label>
+                    <input type="number" id="grid-height" value="8" min="1" max="64">
+                </div>
+                <div class="control-row">
+                    <label>Brightness:</label>
+                    <input type="range" id="brightness" min="1" max="255" value="128" style="background: linear-gradient(to right, rgb(187, 187, 187) 50.1961%, rgb(51, 51, 51) 50.1961%);">
+                    <span id="brightness-value">128</span>
+                </div>
+
+                <div class="button-row">
+                    <button id="convert-btn" class="primary">Convert Image</button>
+                    <button id="clear-btn">Clear Grid</button>
+                    <button id="new-blank-btn">New Blank Grid</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">Edit Grid</div>
+        <div class="tool-bar">
+            <label>Brush:</label>
+            <input type="color" id="brush-color" value="#ff0000">
+            <button class="tool-btn active" id="paint-tool">Paint</button>
+            <button class="tool-btn" id="pick-tool">Pick Color</button>
+            <button class="tool-btn" id="fill-tool">Fill All</button>
+            <span id="index-display">Hover over pixel to see index</span>
+        </div>
+
+        <div id="grid-container">
+            <div id="pixel-grid" style="grid-template-columns: repeat(8, 30px);"><div class="pixel" data-index="0" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="1" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="2" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="3" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="4" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="5" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="6" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="7" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="8" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="9" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="10" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="11" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="12" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="13" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="14" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="15" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="16" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="17" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="18" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="19" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="20" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="21" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="22" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="23" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="24" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="25" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="26" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="27" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="28" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="29" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="30" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="31" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="32" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="33" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="34" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="35" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="36" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="37" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="38" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="39" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="40" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="41" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="42" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="43" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="44" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="45" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="46" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="47" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="48" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="49" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="50" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="51" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="52" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="53" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="54" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="55" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="56" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="57" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="58" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="59" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="60" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="61" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="62" style="background-color: rgb(0, 0, 0);"></div><div class="pixel" data-index="63" style="background-color: rgb(0, 0, 0);"></div></div>
+        </div>
+
+        <div class="section-title">Add to ESP32 LED Matrix</div>
+        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+            <p style="color: #888; margin: 0 0 10px 0;">To add this icon to your project:</p>
+            <ol style="color: #aaa; margin: 0; padding-left: 20px; line-height: 1.8;">
+                <li>Copy the JSON output below</li>
+                <li>Open Terminal in the project folder</li>
+                <li>Run: <code style="background: #333; padding: 2px 6px; border-radius: 3px;">node scripts/add-icon.js "Icon Name"</code></li>
+            </ol>
+            <p style="color: #666; margin: 10px 0 0 0; font-size: 0.85em;">The script reads JSON from your clipboard automatically.</p>
+        </div>
+
+        <div class="section-title">WLED Output</div>
+        <div class="control-row">
+            <label>Segment ID:</label>
+            <input type="number" id="segment-id" value="0" min="0" max="32">
+        </div>
+        <div class="control-row">
+            <label>WLED Host:</label>
+            <input type="text" id="wled-host" placeholder="192.168.1.100">
+        </div>
+
+        <textarea id="json-output" readonly="" placeholder="JSON output will appear here..."></textarea>
+
+        <div class="button-row">
+            <button id="copy-btn">Copy JSON</button>
+            <button id="send-btn" class="primary">Send to WLED</button>
+        </div>
+
+        <div class="section-title">Import WLED JSON</div>
+        <textarea id="json-input" placeholder="Paste WLED JSON here to import..."></textarea>
+        <div class="button-row">
+            <button id="import-btn">Import JSON</button>
+        </div>
+    </div>
+
+    <div id="overlay"></div>
+    <div id="color-picker-container">
+        <input type="color" id="color-input" value="#ff0000">
+        <div class="color-picker-buttons">
+            <button id="color-apply">Apply</button>
+            <button id="color-cancel">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let pixelData = [];
+        let gridWidth = 8;
+        let gridHeight = 8;
+        let currentTool = 'paint';
+        let selectedPixelIndex = null;
+
+        // DOM elements
+        const dropZone = document.getElementById('drop-zone');
+        const filePicker = document.getElementById('file-picker');
+        const preview = document.getElementById('preview');
+        const gridContainer = document.getElementById('pixel-grid');
+        const jsonOutput = document.getElementById('json-output');
+        const brightnessSlider = document.getElementById('brightness');
+        const brightnessValue = document.getElementById('brightness-value');
+        const brushColor = document.getElementById('brush-color');
+        const indexDisplay = document.getElementById('index-display');
+        const overlay = document.getElementById('overlay');
+        const colorPickerContainer = document.getElementById('color-picker-container');
+        const colorInput = document.getElementById('color-input');
+
+        // Initialize
+        initGrid();
+
+        // Event listeners - File handling
+        dropZone.addEventListener('click', () => filePicker.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files[0]) loadImage(e.dataTransfer.files[0]);
+        });
+        filePicker.addEventListener('change', (e) => {
+            if (e.target.files[0]) loadImage(e.target.files[0]);
+        });
+
+        // Buttons
+        document.getElementById('convert-btn').addEventListener('click', convertImage);
+        document.getElementById('clear-btn').addEventListener('click', () => {
+            pixelData = pixelData.map(() => [0, 0, 0]);
+            renderGrid();
+            updateJSON();
+        });
+        document.getElementById('new-blank-btn').addEventListener('click', () => {
+            gridWidth = parseInt(document.getElementById('grid-width').value) || 8;
+            gridHeight = parseInt(document.getElementById('grid-height').value) || 8;
+            initGrid();
+        });
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            jsonOutput.select();
+            navigator.clipboard.writeText(jsonOutput.value);
+        });
+        document.getElementById('import-btn').addEventListener('click', importFromJSON);
+        document.getElementById('send-btn').addEventListener('click', sendToWLED);
+
+        // Tools
+        document.getElementById('paint-tool').addEventListener('click', () => setTool('paint'));
+        document.getElementById('pick-tool').addEventListener('click', () => setTool('pick'));
+        document.getElementById('fill-tool').addEventListener('click', fillAll);
+
+        // Brightness slider
+        brightnessSlider.addEventListener('input', () => {
+            brightnessValue.textContent = brightnessSlider.value;
+            updateSliderBackground();
+            updateJSON();
+        });
+
+        // Color picker modal
+        overlay.addEventListener('click', closeColorPicker);
+        document.getElementById('color-cancel').addEventListener('click', closeColorPicker);
+        document.getElementById('color-apply').addEventListener('click', applyColorPicker);
+
+        function updateSliderBackground() {
+            const percent = (brightnessSlider.value / 255) * 100;
+            brightnessSlider.style.background = `linear-gradient(to right, #bbb ${percent}%, #333 ${percent}%)`;
+        }
+        updateSliderBackground();
+
+        function setTool(tool) {
+            currentTool = tool;
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(tool + '-tool').classList.add('active');
+        }
+
+        function initGrid() {
+            gridWidth = parseInt(document.getElementById('grid-width').value) || 8;
+            gridHeight = parseInt(document.getElementById('grid-height').value) || 8;
+            pixelData = Array(gridWidth * gridHeight).fill(null).map(() => [0, 0, 0]);
+            renderGrid();
+            updateJSON();
+        }
+
+        function renderGrid() {
+            gridContainer.innerHTML = '';
+            gridContainer.style.gridTemplateColumns = `repeat(${gridWidth}, 30px)`;
+            
+            pixelData.forEach((color, index) => {
+                const pixel = document.createElement('div');
+                pixel.className = 'pixel';
+                pixel.style.backgroundColor = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+                pixel.dataset.index = index;
+                
+                pixel.addEventListener('click', () => handlePixelClick(index));
+                pixel.addEventListener('dblclick', () => openColorPicker(index));
+                pixel.addEventListener('mouseenter', () => {
+                    const x = index % gridWidth;
+                    const y = Math.floor(index / gridWidth);
+                    indexDisplay.textContent = `Index: ${index} (x:${x}, y:${y}) RGB: ${color.join(', ')}`;
+                });
+                pixel.addEventListener('mouseleave', () => {
+                    indexDisplay.textContent = 'Hover over pixel to see index';
+                });
+                
+                gridContainer.appendChild(pixel);
+            });
+        }
+
+        function handlePixelClick(index) {
+            if (currentTool === 'paint') {
+                const hex = brushColor.value;
+                pixelData[index] = hexToRgb(hex);
+                renderGrid();
+                updateJSON();
+            } else if (currentTool === 'pick') {
+                const color = pixelData[index];
+                brushColor.value = rgbToHex(color[0], color[1], color[2]);
+                setTool('paint');
+            }
+        }
+
+        function openColorPicker(index) {
+            selectedPixelIndex = index;
+            colorInput.value = rgbToHex(...pixelData[index]);
+            overlay.classList.add('visible');
+            colorPickerContainer.classList.add('visible');
+        }
+
+        function closeColorPicker() {
+            overlay.classList.remove('visible');
+            colorPickerContainer.classList.remove('visible');
+            selectedPixelIndex = null;
+        }
+
+        function applyColorPicker() {
+            if (selectedPixelIndex !== null) {
+                pixelData[selectedPixelIndex] = hexToRgb(colorInput.value);
+                renderGrid();
+                updateJSON();
+            }
+            closeColorPicker();
+        }
+
+        function fillAll() {
+            const hex = brushColor.value;
+            const rgb = hexToRgb(hex);
+            pixelData = pixelData.map(() => [...rgb]);
+            renderGrid();
+            updateJSON();
+        }
+
+        function loadImage(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function convertImage() {
+            if (!preview.src || preview.style.display === 'none') {
+                alert('Load an image first');
+                return;
+            }
+
+            gridWidth = parseInt(document.getElementById('grid-width').value) || 8;
+            gridHeight = parseInt(document.getElementById('grid-height').value) || 8;
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            canvas.width = gridWidth;
+            canvas.height = gridHeight;
+
+            const img = new Image();
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0, gridWidth, gridHeight);
+                const imageData = ctx.getImageData(0, 0, gridWidth, gridHeight);
+                
+                pixelData = [];
+                for (let i = 0; i < imageData.data.length; i += 4) {
+                    pixelData.push([
+                        imageData.data[i],
+                        imageData.data[i + 1],
+                        imageData.data[i + 2]
+                    ]);
+                }
+                
+                renderGrid();
+                updateJSON();
+            };
+            img.src = preview.src;
+        }
+
+        function updateJSON() {
+            const segId = parseInt(document.getElementById('segment-id').value) || 0;
+            const brightness = parseInt(brightnessSlider.value);
+            
+            // Build WLED format: {"seg":{"id":0,"i":[r,g,b,r,g,b,...]}}
+            const colors = [];
+            pixelData.forEach(c => {
+                colors.push(c[0], c[1], c[2]);
+            });
+
+            const payload = {
+                on: true,
+                bri: brightness,
+                seg: {
+                    id: segId,
+                    i: colors
+                }
+            };
+
+            jsonOutput.value = JSON.stringify(payload);
+        }
+
+        async function sendToWLED() {
+            const host = document.getElementById('wled-host').value;
+            if (!host) {
+                alert('Enter WLED host address');
+                return;
+            }
+
+            try {
+                const response = await fetch(`http://${host}/json/state`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: jsonOutput.value
+                });
+                
+                if (response.ok) {
+                    alert('Sent successfully');
+                } else {
+                    alert('Failed to send: ' + response.statusText);
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // Utility functions
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? [
+                parseInt(result[1], 16),
+                parseInt(result[2], 16),
+                parseInt(result[3], 16)
+            ] : [0, 0, 0];
+        }
+
+        function rgbToHex(r, g, b) {
+            return '#' + [r, g, b].map(x => {
+                const hex = x.toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            }).join('');
+        }
+
+        function importFromJSON() {
+            const jsonInput = document.getElementById('json-input').value.trim();
+            if (!jsonInput) {
+                alert('Paste WLED JSON first');
+                return;
+            }
+
+            try {
+                const data = JSON.parse(jsonInput);
+                let colors = [];
+
+                // Handle different JSON formats
+                if (data.seg && data.seg.i) {
+                    colors = data.seg.i;
+                } else if (data.i) {
+                    colors = data.i;
+                } else if (Array.isArray(data)) {
+                    colors = data;
+                }
+
+                if (colors.length < 3) {
+                    alert('No pixel data found in JSON');
+                    return;
+                }
+
+                // Convert flat RGB array to pixel data
+                pixelData = [];
+                for (let i = 0; i < colors.length; i += 3) {
+                    pixelData.push([
+                        colors[i] || 0,
+                        colors[i + 1] || 0,
+                        colors[i + 2] || 0
+                    ]);
+                }
+
+                // Assume 8x8 grid for imported data
+                const totalPixels = pixelData.length;
+                if (totalPixels === 64) {
+                    gridWidth = 8;
+                    gridHeight = 8;
+                } else {
+                    gridWidth = Math.ceil(Math.sqrt(totalPixels));
+                    gridHeight = Math.ceil(totalPixels / gridWidth);
+                }
+
+                document.getElementById('grid-width').value = gridWidth;
+                document.getElementById('grid-height').value = gridHeight;
+
+                renderGrid();
+                updateJSON();
+
+                alert(`Imported ${pixelData.length} pixels (${gridWidth}x${gridHeight})`);
+            } catch (e) {
+                alert('Invalid JSON: ' + e.message);
+            }
+        }
+    </script>
+
+
+</body></html>
