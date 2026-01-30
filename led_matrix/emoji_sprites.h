@@ -42,6 +42,8 @@
 #define DBL CRGB(0,0,180)
 #define GHO CRGB(249,56,1)   // Ghost orange
 #define EYE CRGB(1,119,251)  // Eye blue
+#define SHY CRGB(244,59,2)   // Shy Guy red
+#define SHD CRGB(175,6,0)    // Shy Guy dark
 
 // ==================== SYMBOLS ====================
 
@@ -409,6 +411,18 @@ const CRGB ICON_PACMAN_GHOST[64] = {
   GHO, ___, GHO, ___, GHO, ___, GHO, ___
 };
 
+// Shy Guy (Mario enemy)
+const CRGB ICON_SHY_GUY[64] = {
+  ___, ___, ___, ___, ___, ___, ___, ___,
+  ___, WHT, WHT, WHT, WHT, SHY, SHD, ___,
+  WHT, ___, WHT, ___, WHT, WHT, SHY, SHD,
+  WHT, ___, WHT, ___, WHT, WHT, SHY, ___,
+  WHT, WHT, ___, WHT, WHT, WHT, SHY, SHD,
+  ___, WHT, WHT, WHT, WHT, SHY, SHY, SHD,
+  ___, ___, SHY, SHY, SHY, SHY, SHD, ___,
+  ___, SHD, SHD, ___, SHD, SHD, ___, ___
+};
+
 
 // ==================== MUSIC ====================
 
@@ -488,8 +502,92 @@ const CRGB ICON_RAINBOW[64] = {
   ___, ___, PUR, PUR, PNK, RED, ___, ___
 };
 
+// Mushroom
+const CRGB ICON_MUSHROOM[64] = {
+  ___, ___, RED, RED, RED, RED, ___, ___, 
+  ___, RED, RED, RED, RED, CRGB(255,208,122), RED, ___, 
+  RED, RED, RED, CRGB(255,208,122), RED, RED, RED, RED, 
+  RED, RED, RED, RED, RED, CRGB(255,208,122), RED, RED, 
+  ___, RED, RED, RED, RED, RED, RED, ___, 
+  ___, ___, CRGB(240,255,255), CRGB(240,255,255), CRGB(240,255,255), CRGB(255,208,122), ___, ___, 
+  ___, ___, CRGB(240,255,255), CRGB(240,255,255), CRGB(240,255,255), CRGB(255,208,122), ___, ___, 
+  ___, ___, ___, CRGB(240,255,255), CRGB(255,208,122), ___, ___, ___
+};
+
+// Skelly
+const CRGB ICON_SKELLY[64] = {
+  ___, ___, ___, ___, ___, ___, ___, ___, 
+  ___, WHT, WHT, WHT, WHT, CRGB(188,189,190), ___, ___, 
+  WHT, ___, ___, WHT, ___, ___, CRGB(188,189,190), ___, 
+  WHT, ___, RED, WHT, RED, ___, CRGB(188,189,190), ___, 
+  WHT, WHT, WHT, WHT, WHT, WHT, CRGB(188,189,190), ___, 
+  WHT, WHT, WHT, ___, WHT, WHT, CRGB(188,189,190), ___, 
+  ___, WHT, WHT, WHT, WHT, CRGB(188,189,190), ___, ___, 
+  ___, WHT, ___, WHT, ___, CRGB(188,189,190), ___, ___
+};
+
+// chicken
+const CRGB ICON_CHICKEN[64] = {
+  ___, ___, RED, RED, RED, ___, ___, ___, 
+  ___, ___, WHT, WHT, WHT, ___, ___, ___, 
+  ___, WHT, WHT, WHT, WHT, WHT, ___, ___, 
+  ___, WHT, ___, WHT, WHT, WHT, WHT, ___, 
+  CRGB(254,186,0), WHT, WHT, WHT, WHT, WHT, WHT, WHT, 
+  ___, WHT, WHT, WHT, WHT, WHT, WHT, WHT, 
+  ___, ___, WHT, WHT, WHT, WHT, WHT, ___, 
+  ___, ___, ___, CRGB(254,186,0), CRGB(254,186,0), ___, ___, ___
+};
+
+// invader
+const CRGB ICON_INVADER[64] = {
+  CRGB(48,228,215), ___, CRGB(48,228,215), CRGB(48,228,215), CRGB(48,228,215), CRGB(17,17,17), CRGB(48,228,215), CRGB(17,17,17), 
+  ___, CRGB(48,228,215), CRGB(48,228,215), CRGB(48,228,215), CRGB(48,228,215), CRGB(48,228,215), CRGB(17,17,17), ___, 
+  CRGB(48,228,215), CRGB(48,228,215), ___, CRGB(48,228,215), ___, CRGB(48,228,215), CRGB(48,228,215), CRGB(17,17,17), 
+  CRGB(33,131,129), CRGB(33,131,129), ___, CRGB(33,131,129), ___, CRGB(33,131,129), CRGB(33,131,129), CRGB(17,17,17), 
+  CRGB(33,131,129), CRGB(33,131,129), CRGB(33,131,129), CRGB(33,131,129), CRGB(33,131,129), CRGB(33,131,129), CRGB(33,131,129), CRGB(17,17,17), 
+  CRGB(6,59,88), ___, CRGB(6,59,88), ___, CRGB(6,59,88), ___, CRGB(6,59,88), ___, 
+  CRGB(6,59,88), ___, CRGB(6,59,88), ___, CRGB(6,59,88), ___, CRGB(6,59,88), ___, 
+  CRGB(6,59,88), ___, CRGB(6,59,88), ___, CRGB(6,59,88), ___, CRGB(6,59,88), ___
+};
+
+// dragon
+const CRGB ICON_DRAGON[64] = {
+  ___, ___, CRGB(223,2,83), ___, CRGB(223,2,83), ___, ___, ___, 
+  ___, CRGB(148,123,232), CRGB(148,123,232), CRGB(148,123,232), CRGB(148,123,232), ___, ___, ___, 
+  CRGB(148,123,232), ___, CRGB(148,123,232), ___, CRGB(148,123,232), CRGB(216,29,85), ___, ___, 
+  CRGB(148,123,232), CRGB(148,123,232), CRGB(148,123,232), CRGB(148,123,232), CRGB(148,123,232), ___, ___, ___, 
+  ___, ___, CRGB(217,185,252), CRGB(217,185,252), CRGB(148,123,232), CRGB(216,29,85), ___, ___, 
+  ___, CRGB(148,123,232), CRGB(217,185,252), CRGB(148,123,232), CRGB(148,123,232), ___, ___, CRGB(148,123,232), 
+  ___, ___, CRGB(217,185,252), CRGB(217,185,252), CRGB(148,123,232), CRGB(148,123,232), CRGB(148,123,232), ___, 
+  ___, ___, CRGB(148,123,232), ___, CRGB(148,123,232), ___, ___, ___
+};
+
+// twinkle heart
+const CRGB ICON_TWINKLE_HEART[64] = {
+  ___, RED, RED, ___, RED, RED, ___, ___, 
+  RED, RED, RED, RED, RED, RED, RED, ___, 
+  RED, RED, RED, RED, RED, ___, RED, ___, 
+  ___, RED, RED, RED, ___, CRGB(248,183,7), ___, ___, 
+  ___, ___, RED, ___, CRGB(248,183,7), CRGB(241,221,116), CRGB(248,183,7), ___, 
+  ___, ___, ___, RED, ___, CRGB(248,183,7), ___, ___, 
+  ___, ___, ___, ___, ___, ___, ___, ___, 
+  ___, ___, ___, ___, ___, ___, ___, ___
+};
+
+// popsicle
+const CRGB ICON_POPSICLE[64] = {
+  ___, ___, ___, CRGB(248,121,247), CRGB(248,121,247), ___, ___, ___, 
+  ___, ___, CRGB(248,121,247), CRGB(255,243,255), CRGB(248,121,247), CRGB(248,121,247), ___, ___, 
+  ___, ___, CRGB(255,243,255), CRGB(248,121,247), CRGB(248,121,247), CRGB(248,121,247), ___, ___, 
+  ___, ___, CRGB(248,121,247), CRGB(248,121,247), CRGB(248,121,247), CRGB(248,121,247), ___, ___, 
+  ___, ___, CRGB(248,121,247), CRGB(248,121,247), CRGB(248,121,247), CRGB(248,121,247), ___, ___, 
+  ___, ___, CRGB(248,121,247), CRGB(248,121,247), CRGB(248,121,247), CRGB(248,121,247), ___, ___, 
+  ___, ___, ___, CRGB(169,124,26), CRGB(169,124,26), ___, ___, ___, 
+  ___, ___, ___, CRGB(169,124,26), CRGB(169,124,26), ___, ___, ___
+};
+
 // ==================== ICON COUNT ====================
-#define ICON_COUNT 33
+#define ICON_COUNT 41
 
 // Array of all icons for easy iteration
 const CRGB* ALL_ICONS[ICON_COUNT] = {
@@ -500,7 +598,7 @@ const CRGB* ALL_ICONS[ICON_COUNT] = {
   ICON_KEY, ICON_GEM, ICON_POTION, ICON_SWORD,
   ICON_SHIELD, ICON_ARROW_UP, ICON_ARROW_DOWN, ICON_ARROW_LEFT,
   ICON_ARROW_RIGHT, ICON_SKULL, ICON_GHOST, ICON_ALIEN,
-  ICON_PACMAN, ICON_PACMAN_GHOST, ICON_MUSIC, ICON_WIFI, ICON_RAINBOW
+  ICON_PACMAN, ICON_PACMAN_GHOST, ICON_SHY_GUY, ICON_MUSIC, ICON_WIFI, ICON_RAINBOW, ICON_MUSHROOM, ICON_SKELLY, ICON_CHICKEN, ICON_INVADER, ICON_DRAGON, ICON_TWINKLE_HEART, ICON_POPSICLE
 };
 
 // Icon names for debugging
@@ -512,7 +610,7 @@ const char* ICON_NAMES[ICON_COUNT] = {
   "Key", "Gem", "Potion", "Sword",
   "Shield", "ArrowUp", "ArrowDown", "ArrowLeft",
   "ArrowRight", "Skull", "Ghost", "Alien",
-  "Pacman", "PacGhost", "Music", "WiFi", "Rainbow"
+  "Pacman", "PacGhost", "ShyGuy", "Music", "WiFi", "Rainbow", "Mushroom", "Skelly", "chicken", "invader", "dragon", "twinkleheart", "popsicle"
 };
 
 // Compatibility aliases for emoji system
