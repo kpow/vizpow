@@ -31,6 +31,10 @@
 #include "effects_ambient.h"
 #include "effects_emoji.h"
 #include "web_server.h"
+#include "display_lcd.h"
+#if defined(TOUCH_ENABLED)
+#include "touch_control.h"
+#endif
 
 // Global objects
 CRGB leds[NUM_LEDS];
@@ -58,7 +62,8 @@ unsigned long lastModeChange = 0;
 bool wasShaking = false;  // Track if we were above threshold last frame
 
 // Shuffle bags for random-without-repeats cycling
-uint8_t effectShuffleBag[max(NUM_MOTION_EFFECTS, NUM_AMBIENT_EFFECTS)];
+// Use 16 (NUM_AMBIENT_EFFECTS) as it's the larger of the two
+uint8_t effectShuffleBag[16];
 uint8_t effectShufflePos = 0;
 uint8_t effectShuffleSize = 0;
 
@@ -109,6 +114,16 @@ uint8_t nextShuffledPalette() {
   return paletteShuffleBag[paletteShufflePos++];
 }
 
+// Helper function to show output on configured displays
+void showDisplay() {
+  #if defined(DISPLAY_LED_ONLY) || defined(DISPLAY_DUAL)
+    FastLED.show();
+  #endif
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+    renderToLCD();
+  #endif
+}
+
 // Sparkle intro animation at startup
 void introAnimation() {
   unsigned long startTime = millis();
@@ -116,26 +131,47 @@ void introAnimation() {
     fadeToBlackBy(leds, NUM_LEDS, 20);
     int pos = random16(NUM_LEDS);
     leds[pos] = CHSV(random8(), 255, 255);  // Random rainbow colors
-    FastLED.show();
+    showDisplay();
     delay(20);
   }
   FastLED.clear();
-  FastLED.show();
+  showDisplay();
 }
 
 void setup() {
   Serial.begin(115200);
-  
-  // Initialize LEDs
+  delay(100);
+
+  // Start WiFi AP FIRST (before other peripherals)
+  WiFi.mode(WIFI_AP);
+  delay(100);
+  bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+  Serial.print("AP Started: ");
+  Serial.println(apStarted ? "YES" : "NO");
+  Serial.print("SSID: ");
+  Serial.println(WIFI_SSID);
+  Serial.print("IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  // Setup web server
+  setupWebServer();
+  Serial.println("Web server started");
+
+  // Initialize LEDs (always needed for the leds[] buffer)
   FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
   FastLED.setBrightness(brightness);
-  
+
+  // Initialize LCD if enabled
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+    initLCD();
+  #endif
+
   // Run intro animation
   introAnimation();
-  
+
   // Initialize IMU
   Wire.begin(I2C_SDA, I2C_SCL);
-  
+
   if (imu.begin(Wire, QMI8658_L_SLAVE_ADDRESS, I2C_SDA, I2C_SCL)) {
     imu.configAccelerometer(
       SensorQMI8658::ACC_RANGE_4G,
@@ -153,7 +189,12 @@ void setup() {
   } else {
     Serial.println("IMU initialization failed");
   }
-  
+
+  // Initialize touch controller (shares I2C bus with IMU)
+  #if defined(TOUCH_ENABLED)
+    initTouch();
+  #endif
+
   // Set initial palette
   currentPalette = palettes[0];
 
@@ -165,16 +206,6 @@ void setup() {
   // Initialize shuffle bags
   resetEffectShuffle();
   resetPaletteShuffle();
-
-  // Start WiFi AP
-  WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
-  Serial.println("Access Point Started");
-  Serial.print("IP: ");
-  Serial.println(WiFi.softAPIP());
-  
-  // Setup web server
-  setupWebServer();
-  Serial.println("Web server started");
 }
 
 void readIMU() {
@@ -237,7 +268,7 @@ void checkModeShake() {
       for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = CRGB(50, 50, 50);
       }
-      FastLED.show();
+      showDisplay();
       delay(100);
       FastLED.clear();
     }
@@ -250,6 +281,11 @@ void loop() {
   server.handleClient();
   readIMU();
   checkModeShake();  // Check for shake gesture to change mode
+
+  // Handle touch gestures
+  #if defined(TOUCH_ENABLED)
+    handleTouch();
+  #endif
 
   // Only do effect/palette cycling for Motion and Ambient modes
   if (currentMode != MODE_EMOJI) {
@@ -284,6 +320,6 @@ void loop() {
       break;
   }
 
-  FastLED.show();
+  showDisplay();
   delay(speed);
 }
