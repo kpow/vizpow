@@ -165,7 +165,7 @@ const char webpage[] PROGMEM = R"rawliteral(
 
     <div id="emojiPanel" class="hidden">
       <h2>Select Emoji</h2>
-      <div class="grid4" id="emojiGrid"></div>
+      <div class="grid" id="emojiGrid"></div>
       <h2>Queue (<span id="queueCount">0</span>/16)</h2>
       <div id="emojiQueue"><span class="queueEmpty">Click an emoji above to add</span></div>
       <div class="btn-row">
@@ -211,7 +211,7 @@ const char webpage[] PROGMEM = R"rawliteral(
 
   <script>
     const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Spin Trails", "Gravity Pixels", "Motion Noise", "Tilt Ripple", "Gyro Swirl", "Shake Explode", "Tilt Fire", "Motion Rainbow"];
-    const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Wave", "Spiral", "Breathe", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
+    const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
 
     let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };

@@ -102,18 +102,18 @@ bool addEmojiByIndex(uint8_t spriteIndex) {
 void displayEmoji(EmojiFrame* frame) {
   // Icons are stored in visual order (left-to-right, top-to-bottom)
   // XY() converts visual coordinates to physical LED index for serpentine matrix
-  for (uint8_t y = 0; y < HEIGHT; y++) {
-    for (uint8_t x = 0; x < WIDTH; x++) {
-      leds[XY(x, y)] = frame->pixels[y * WIDTH + x];
+  for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+      leds[XY(x, y)] = frame->pixels[y * MATRIX_WIDTH + x];
     }
   }
 }
 
 // Blend between two emojis for fade transition
 void blendEmojis(EmojiFrame* from, EmojiFrame* to, uint8_t blendAmount) {
-  for (uint8_t y = 0; y < HEIGHT; y++) {
-    for (uint8_t x = 0; x < WIDTH; x++) {
-      int srcIndex = y * WIDTH + x;  // Direct mapping - XY() handles serpentine
+  for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+      int srcIndex = y * MATRIX_WIDTH + x;  // Direct mapping - XY() handles serpentine
       leds[XY(x, y)] = blend(from->pixels[srcIndex], to->pixels[srcIndex], blendAmount);
     }
   }

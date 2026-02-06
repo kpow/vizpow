@@ -39,7 +39,7 @@ void tiltBall() {
     for (int dy = -1; dy <= 1; dy++) {
       int nx = ix + dx;
       int ny = iy + dy;
-      if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
+      if (nx >= 0 && nx < MATRIX_WIDTH && ny >= 0 && ny < MATRIX_HEIGHT) {
         float dist = sqrt((ballX - nx) * (ballX - nx) + (ballY - ny) * (ballY - ny));
         uint8_t bright = 255 - constrain(dist * 150, 0, 255);
         leds[XY(nx, ny)] = ColorFromPalette(currentPalette, millis() / 20, bright);
@@ -53,8 +53,8 @@ void motionPlasma() {
   float motion = sqrt(gyroX * gyroX + gyroY * gyroY + gyroZ * gyroZ);
   t += 1 + (motion / 15 * GYRO_SENSITIVITY);  // Much faster response (was /50)
   
-  for (uint8_t x = 0; x < WIDTH; x++) {
-    for (uint8_t y = 0; y < HEIGHT; y++) {
+  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
       uint8_t value = sin8(x * 32 + t) + sin8(y * 32 + t) + sin8((x + y) * 16 + t);
       leds[XY(x, y)] = ColorFromPalette(currentPalette, value);
     }
@@ -82,8 +82,8 @@ void tiltWave() {
   float angle = atan2(accelY, accelX);
   
   FastLED.clear();
-  for (uint8_t x = 0; x < WIDTH; x++) {
-    for (uint8_t y = 0; y < HEIGHT; y++) {
+  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
       float projected = x * cos(angle) + y * sin(angle);
       uint8_t bright = sin8(projected * 40 + t * 3);
       leds[XY(x, y)] = ColorFromPalette(currentPalette, projected * 20 + t, bright);
@@ -100,7 +100,7 @@ void spinTrails() {
   for (float r = 0; r < 4; r += 0.5) {
     int x = 3.5 + cos(angle + r) * r;
     int y = 3.5 + sin(angle + r) * r;
-    if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
+    if (x >= 0 && x < MATRIX_WIDTH && y >= 0 && y < MATRIX_HEIGHT) {
       leds[XY(x, y)] = ColorFromPalette(currentPalette, r * 50 + millis() / 20);
     }
   }
@@ -112,8 +112,8 @@ void gravityPixels() {
 
   if (!init) {
     for (int i = 0; i < 8; i++) {
-      px[i] = random8(WIDTH);
-      py[i] = random8(HEIGHT);
+      px[i] = random8(MATRIX_WIDTH);
+      py[i] = random8(MATRIX_HEIGHT);
       vx[i] = 0;
       vy[i] = 0;
     }
@@ -150,8 +150,8 @@ void motionNoise() {
   int offsetX = accelX * 150 * ACCEL_SENSITIVITY;
   int offsetY = accelY * 150 * ACCEL_SENSITIVITY;
   
-  for (uint8_t x = 0; x < WIDTH; x++) {
-    for (uint8_t y = 0; y < HEIGHT; y++) {
+  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
       uint8_t n = inoise8((x * 50) + offsetX, (y * 50) + offsetY, t);
       leds[XY(x, y)] = ColorFromPalette(currentPalette, n);
     }
@@ -166,8 +166,8 @@ void tiltRipple() {
   float cx = 3.5 + accelX * 4.0 * ACCEL_SENSITIVITY;
   float cy = 3.5 - accelY * 4.0 * ACCEL_SENSITIVITY;
   
-  for (uint8_t x = 0; x < WIDTH; x++) {
-    for (uint8_t y = 0; y < HEIGHT; y++) {
+  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
       float dx = x - cx;
       float dy = y - cy;
       float dist = sqrt(dx * dx + dy * dy);
@@ -181,8 +181,8 @@ void gyroSwirl() {
   static uint16_t t = 0;
   t += 2 + abs(gyroZ) / 30 * GYRO_SENSITIVITY;  // Much faster swirl (was /100)
   
-  for (uint8_t x = 0; x < WIDTH; x++) {
-    for (uint8_t y = 0; y < HEIGHT; y++) {
+  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
       float dx = x - 3.5;
       float dy = y - 3.5;
       float angle = atan2(dy, dx);
@@ -209,8 +209,8 @@ void shakeExplode() {
     float radius = explodeFrame / 5.0;
     FastLED.clear();
     
-    for (uint8_t x = 0; x < WIDTH; x++) {
-      for (uint8_t y = 0; y < HEIGHT; y++) {
+    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+      for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
         float dx = x - 3.5;
         float dy = y - 3.5;
         float dist = sqrt(dx * dx + dy * dy);
@@ -236,15 +236,15 @@ void tiltFire() {
     heat[i] = qsub8(heat[i], random8(0, 20));
   }
   
-  for (int x = 0; x < WIDTH; x++) {
+  for (int x = 0; x < MATRIX_WIDTH; x++) {
     int intensity = 255 - abs(x - hotSpot) * 50;
     if (random8() < 180 && intensity > 0) {
-      heat[XY(x, HEIGHT - 1)] = qadd8(heat[XY(x, HEIGHT - 1)], random8(intensity / 2, intensity));
+      heat[XY(x, MATRIX_HEIGHT - 1)] = qadd8(heat[XY(x, MATRIX_HEIGHT - 1)], random8(intensity / 2, intensity));
     }
   }
   
-  for (int y = 0; y < HEIGHT - 1; y++) {
-    for (int x = 0; x < WIDTH; x++) {
+  for (int y = 0; y < MATRIX_HEIGHT - 1; y++) {
+    for (int x = 0; x < MATRIX_WIDTH; x++) {
       heat[XY(x, y)] = (heat[XY(x, y)] + heat[XY(x, y + 1)] + heat[XY(x, y + 1)]) / 3;
     }
   }
@@ -262,8 +262,8 @@ void motionRainbow() {
   // More speed boost from tilt (was *2)
   float spd = 1 + sqrt(accelX * accelX + accelY * accelY) * 5 * ACCEL_SENSITIVITY;
   
-  for (uint8_t x = 0; x < WIDTH; x++) {
-    for (uint8_t y = 0; y < HEIGHT; y++) {
+  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
       uint8_t hue = hueOffset + (x * 8) + (y * 8);
       leds[XY(x, y)] = ColorFromPalette(currentPalette, hue);
     }
