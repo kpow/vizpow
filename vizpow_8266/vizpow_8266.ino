@@ -1,5 +1,5 @@
 /*
- * ESP8266 LED Matrix Controller
+ * vizPow — ESP8266 Controller
  *
  * A WiFi-controlled LED matrix for 8x8 WS2812B grids.
  * Port of the ESP32 version, stripped of IMU/touch/LCD hardware.

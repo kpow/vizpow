@@ -1,5 +1,5 @@
 /**
- * 8x8 Multicolor Icons for LED Matrix
+ * 8x8 Multicolor Icons for vizPow
  * For use with FastLED / ESP32-S3-Matrix
  * 
  * Each icon is 64 CRGB values (8x8 grid, row-major order)

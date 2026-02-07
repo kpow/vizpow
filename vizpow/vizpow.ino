@@ -1,5 +1,5 @@
 /*
- * ESP32-S3 LED Matrix Controller
+ * vizPow — ESP32-S3 Controller
  * 
  * A motion-reactive LED matrix controller for wearable displays.
  * Uses Waveshare ESP32-S3-Matrix with onboard 8x8 WS2812B and QMI8658 IMU.

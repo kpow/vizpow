@@ -102,7 +102,7 @@ void renderToLCD() {
     return;
   }
 
-  extern CRGB leds[];  // Reference the global leds array from led_matrix.ino
+  extern CRGB leds[];  // Reference the global leds array from vizpow.ino
 
   for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
     for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {

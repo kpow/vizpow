@@ -1,13 +1,13 @@
 #ifndef WEB_SERVER_H
 #define WEB_SERVER_H
 
-#include <WebServer.h>
+#include <ESP8266WebServer.h>
 #include <FastLED.h>
 #include "config.h"
 #include "palettes.h"
 
 // External references to globals
-extern WebServer server;
+extern ESP8266WebServer server;
 extern uint8_t effectIndex;
 extern uint8_t paletteIndex;
 extern uint8_t brightness;
@@ -34,7 +34,7 @@ const char webpage[] PROGMEM = R"rawliteral(
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <title>LED Matrix</title>
+  <title>VizPow</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -150,13 +150,12 @@ const char webpage[] PROGMEM = R"rawliteral(
   </style>
 </head>
 <body>
-  <h1>LED Matrix Control</h1>
+  <h1>VizPow Control</h1>
 
   <div class="card">
     <div class="tab-row">
-      <button class="tab active" id="tabMotion" onclick="setMode(0)">Motion</button>
-      <button class="tab" id="tabAmbient" onclick="setMode(1)">Ambient</button>
-      <button class="tab" id="tabEmoji" onclick="setMode(2)">Emoji</button>
+      <button class="tab active" id="tabAmbient" onclick="setMode(0)">Ambient</button>
+      <button class="tab" id="tabEmoji" onclick="setMode(1)">Emoji</button>
     </div>
 
     <div id="effectsPanel">
@@ -207,10 +206,9 @@ const char webpage[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
-  <div class="status">Connected to LED-Matrix</div>
+  <div class="status">Connected to VizPow-8266</div>
 
   <script>
-    const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Spin Trails", "Gravity Pixels", "Motion Noise", "Tilt Ripple", "Gyro Swirl", "Shake Explode", "Tilt Fire", "Motion Rainbow"];
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
 
@@ -230,17 +228,15 @@ const char webpage[] PROGMEM = R"rawliteral(
       "Pacman", "PacGhost", "ShyGuy", "Music", "WiFi", "Rainbow", "Mushroom", "Skelly", "chicken", "invader", "dragon", "twinkleheart", "popsicle"];
 
     function render() {
-      const effects = state.currentMode === 0 ? motionEffects : ambientEffects;
-      document.getElementById('tabMotion').className = 'tab ' + (state.currentMode === 0 ? 'active' : '');
-      document.getElementById('tabAmbient').className = 'tab ' + (state.currentMode === 1 ? 'active' : '');
-      document.getElementById('tabEmoji').className = 'tab ' + (state.currentMode === 2 ? 'active' : '');
+      document.getElementById('tabAmbient').className = 'tab ' + (state.currentMode === 0 ? 'active' : '');
+      document.getElementById('tabEmoji').className = 'tab ' + (state.currentMode === 1 ? 'active' : '');
 
-      document.getElementById('effectsPanel').className = state.currentMode === 2 ? 'hidden' : '';
-      document.getElementById('emojiPanel').className = state.currentMode === 2 ? '' : 'hidden';
-      document.getElementById('paletteCard').className = state.currentMode === 2 ? 'card hidden' : 'card';
+      document.getElementById('effectsPanel').className = state.currentMode === 1 ? 'hidden' : '';
+      document.getElementById('emojiPanel').className = state.currentMode === 1 ? '' : 'hidden';
+      document.getElementById('paletteCard').className = state.currentMode === 1 ? 'card hidden' : 'card';
 
-      if (state.currentMode !== 2) {
-        document.getElementById('effects').innerHTML = effects.map((e, i) =>
+      if (state.currentMode !== 1) {
+        document.getElementById('effects').innerHTML = ambientEffects.map((e, i) =>
           `<button class="${state.effect === i ? 'active' : ''}" onclick="setEffect(${i})">${e}</button>`
         ).join('');
       } else {
@@ -386,7 +382,7 @@ void handleState() {
 
 void handleMode() {
   if (server.hasArg("v")) {
-    currentMode = constrain(server.arg("v").toInt(), 0, 2);
+    currentMode = constrain(server.arg("v").toInt(), 0, 1);
     effectIndex = 0;
     resetEffectShuffle();
     FastLED.clear();
@@ -396,8 +392,7 @@ void handleMode() {
 
 void handleEffect() {
   if (server.hasArg("v")) {
-    int maxEffects = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
-    effectIndex = server.arg("v").toInt() % maxEffects;
+    effectIndex = server.arg("v").toInt() % NUM_AMBIENT_EFFECTS;
     FastLED.clear();
   }
   server.send(200, "text/plain", "OK");

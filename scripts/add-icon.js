@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Add Icon Script for ESP32 LED Matrix
+ * Add Icon Script for vizPow
  *
  * Usage:
  *   node scripts/add-icon.js "Icon Name" '{"seg":{"i":[0,0,0,...]}}'
@@ -45,8 +45,8 @@ const COLOR_SHORTCUTS = {
 
 // Paths relative to project root
 const PROJECT_ROOT = path.join(__dirname, '..');
-const SPRITES_PATH = path.join(PROJECT_ROOT, 'led_matrix', 'emoji_sprites.h');
-const WEBSERVER_PATH = path.join(PROJECT_ROOT, 'led_matrix', 'web_server.h');
+const SPRITES_PATH = path.join(PROJECT_ROOT, 'vizpow', 'emoji_sprites.h');
+const WEBSERVER_PATH = path.join(PROJECT_ROOT, 'vizpow', 'web_server.h');
 
 function rgbToCrgb(r, g, b) {
   const key = `${r},${g},${b}`;
