@@ -1,6 +1,6 @@
 # ESP32 LED Matrix Controller
 
-A motion-reactive LED matrix controller designed for wearable displays. Supports two platforms:
+A motion-reactive LED matrix controller designed for wearable/portable/alternate displays. Supports two platforms:
 
 - **ESP32-S3** — Full-featured with IMU, LCD display, touch control, and 3 display modes
 - **ESP8266** — Lightweight WiFi-only port with 2 display modes (ambient + emoji)
