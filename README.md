@@ -1,6 +1,6 @@
-# ESP32 LED Matrix Controller
+# vizPow
 
-A motion-reactive LED matrix controller designed for wearable/portable/alternate displays. Supports two platforms:
+A motion-reactive display controller platform for wearable/portable/alternate displays. Supports two platforms:
 
 - **ESP32-S3** — Full-featured with IMU, LCD display, touch control, and 3 display modes
 - **ESP8266** — Lightweight WiFi-only port with 2 display modes (ambient + emoji)
@@ -100,7 +100,7 @@ Install via Arduino Library Manager:
 2. Select Board: `ESP32S3 Dev Module`
 3. Enable: `USB CDC On Boot -> Enabled`
 4. Select Port
-5. Upload `led_matrix/led_matrix.ino`
+5. Upload `vizpow/vizpow.ino`
 
 ### ESP8266
 
@@ -121,7 +121,7 @@ Install via Arduino Library Manager:
 1. Connect ESP8266 board via USB
 2. Select Board: `NodeMCU 1.0 (ESP-12E Module)` (or your board variant)
 3. Select Port
-4. Upload `led_matrix_8266/led_matrix_8266.ino`
+4. Upload `vizpow_8266/vizpow_8266.ino`
 
 ## Usage
 
@@ -129,8 +129,8 @@ Install via Arduino Library Manager:
 
 1. Power on the device — a sparkle intro animation plays on startup
 2. On your phone, connect to WiFi:
-   - ESP32: `LED-Matrix` / password: `12345678`
-   - ESP8266: `LED-Matrix-8266` / password: `12345678`
+   - ESP32: `VizPow` / password: `12345678`
+   - ESP8266: `VizPow-8266` / password: `12345678`
 3. Open browser: `http://192.168.4.1`
 
 ### Shake to Change Mode (ESP32 only)
@@ -218,9 +218,9 @@ Heart, Star, Smiley, Check, X, Question, Exclaim, Sun, Moon, Cloud, Rain, Lightn
 ## Project Structure
 
 ```
-esp32-led-matrix/
-├── led_matrix/                  # ESP32-S3 version (full-featured)
-│   ├── led_matrix.ino           # Main sketch — setup(), loop(), globals, shake detection
+vizpow/
+├── vizpow/                      # ESP32-S3 version (full-featured)
+│   ├── vizpow.ino               # Main sketch — setup(), loop(), globals, shake detection
 │   ├── config.h                 # Hardware pins, constants, XY mapping, board selection
 │   ├── palettes.h               # 15 color palette definitions
 │   ├── effects_motion.h         # 12 motion-reactive effects
@@ -231,8 +231,8 @@ esp32-led-matrix/
 │   ├── touch_control.h          # Touch menu gestures and UI
 │   ├── web_server.h             # Web UI HTML + API handlers
 │   └── SensorQMI8658.hpp        # IMU driver
-├── led_matrix_8266/             # ESP8266 port (WiFi + LEDs only)
-│   ├── led_matrix_8266.ino      # Main sketch — 2 modes, no IMU/LCD/touch
+├── vizpow_8266/                 # ESP8266 port (WiFi + LEDs only)
+│   ├── vizpow_8266.ino          # Main sketch — 2 modes, no IMU/LCD/touch
 │   ├── config.h                 # ESP8266 pin config (GPIO2)
 │   ├── palettes.h               # Same 15 palettes
 │   ├── effects_ambient.h        # 13 ambient effects

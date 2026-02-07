@@ -64,12 +64,8 @@
 #define MATRIX_WIDTH 8
 #define MATRIX_HEIGHT 8
 
-// WiFi AP configuration (unique per board)
-#if defined(TARGET_LCD)
-  #define WIFI_SSID "LCD-Matrix"
-#else
-  #define WIFI_SSID "LED-Matrix"
-#endif
+// WiFi AP configuration
+#define WIFI_SSID "VizPow"
 #define WIFI_PASSWORD "12345678"
 
 // Display modes

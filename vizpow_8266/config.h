@@ -2,7 +2,7 @@
 #define CONFIG_H
 
 // ============================================================================
-// ESP8266 LED Matrix Configuration
+// vizPow ESP8266 Configuration
 // Bare ESP8266EX module driving 8x8 WS2812B grid via GPIO2
 // ============================================================================
 
@@ -15,7 +15,7 @@
 #define MATRIX_HEIGHT 8
 
 // WiFi AP configuration
-#define WIFI_SSID "LED-Matrix-8266"
+#define WIFI_SSID "VizPow-8266"
 #define WIFI_PASSWORD "12345678"
 
 // Display modes (no motion mode on ESP8266 - no IMU)
