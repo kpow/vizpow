@@ -83,7 +83,7 @@ void setup() {
   WiFi.disconnect();
   delay(100);
 
-  WiFi.begin("powerhouse", "YOUR_PASSWORD_HERE");
+  WiFi.begin("powerhouse", "R00s3velt");
 
   int tries = 0;
   while (WiFi.status() != WL_CONNECTED && tries < 30) {

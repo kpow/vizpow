@@ -26,6 +26,9 @@
 #include "SensorQMI8658.hpp"
 
 #include "config.h"
+#if defined(AUTO_WIFI_USB_DETECT)
+  #include "hal/usb_serial_jtag_ll.h"
+#endif
 #include "palettes.h"
 #include "effects_motion.h"
 #include "effects_ambient.h"
@@ -40,11 +43,12 @@
 CRGB leds[NUM_LEDS];
 SensorQMI8658 imu;
 WebServer server(80);
+bool wifiEnabled = false;
 
 // State variables
 uint8_t effectIndex = 0;
 uint8_t paletteIndex = 0;
-uint8_t brightness = 15;
+uint8_t brightness = DEFAULT_BRIGHTNESS;
 uint8_t speed = 20;
 bool autoCycle = true;
 uint8_t currentMode = MODE_AMBIENT;
@@ -72,6 +76,12 @@ uint8_t paletteShufflePos = 0;
 
 // Current palette
 CRGBPalette16 currentPalette;
+
+// IMU power profile tracking (used when POWER_SAVE_ENABLED)
+#if defined(POWER_SAVE_ENABLED)
+enum IMUProfile { IMU_FULL, IMU_LOW_POWER };
+IMUProfile currentIMUProfile = IMU_FULL;
+#endif
 
 // Fisher-Yates shuffle
 void shuffleArray(uint8_t* arr, uint8_t size) {
@@ -127,10 +137,10 @@ void showDisplay() {
 // Sparkle intro animation at startup
 void introAnimation() {
   unsigned long startTime = millis();
-  while (millis() - startTime < 2000) {  // Run for 2 seconds
-    fadeToBlackBy(leds, NUM_LEDS, 20);
+  while (millis() - startTime < INTRO_DURATION_MS) {
+    fadeToBlackBy(leds, NUM_LEDS, INTRO_FADE_RATE);
     int pos = random16(NUM_LEDS);
-    leds[pos] = CHSV(random8(), 255, 255);  // Random rainbow colors
+    leds[pos] = CHSV(random8(), 255, INTRO_SPARKLE_BRIGHTNESS);
     showDisplay();
     delay(20);
   }
@@ -142,24 +152,42 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
-  // Start WiFi AP FIRST (before other peripherals)
-  WiFi.mode(WIFI_AP);
-  delay(100);
-  bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
-  Serial.print("AP Started: ");
-  Serial.println(apStarted ? "YES" : "NO");
-  Serial.print("SSID: ");
-  Serial.println(WIFI_SSID);
-  Serial.print("IP: ");
-  Serial.println(WiFi.softAPIP());
+  // Determine whether to enable WiFi
+  #if defined(AUTO_WIFI_USB_DETECT)
+    // Wait for USB host to enumerate, then check for SOF frames
+    delay(USB_DETECT_DELAY_MS);
+    wifiEnabled = usb_serial_jtag_ll_txfifo_writable();
+    Serial.println(wifiEnabled ? "USB detected - WiFi ON" : "Battery mode - WiFi OFF");
+  #else
+    wifiEnabled = true;  // LCD target: always enable WiFi
+  #endif
 
-  // Setup web server
-  setupWebServer();
-  Serial.println("Web server started");
+  if (wifiEnabled) {
+    WiFi.mode(WIFI_AP);
+    delay(100);
+    bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+    #if defined(WIFI_TX_POWER)
+      WiFi.setTxPower(WIFI_TX_POWER);
+    #endif
+    Serial.print("AP Started: ");
+    Serial.println(apStarted ? "YES" : "NO");
+    Serial.print("SSID: ");
+    Serial.println(WIFI_SSID);
+    Serial.print("IP: ");
+    Serial.println(WiFi.softAPIP());
+
+    setupWebServer();
+    Serial.println("Web server started");
+  } else {
+    WiFi.mode(WIFI_OFF);
+  }
 
   // Initialize LEDs (always needed for the leds[] buffer)
   FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
   FastLED.setBrightness(brightness);
+  #if defined(MAX_LED_POWER_MA)
+    FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_LED_POWER_MA);
+  #endif
 
   // Initialize LCD if enabled
   #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
@@ -208,10 +236,33 @@ void setup() {
   resetPaletteShuffle();
 }
 
+// Switch IMU between full (motion mode) and low-power (ambient/emoji)
+#if defined(POWER_SAVE_ENABLED)
+void updateIMUForMode() {
+  IMUProfile target = (currentMode == MODE_MOTION) ? IMU_FULL : IMU_LOW_POWER;
+  if (target == currentIMUProfile) return;
+
+  if (target == IMU_FULL) {
+    imu.enableGyroscope();
+  } else {
+    imu.disableGyroscope();
+  }
+  currentIMUProfile = target;
+}
+#endif
+
 void readIMU() {
   if (imu.getDataReady()) {
     imu.getAccelerometer(accelX, accelY, accelZ);
-    imu.getGyroscope(gyroX, gyroY, gyroZ);
+    #if defined(POWER_SAVE_ENABLED)
+      if (currentIMUProfile == IMU_FULL) {
+        imu.getGyroscope(gyroX, gyroY, gyroZ);
+      } else {
+        gyroX = gyroY = gyroZ = 0;
+      }
+    #else
+      imu.getGyroscope(gyroX, gyroY, gyroZ);
+    #endif
   }
 }
 
@@ -278,8 +329,11 @@ void checkModeShake() {
 }
 
 void loop() {
-  server.handleClient();
+  if (wifiEnabled) server.handleClient();
   readIMU();
+  #if defined(POWER_SAVE_ENABLED)
+    updateIMUForMode();
+  #endif
   checkModeShake();  // Check for shake gesture to change mode
 
   // Handle touch gestures
@@ -321,5 +375,33 @@ void loop() {
   }
 
   showDisplay();
-  delay(speed);
+
+  // Frame timing: power-save uses adaptive delays with FPS caps,
+  // full-power just uses the speed setting directly
+  #if defined(POWER_SAVE_ENABLED)
+    int frameDelay;
+    switch (currentMode) {
+      case MODE_EMOJI:
+        frameDelay = emojiFading ? FRAME_DELAY_EMOJI_FADING : FRAME_DELAY_EMOJI_STATIC;
+        break;
+      case MODE_AMBIENT:
+        frameDelay = max((int)speed, FRAME_DELAY_AMBIENT_MIN);
+        break;
+      default:  // MODE_MOTION
+        frameDelay = speed;
+        break;
+    }
+
+    // Chunk long delays into 30ms segments so shake detection stays responsive
+    while (frameDelay > 30) {
+      delay(30);
+      frameDelay -= 30;
+      if (wifiEnabled) server.handleClient();
+      readIMU();
+      checkModeShake();
+    }
+    delay(frameDelay);
+  #else
+    delay(speed);
+  #endif
 }
