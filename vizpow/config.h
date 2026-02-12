@@ -14,10 +14,28 @@
 #if defined(TARGET_LED)
   #define BOARD_ESP32S3_MATRIX
   #define DISPLAY_LED_ONLY
+  // Power-saving profile for battery-powered LED matrix
+  #define POWER_SAVE_ENABLED
+  #define AUTO_WIFI_USB_DETECT       // WiFi ON when USB host detected, OFF on battery
+  #define USB_DETECT_DELAY_MS 1500   // Time to wait for USB host enumeration at boot
+  #define DEFAULT_BRIGHTNESS 10
+  #define MAX_LED_POWER_MA 200       // FastLED auto-scales to this limit
+  #define WIFI_TX_POWER WIFI_POWER_8_5dBm  // Reduced TX - phone is nearby
+  #define FRAME_DELAY_EMOJI_STATIC 100     // 10 FPS - static image
+  #define FRAME_DELAY_EMOJI_FADING 50      // 20 FPS - smooth crossfade
+  #define FRAME_DELAY_AMBIENT_MIN 40       // 25 FPS cap for ambient effects
+  #define INTRO_DURATION_MS 1000
+  #define INTRO_FADE_RATE 40
+  #define INTRO_SPARKLE_BRIGHTNESS 180
 #elif defined(TARGET_LCD)
   #define BOARD_ESP32S3_TOUCH_LCD
   #define DISPLAY_LCD_ONLY
   #define HIRES_ENABLED  // Enable hi-res rendering mode for LCD
+  // Full power profile for USB-powered LCD board
+  #define DEFAULT_BRIGHTNESS 15
+  #define INTRO_DURATION_MS 2000
+  #define INTRO_FADE_RATE 20
+  #define INTRO_SPARKLE_BRIGHTNESS 255
 #else
   #error "Please define TARGET_LED or TARGET_LCD"
 #endif
