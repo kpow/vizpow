@@ -233,7 +233,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Spin Trails", "Gravity Pixels", "Motion Noise", "Tilt Ripple", "Gyro Swirl", "Shake Explode", "Tilt Fire", "Motion Rainbow"];
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
-    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead"];
+    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];
     const botPersonalityNames = ["Chill", "Hyper", "Grumpy", "Sleepy"];
     const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
     let curPersonality = 0;
@@ -601,11 +601,17 @@ void handleBotWeatherConfig() {
 }
 
 void handleBotState() {
+  // Cloud-ready full bot state JSON
   String json = "{\"expression\":" + String(getBotExpression()) +
                 ",\"state\":" + String(getBotState()) +
                 ",\"personality\":" + String(getBotPersonality()) +
                 ",\"timeOverlay\":" + (isBotTimeOverlayEnabled() ? "true" : "false") +
-                ",\"faceColor\":" + String(botFaceColor) + "}";
+                ",\"faceColor\":" + String(botFaceColor) +
+                ",\"background\":" + String(getBotBackgroundStyle()) +
+                ",\"numExpressions\":" + String(BOT_NUM_EXPRESSIONS) +
+                ",\"numPersonalities\":" + String(BOT_NUM_PERSONALITIES) +
+                ",\"speechBubbleActive\":" + (botMode.speechBubble.active ? "true" : "false") +
+                "}";
   server.send(200, "application/json", json);
 }
 #endif

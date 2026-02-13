@@ -84,7 +84,7 @@ struct BotExpression {
 #define BOT_FACE_CY 118
 
 // Number of defined expressions
-#define BOT_NUM_EXPRESSIONS 12
+#define BOT_NUM_EXPRESSIONS 20
 
 // Expression indices
 #define EXPR_NEUTRAL    0
@@ -99,6 +99,14 @@ struct BotExpression {
 #define EXPR_EXCITED    9
 #define EXPR_MISCHIEF   10
 #define EXPR_DEAD       11
+#define EXPR_SKEPTICAL  12
+#define EXPR_WORRIED    13
+#define EXPR_CONFUSED   14
+#define EXPR_PROUD      15
+#define EXPR_SHY        16
+#define EXPR_ANNOYED    17
+#define EXPR_BLISS      18
+#define EXPR_FOCUSED    19
 
 // Expression parameter table (stored in PROGMEM)
 const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
@@ -233,6 +241,94 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .mouthType = MOUTH_LINE, .mouthWidth = 18, .mouthOffsetY = 62, .mouthCurve = 0,
     .eyeMode = EYE_X,
     .transitionMs = 150
+  },
+
+  // 12: SKEPTICAL — one eye narrowed, one normal, flat mouth
+  {
+    .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
+    .pupilRadius = 13, .pupilOffsetX = 6, .pupilOffsetY = 2,
+    .browOffsetY = -12, .browLength = 28, .browThickness = 6,
+    .browAngleL = -10, .browAngleR = 18, .browVisible = true,
+    .mouthType = MOUTH_LINE, .mouthWidth = 14, .mouthOffsetY = 62, .mouthCurve = 0,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 300
+  },
+
+  // 13: WORRIED — wide eyes, brows angled inward-up, frown
+  {
+    .eyeWhiteW = 52, .eyeWhiteH = 50, .eyeSpacing = 44,
+    .pupilRadius = 11, .pupilOffsetX = 0, .pupilOffsetY = 4,
+    .browOffsetY = -16, .browLength = 26, .browThickness = 5,
+    .browAngleL = -14, .browAngleR = -14, .browVisible = true,
+    .mouthType = MOUTH_FROWN, .mouthWidth = 12, .mouthOffsetY = 64, .mouthCurve = 6,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 350
+  },
+
+  // 14: CONFUSED — looking sideways, asymmetric brows, wavy mouth
+  {
+    .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
+    .pupilRadius = 12, .pupilOffsetX = -8, .pupilOffsetY = -4,
+    .browOffsetY = -12, .browLength = 26, .browThickness = 5,
+    .browAngleL = 10, .browAngleR = -8, .browVisible = true,
+    .mouthType = MOUTH_WAVY, .mouthWidth = 14, .mouthOffsetY = 62, .mouthCurve = 4,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 350
+  },
+
+  // 15: PROUD — eyes slightly closed, chin-up look, big smile
+  {
+    .eyeWhiteW = 50, .eyeWhiteH = 35, .eyeSpacing = 44,
+    .pupilRadius = 12, .pupilOffsetX = 0, .pupilOffsetY = -4,
+    .browOffsetY = -10, .browLength = 30, .browThickness = 6,
+    .browAngleL = 6, .browAngleR = 6, .browVisible = true,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 22, .mouthOffsetY = 60, .mouthCurve = 10,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 350
+  },
+
+  // 16: SHY — looking down-left, small pupils, slight smile
+  {
+    .eyeWhiteW = 48, .eyeWhiteH = 42, .eyeSpacing = 44,
+    .pupilRadius = 10, .pupilOffsetX = -10, .pupilOffsetY = 8,
+    .browOffsetY = -10, .browLength = 24, .browThickness = 5,
+    .browAngleL = -4, .browAngleR = 4, .browVisible = true,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 12, .mouthOffsetY = 62, .mouthCurve = 4,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 400
+  },
+
+  // 17: ANNOYED — half-lidded, side-looking, flat mouth
+  {
+    .eyeWhiteW = 52, .eyeWhiteH = 28, .eyeSpacing = 44,
+    .pupilRadius = 12, .pupilOffsetX = 8, .pupilOffsetY = 2,
+    .browOffsetY = -4, .browLength = 30, .browThickness = 7,
+    .browAngleL = 10, .browAngleR = 10, .browVisible = true,
+    .mouthType = MOUTH_LINE, .mouthWidth = 16, .mouthOffsetY = 60, .mouthCurve = 0,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 250
+  },
+
+  // 18: BLISS — caret eyes but relaxed, big content smile
+  {
+    .eyeWhiteW = 48, .eyeWhiteH = 40, .eyeSpacing = 44,
+    .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
+    .browOffsetY = -14, .browLength = 26, .browThickness = 5,
+    .browAngleL = 8, .browAngleR = 8, .browVisible = false,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 20, .mouthOffsetY = 58, .mouthCurve = 10,
+    .eyeMode = EYE_CARET,
+    .transitionMs = 400
+  },
+
+  // 19: FOCUSED — normal eyes looking straight, slight squint, no mouth
+  {
+    .eyeWhiteW = 48, .eyeWhiteH = 38, .eyeSpacing = 44,
+    .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = 0,
+    .browOffsetY = -8, .browLength = 28, .browThickness = 6,
+    .browAngleL = 4, .browAngleR = 4, .browVisible = true,
+    .mouthType = MOUTH_NONE, .mouthWidth = 0, .mouthOffsetY = 62, .mouthCurve = 0,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 300
   }
 };
 

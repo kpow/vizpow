@@ -365,12 +365,81 @@ void updateBotMode() {
 // Bot Mode Render (called each frame after update)
 // ============================================================================
 
+// Track previous frame's face bounds for minimal-clear approach
+static int16_t prevFaceTop = 0;
+static int16_t prevFaceBot = 0;
+static bool botFirstFrame = true;
+
 void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
 
-  // Clear to black
-  gfx->fillScreen(BOT_COLOR_BG);
+  // Anti-flicker strategy: only clear the area where the face was drawn
+  // on the previous frame, then immediately redraw. This minimizes the
+  // time any pixel is black, reducing perceived flicker on SPI displays.
+  if (botFirstFrame) {
+    gfx->fillScreen(BOT_COLOR_BG);
+    botFirstFrame = false;
+  }
+
+  // ---- Draw background based on style ----
+  switch (botBackgroundStyle) {
+    case 0:
+      // Solid black — just clear the face region
+      {
+        int16_t clearTop = BOT_FACE_CY - 90;
+        if (clearTop < 0) clearTop = 0;
+        gfx->fillRect(0, clearTop, LCD_WIDTH, 250 - clearTop, BOT_COLOR_BG);
+      }
+      break;
+
+    case 1:
+      // Subtle dark gradient — dark blue at top fading to black
+      for (int16_t y = 0; y < LCD_HEIGHT; y += 4) {
+        uint8_t b = (uint8_t)((1.0f - (float)y / LCD_HEIGHT) * 12);
+        uint16_t c = ((b >> 3) << 11) | ((b >> 2) << 5) | (b >> 1);
+        gfx->fillRect(0, y, LCD_WIDTH, 4, c);
+      }
+      break;
+
+    case 2:
+      // Breathing color — slow pulse of dark accent color
+      {
+        float breathT = (float)(millis() % 6000) / 6000.0f;
+        uint8_t intensity = (uint8_t)(sinf(breathT * TWO_PI) * 4.0f + 4.0f);
+        uint16_t bgColor = ((intensity >> 3) << 11) | ((intensity >> 2) << 5) | (intensity >> 1);
+        int16_t clearTop = BOT_FACE_CY - 90;
+        if (clearTop < 0) clearTop = 0;
+        gfx->fillRect(0, clearTop, LCD_WIDTH, 250 - clearTop, bgColor);
+      }
+      break;
+
+    case 3:
+      // Starfield — black with a few dim white dots
+      {
+        int16_t clearTop = BOT_FACE_CY - 90;
+        if (clearTop < 0) clearTop = 0;
+        gfx->fillRect(0, clearTop, LCD_WIDTH, 250 - clearTop, BOT_COLOR_BG);
+        // Draw a few "stars" that twinkle
+        for (int i = 0; i < 8; i++) {
+          // Deterministic positions based on index (not random per frame)
+          int16_t sx = (i * 31 + 17) % LCD_WIDTH;
+          int16_t sy = (i * 47 + 11) % LCD_HEIGHT;
+          // Twinkle: brightness varies with time offset
+          float twinkle = sinf((float)(millis() + i * 500) / 1500.0f);
+          if (twinkle > 0.3f) {
+            uint8_t bright = (uint8_t)(twinkle * 8);
+            uint16_t starColor = ((bright >> 3) << 11) | ((bright >> 2) << 5) | (bright >> 3);
+            gfx->fillRect(sx, sy, 2, 2, starColor);
+          }
+        }
+      }
+      break;
+
+    default:
+      gfx->fillRect(0, BOT_FACE_CY - 90, LCD_WIDTH, 250 - (BOT_FACE_CY - 90), BOT_COLOR_BG);
+      break;
+  }
 
   // Render the face
   renderBotFace(botMode.face);
@@ -416,6 +485,8 @@ void renderBotMode() {
 // ============================================================================
 
 void enterBotMode() {
+  botFirstFrame = true;  // Force full clear on entry
+
   if (!botMode.initialized) {
     botMode.init();
 
@@ -477,6 +548,17 @@ void setBotFaceColor(uint16_t color) {
   botFaceColor = color;
 }
 
+// Background style
+uint8_t botBackgroundStyle = 0;  // 0=solid black, 1=subtle gradient, 2=breathing, 3=starfield
+
+void setBotBackgroundStyle(uint8_t style) {
+  botBackgroundStyle = style;
+}
+
+uint8_t getBotBackgroundStyle() {
+  return botBackgroundStyle;
+}
+
 void showBotSaying(const char* text, uint16_t durationMs) {
   botMode.showSaying(text, durationMs);
 }
@@ -528,6 +610,8 @@ inline void setBotPersonality(uint8_t index) {}
 inline uint8_t getBotPersonality() { return 0; }
 inline void setBotWeatherEnabled(bool enabled) {}
 inline void setBotWeatherLocation(float lat, float lon) {}
+inline void setBotBackgroundStyle(uint8_t style) {}
+inline uint8_t getBotBackgroundStyle() { return 0; }
 
 #endif // DISPLAY_LCD_ONLY || DISPLAY_DUAL
 
