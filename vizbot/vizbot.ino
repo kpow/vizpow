@@ -22,7 +22,7 @@
 #include <FastLED.h>
 #include <Wire.h>
 #include <WiFi.h>
-#include <ESPAsyncWebServer.h>
+#include <WebServer.h>
 #include "SensorQMI8658.hpp"
 
 #include "config.h"
@@ -40,7 +40,7 @@
 // Global objects
 CRGB leds[NUM_LEDS];
 SensorQMI8658 imu;
-AsyncWebServer server(80);
+WebServer server(80);
 bool wifiEnabled = false;
 
 // State variables
@@ -213,10 +213,15 @@ void setup() {
 
   // Enter bot mode
   enterBotMode();
+
+  // Start WiFi server task on Core 0 (render stays on Core 1)
+  if (wifiEnabled) {
+    startWifiTask();
+  }
 }
 
 void loop() {
-  // AsyncWebServer handles requests on Core 0 — no handleClient() needed
+  // Web server runs in its own FreeRTOS task on Core 0 — no handleClient() here
 
   // Only read IMU if it initialized successfully
   if (sysStatus.imuReady) {

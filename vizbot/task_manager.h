@@ -5,14 +5,14 @@
 #include "config.h"
 
 // ============================================================================
-// Task Manager — I2C Mutex & Command Queue
+// Task Manager — I2C Mutex, Command Queue & WiFi Task
 // ============================================================================
 // Prevents race conditions between WiFi handlers, IMU, and touch on
 // shared I2C bus. Commands from WiFi/touch go through a queue so the
 // render loop can apply them atomically between frames.
 //
-// Sprint 2: Runs in the existing single-threaded loop().
-// Sprint 3: Will be consumed by FreeRTOS tasks on separate cores.
+// Sprint 3: WiFi server.handleClient() runs in its own FreeRTOS task
+// pinned to Core 0, keeping the render loop on Core 1 unblocked.
 // ============================================================================
 
 // ============================================================================
@@ -199,6 +199,41 @@ void drainCommandQueue() {
         break;
     }
   }
+}
+
+// ============================================================================
+// WiFi Server Task — runs handleClient() on Core 0
+// ============================================================================
+// The built-in WebServer is synchronous, but by running it in its own
+// FreeRTOS task pinned to Core 0 (where WiFi stack lives), we keep
+// HTTP handling completely off the render core (Core 1).
+
+extern WebServer server;
+extern bool wifiEnabled;
+
+static TaskHandle_t wifiTaskHandle = nullptr;
+
+void wifiServerTask(void* param) {
+  for (;;) {
+    if (wifiEnabled) {
+      server.handleClient();
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));  // ~500 req/s max, yields to WiFi stack
+  }
+}
+
+// Call after WiFi AP + web server are up (end of boot sequence)
+void startWifiTask() {
+  xTaskCreatePinnedToCore(
+    wifiServerTask,   // Task function
+    "wifi_srv",        // Name
+    4096,              // Stack size (bytes)
+    nullptr,           // Parameter
+    1,                 // Priority (low — WiFi stack is higher)
+    &wifiTaskHandle,   // Handle
+    0                  // Core 0 (protocol CPU)
+  );
+  DBGLN("WiFi server task started on Core 0");
 }
 
 // ============================================================================
