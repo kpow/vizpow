@@ -83,7 +83,7 @@
 #define MATRIX_HEIGHT 8
 
 // WiFi AP configuration
-#define WIFI_SSID "VizPow"
+#define WIFI_SSID "vizBot"
 #define WIFI_PASSWORD "12345678"
 
 // WiFi STA (home network) for NTP time sync
