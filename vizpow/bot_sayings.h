@@ -61,14 +61,35 @@ const char say_idle_9[] PROGMEM = "Thinking...";
 const char say_idle_10[] PROGMEM = "*taps foot*";
 const char say_idle_11[] PROGMEM = "So quiet...";
 const char say_idle_12[] PROGMEM = "Beep boop";
+const char say_idle_13[] PROGMEM = "I like this!";
+const char say_idle_14[] PROGMEM = "Boop beep";
+const char say_idle_15[] PROGMEM = "What if...";
+const char say_idle_16[] PROGMEM = "*hums*";
+const char say_idle_17[] PROGMEM = "I wonder...";
+const char say_idle_18[] PROGMEM = "Hey hey!";
+const char say_idle_19[] PROGMEM = "Look at me!";
+const char say_idle_20[] PROGMEM = "*dances*";
+const char say_idle_21[] PROGMEM = "So shiny~";
+const char say_idle_22[] PROGMEM = "Ooh!";
+const char say_idle_23[] PROGMEM = "Heh heh";
+const char say_idle_24[] PROGMEM = "Fun times!";
+const char say_idle_25[] PROGMEM = "*bounces*";
+const char say_idle_26[] PROGMEM = "Nice day!";
+const char say_idle_27[] PROGMEM = ":D";
+const char say_idle_28[] PROGMEM = "Vibin~";
+const char say_idle_29[] PROGMEM = "*spins*";
 
 const char* const sayIdle[] PROGMEM = {
   say_idle_0, say_idle_1, say_idle_2, say_idle_3,
   say_idle_4, say_idle_5, say_idle_6, say_idle_7,
   say_idle_8, say_idle_9, say_idle_10, say_idle_11,
-  say_idle_12
+  say_idle_12, say_idle_13, say_idle_14, say_idle_15,
+  say_idle_16, say_idle_17, say_idle_18, say_idle_19,
+  say_idle_20, say_idle_21, say_idle_22, say_idle_23,
+  say_idle_24, say_idle_25, say_idle_26, say_idle_27,
+  say_idle_28, say_idle_29
 };
-#define NUM_SAY_IDLE 13
+#define NUM_SAY_IDLE 30
 
 // Shake reactions
 const char say_shake_0[] PROGMEM = "Whoa!";

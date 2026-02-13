@@ -125,11 +125,11 @@ struct BotLookAround {
   unsigned long nextMoveTime;
   uint16_t moveDuration;
 
-  static const uint16_t LOOK_MIN_INTERVAL = 2000;
-  static const uint16_t LOOK_MAX_INTERVAL = 6000;
-  static const int16_t LOOK_MAX_OFFSET = 16;       // Max pixel offset
-  static const uint16_t MOVE_DURATION_MIN = 300;
-  static const uint16_t MOVE_DURATION_MAX = 700;
+  static const uint16_t LOOK_MIN_INTERVAL = 800;
+  static const uint16_t LOOK_MAX_INTERVAL = 2500;
+  static const int16_t LOOK_MAX_OFFSET = 20;       // Max pixel offset
+  static const uint16_t MOVE_DURATION_MIN = 200;
+  static const uint16_t MOVE_DURATION_MAX = 500;
 
   void init() {
     currentX = currentY = 0;
@@ -147,8 +147,8 @@ struct BotLookAround {
       targetX = random(-LOOK_MAX_OFFSET, LOOK_MAX_OFFSET + 1);
       targetY = random(-LOOK_MAX_OFFSET / 2, LOOK_MAX_OFFSET / 2 + 1);
 
-      // 30% chance to return to center
-      if (random(100) < 30) {
+      // 15% chance to return to center
+      if (random(100) < 15) {
         targetX = 0;
         targetY = 0;
       }

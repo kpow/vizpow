@@ -66,21 +66,21 @@ struct BotPersonality {
 };
 
 const BotPersonality botPersonalities[BOT_NUM_PERSONALITIES] = {
-  // CHILL: relaxed, balanced, default behavior
-  { "Chill", 60000, 180000, 300000, 15000, 45000, 25000, 70000, 35,
-    { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_NEUTRAL, EXPR_NEUTRAL } },
+  // CHILL: lively and expressive, default behavior
+  { "Chill", 90000, 240000, 360000, 4000, 10000, 8000, 20000, 55,
+    { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_MISCHIEF, EXPR_BLISS } },
 
-  // HYPER: energetic, frequent expressions and sayings
-  { "Hyper", 120000, 300000, 600000, 5000, 15000, 8000, 25000, 70,
-    { EXPR_HAPPY, EXPR_EXCITED, EXPR_HAPPY, EXPR_SURPRISED, EXPR_EXCITED } },
+  // HYPER: energetic, constant expressions and sayings
+  { "Hyper", 180000, 360000, 600000, 2000, 6000, 4000, 12000, 80,
+    { EXPR_HAPPY, EXPR_EXCITED, EXPR_SURPRISED, EXPR_LOVE, EXPR_PROUD } },
 
-  // GRUMPY: annoyed, slow to engage, sarcastic
-  { "Grumpy", 30000, 90000, 180000, 20000, 60000, 30000, 90000, 50,
-    { EXPR_ANGRY, EXPR_NEUTRAL, EXPR_MISCHIEF, EXPR_NEUTRAL, EXPR_ANGRY } },
+  // GRUMPY: annoyed but still chatty and expressive
+  { "Grumpy", 45000, 120000, 240000, 6000, 18000, 10000, 30000, 60,
+    { EXPR_ANGRY, EXPR_ANNOYED, EXPR_MISCHIEF, EXPR_SKEPTICAL, EXPR_ANGRY } },
 
-  // SLEEPY: drowsy, falls asleep quickly, minimal energy
-  { "Sleepy", 20000, 45000, 90000, 30000, 60000, 40000, 90000, 20,
-    { EXPR_SLEEPY, EXPR_NEUTRAL, EXPR_SLEEPY, EXPR_NEUTRAL, EXPR_THINKING } },
+  // SLEEPY: drowsy but still talks a bit
+  { "Sleepy", 30000, 60000, 120000, 10000, 25000, 15000, 40000, 30,
+    { EXPR_SLEEPY, EXPR_BLISS, EXPR_NEUTRAL, EXPR_THINKING, EXPR_SHY } },
 };
 
 // ============================================================================
@@ -184,8 +184,8 @@ struct BotModeState {
     registerInteraction();
 
     // Pick a random reaction expression
-    uint8_t reactions[] = { EXPR_SURPRISED, EXPR_HAPPY, EXPR_EXCITED, EXPR_MISCHIEF };
-    uint8_t pick = reactions[random(0, 4)];
+    uint8_t reactions[] = { EXPR_SURPRISED, EXPR_HAPPY, EXPR_EXCITED, EXPR_MISCHIEF, EXPR_LOVE, EXPR_SHY, EXPR_CONFUSED, EXPR_PROUD };
+    uint8_t pick = reactions[random(0, 8)];
     face.transitionTo(pick, 150);
 
     // Maybe show a tap saying
@@ -311,7 +311,14 @@ void updateBotMode() {
 
   // ---- Random idle expression changes (personality-driven) ----
   if (botMode.state == BOT_ACTIVE && !botMode.shakeReacting && now >= botMode.nextRandomExpr) {
-    uint8_t pick = p->favoriteExprs[random(0, 5)];
+    uint8_t pick;
+    if (random(100) < 35) {
+      // 35% chance: pick from full expression range for variety
+      pick = random(0, BOT_NUM_EXPRESSIONS);
+    } else {
+      // 65% chance: pick from personality favorites
+      pick = p->favoriteExprs[random(0, 5)];
+    }
     botMode.face.transitionTo(pick, 500);
     botMode.nextRandomExpr = now + random(p->exprMinMs, p->exprMaxMs);
   }
