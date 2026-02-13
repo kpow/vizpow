@@ -373,7 +373,49 @@ void updateBotMode() {
 // ============================================================================
 
 // Background style (declared before renderBotMode which uses it)
-uint8_t botBackgroundStyle = 0;  // 0=solid black, 1=subtle gradient, 2=breathing, 3=starfield
+uint8_t botBackgroundStyle = 0;  // 0=solid black, 1=subtle gradient, 2=breathing, 3=starfield, 4=ambient
+
+// Ambient background sub-mode state
+uint8_t botAmbientEffectIndex = 0;       // Current ambient effect in bot bg mode
+unsigned long botAmbientLastChange = 0;  // Last ambient effect change time
+unsigned long botAmbientCycleMs = 15000; // Cycle ambient effects every 15s
+unsigned long botPaletteLastChange = 0;  // Palette auto-cycle for ambient bg
+
+// External palette references (for ambient bg cycling)
+extern CRGBPalette16 currentPalette;
+extern CRGBPalette16 palettes[];
+extern uint8_t paletteIndex;
+
+// Render ambient hi-res effect as bot background (functions from effects_ambient.h)
+void renderBotAmbientBackground() {
+  switch (botAmbientEffectIndex) {
+    case 0:  ambientPlasmaHiRes(); break;
+    case 1:  ambientRainbowHiRes(); break;
+    case 2:  ambientFireHiRes(); break;
+    case 3:  ambientOceanHiRes(); break;
+    case 4:  ambientSparkleHiRes(); break;
+    case 5:  ambientMatrixHiRes(); break;
+    case 6:  ambientLavaHiRes(); break;
+    case 7:  ambientAuroraHiRes(); break;
+    case 8:  ambientConfettiHiRes(); break;
+    case 9:  ambientCometHiRes(); break;
+    case 10: ambientGalaxyHiRes(); break;
+    case 11: ambientHeartHiRes(); break;
+    case 12: ambientDonutHiRes(); break;
+  }
+
+  // Auto-cycle ambient effect and palette
+  unsigned long now = millis();
+  if (now - botAmbientLastChange > botAmbientCycleMs) {
+    botAmbientLastChange = now;
+    botAmbientEffectIndex = (botAmbientEffectIndex + 1) % NUM_AMBIENT_EFFECTS;
+  }
+  if (now - botPaletteLastChange > 5000) {
+    botPaletteLastChange = now;
+    paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
+    currentPalette = palettes[paletteIndex];
+  }
+}
 
 // ============================================================================
 // Offscreen Canvas — eliminates ALL flicker
@@ -433,6 +475,10 @@ void renderBotMode() {
         gfx->fillRect(sx, sy, 2, 2, starColor);
       }
     }
+  } else if (botBackgroundStyle == 4) {
+    // Ambient effect as background — face renders on top
+    renderBotAmbientBackground();
+    bgColor = 0x0000;  // Face erase uses black (though prevFrame is invalidated)
   }
 
   // Since we redraw everything fresh each frame, skip the old targeted-erase logic

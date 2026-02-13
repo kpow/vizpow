@@ -23,6 +23,7 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Preferences.h>
 #include "SensorQMI8658.hpp"
 
 #include "config.h"
@@ -46,7 +47,15 @@
 CRGB leds[NUM_LEDS];
 SensorQMI8658 imu;
 WebServer server(80);
+Preferences preferences;
 bool wifiEnabled = false;
+
+// WiFi STA credentials (loaded from NVS, fallback to config.h defaults)
+char wifiStaSSID[33] = "";
+char wifiStaPassword[65] = "";
+bool staConnected = false;
+unsigned long lastNTPRetry = 0;
+bool ntpSynced = false;
 
 // State variables
 uint8_t effectIndex = 0;
@@ -168,6 +177,14 @@ void setup() {
   #endif
 
   if (wifiEnabled) {
+    // Load saved WiFi STA credentials from NVS (fallback to config.h defaults)
+    preferences.begin("vizpow", true);  // read-only
+    String savedSSID = preferences.getString("sta_ssid", WIFI_STA_SSID);
+    String savedPass = preferences.getString("sta_pass", WIFI_STA_PASSWORD);
+    preferences.end();
+    savedSSID.toCharArray(wifiStaSSID, sizeof(wifiStaSSID));
+    savedPass.toCharArray(wifiStaPassword, sizeof(wifiStaPassword));
+
     // AP+STA: keep web server AP and connect to home network for NTP
     WiFi.mode(WIFI_AP_STA);
     delay(100);
@@ -183,22 +200,36 @@ void setup() {
     Serial.println(WiFi.softAPIP());
 
     // Connect to home network for NTP
-    WiFi.begin(WIFI_STA_SSID, WIFI_STA_PASSWORD);
-    Serial.print("Connecting to ");
-    Serial.print(WIFI_STA_SSID);
-    int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 20) {
-      delay(250);
-      Serial.print(".");
-      tries++;
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.print("\nConnected! IP: ");
-      Serial.println(WiFi.localIP());
-      configTime(NTP_GMT_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER);
-      Serial.println("NTP time sync started");
+    if (strlen(wifiStaSSID) > 0) {
+      WiFi.begin(wifiStaSSID, wifiStaPassword);
+      Serial.print("Connecting to ");
+      Serial.print(wifiStaSSID);
+      int tries = 0;
+      while (WiFi.status() != WL_CONNECTED && tries < 30) {
+        delay(300);
+        Serial.print(".");
+        tries++;
+      }
+      if (WiFi.status() == WL_CONNECTED) {
+        staConnected = true;
+        Serial.print("\nConnected! IP: ");
+        Serial.println(WiFi.localIP());
+        configTime(NTP_GMT_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER);
+        Serial.println("NTP time sync started");
+
+        // Wait briefly for NTP to actually sync
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo, 3000)) {
+          ntpSynced = true;
+          Serial.println("NTP synced!");
+        } else {
+          Serial.println("NTP pending (will retry in loop)");
+        }
+      } else {
+        Serial.println("\nHome network connection failed - will retry in background");
+      }
     } else {
-      Serial.println("\nHome network connection failed - time will use uptime");
+      Serial.println("No WiFi STA SSID configured");
     }
 
     setupWebServer();
@@ -370,7 +401,30 @@ void checkModeShake() {
 }
 
 void loop() {
-  if (wifiEnabled) server.handleClient();
+  if (wifiEnabled) {
+    server.handleClient();
+
+    // Background WiFi STA reconnect + NTP retry
+    if (!staConnected && strlen(wifiStaSSID) > 0 && WiFi.status() != WL_CONNECTED) {
+      unsigned long now = millis();
+      if (now - lastNTPRetry > 30000) {  // Retry every 30s
+        lastNTPRetry = now;
+        WiFi.begin(wifiStaSSID, wifiStaPassword);
+      }
+    }
+    if (!staConnected && WiFi.status() == WL_CONNECTED) {
+      staConnected = true;
+      configTime(NTP_GMT_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER);
+      Serial.println("WiFi STA reconnected + NTP started");
+    }
+    if (staConnected && !ntpSynced) {
+      struct tm timeinfo;
+      if (getLocalTime(&timeinfo, 0)) {
+        ntpSynced = true;
+        Serial.println("NTP synced!");
+      }
+    }
+  }
   readIMU();
   #if defined(POWER_SAVE_ENABLED)
     updateIMUForMode();
