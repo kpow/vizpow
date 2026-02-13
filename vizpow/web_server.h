@@ -195,6 +195,10 @@ const char webpage[] PROGMEM = R"rawliteral(
           style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
         <button onclick="sendBotSay()" style="padding:10px 16px">Say</button>
       </div>
+      <h2 style="margin-top:15px">Personality</h2>
+      <div class="grid4" id="botPersonalities"></div>
+      <h2 style="margin-top:15px">Face Color</h2>
+      <div class="grid4" id="botColors"></div>
       <div class="toggle-row" style="margin-top:12px">
         <span>Time Overlay</span>
         <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
@@ -230,6 +234,9 @@ const char webpage[] PROGMEM = R"rawliteral(
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
     const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead"];
+    const botPersonalityNames = ["Chill", "Hyper", "Grumpy", "Sleepy"];
+    const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
+    let curPersonality = 0;
 
     let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };
     let emojiQueue = [];
@@ -263,6 +270,12 @@ const char webpage[] PROGMEM = R"rawliteral(
       if (isBot) {
         document.getElementById('botExpressions').innerHTML = botExprNames.map((name, i) =>
           `<button onclick="setBotExpr(${i})">${name}</button>`
+        ).join('');
+        document.getElementById('botPersonalities').innerHTML = botPersonalityNames.map((name, i) =>
+          `<button class="${curPersonality === i ? 'active' : ''}" onclick="setBotPers(${i})">${name}</button>`
+        ).join('');
+        document.getElementById('botColors').innerHTML = botColorNames.map((name, i) =>
+          `<button onclick="setBotColor(${i})">${name}</button>`
         ).join('');
       } else if (!isEmoji) {
         document.getElementById('effects').innerHTML = effects.map((e, i) =>
@@ -341,6 +354,8 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('botTimeToggle').className = 'toggle ' + (botTimeOn ? 'on' : '');
       api('/bot/time?v=' + (botTimeOn ? 1 : 0));
     }
+    function setBotPers(i) { curPersonality = i; render(); api('/bot/personality?v=' + i); }
+    function setBotColor(i) { api('/bot/background?v=' + i); }
 
     document.getElementById('brightness').oninput = function() {
       state.brightness = this.value;
@@ -551,9 +566,44 @@ void handleBotTime() {
   server.send(200, "text/plain", "OK");
 }
 
+void handleBotPersonality() {
+  if (server.hasArg("v")) {
+    uint8_t p = constrain(server.arg("v").toInt(), 0, BOT_NUM_PERSONALITIES - 1);
+    setBotPersonality(p);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotBackground() {
+  if (server.hasArg("v")) {
+    // Map index to color: 0=white, 1=cyan, 2=green, 3=magenta, 4=yellow
+    uint16_t colors[] = { 0xFFFF, 0x07FF, 0x07E0, 0xF81F, 0xFFE0 };
+    uint8_t idx = constrain(server.arg("v").toInt(), 0, 4);
+    setBotFaceColor(colors[idx]);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotWeather() {
+  if (server.hasArg("v")) {
+    setBotWeatherEnabled(server.arg("v").toInt() == 1);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotWeatherConfig() {
+  if (server.hasArg("lat") && server.hasArg("lon")) {
+    float lat = server.arg("lat").toFloat();
+    float lon = server.arg("lon").toFloat();
+    setBotWeatherLocation(lat, lon);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
 void handleBotState() {
   String json = "{\"expression\":" + String(getBotExpression()) +
                 ",\"state\":" + String(getBotState()) +
+                ",\"personality\":" + String(getBotPersonality()) +
                 ",\"timeOverlay\":" + (isBotTimeOverlayEnabled() ? "true" : "false") +
                 ",\"faceColor\":" + String(botFaceColor) + "}";
   server.send(200, "application/json", json);
@@ -581,6 +631,10 @@ void setupWebServer() {
   server.on("/bot/expression", handleBotExpression);
   server.on("/bot/say", handleBotSay);
   server.on("/bot/time", handleBotTime);
+  server.on("/bot/personality", handleBotPersonality);
+  server.on("/bot/background", handleBotBackground);
+  server.on("/bot/weather", handleBotWeather);
+  server.on("/bot/weather/config", handleBotWeatherConfig);
   server.on("/bot/state", handleBotState);
   #endif
 

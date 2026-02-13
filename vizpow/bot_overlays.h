@@ -262,6 +262,202 @@ struct BotTimeOverlay {
   }
 };
 
+// ============================================================================
+// Weather Overlay
+// ============================================================================
+// Fetches weather from Open-Meteo API (free, no key needed).
+// Displays temperature and procedural weather icon in top-left corner.
+// Only works in STA (station) mode with internet access.
+// ============================================================================
+
+#include <HTTPClient.h>
+
+// Weather condition codes (WMO)
+enum WeatherIcon : uint8_t {
+  WEATHER_CLEAR = 0,
+  WEATHER_CLOUDY,
+  WEATHER_RAIN,
+  WEATHER_SNOW,
+  WEATHER_STORM,
+  WEATHER_UNKNOWN
+};
+
+struct BotWeatherOverlay {
+  bool enabled;
+  float temperature;              // Current temp in Celsius
+  WeatherIcon icon;
+  unsigned long lastFetchTime;
+  unsigned long fetchIntervalMs;  // Default 30 minutes
+  float latitude;
+  float longitude;
+  bool hasLocation;
+  bool fetching;
+
+  void init() {
+    enabled = false;
+    temperature = 0;
+    icon = WEATHER_UNKNOWN;
+    lastFetchTime = 0;
+    fetchIntervalMs = 1800000;  // 30 minutes
+    latitude = 0;
+    longitude = 0;
+    hasLocation = false;
+    fetching = false;
+  }
+
+  void setLocation(float lat, float lon) {
+    latitude = lat;
+    longitude = lon;
+    hasLocation = true;
+    lastFetchTime = 0;  // Force immediate fetch
+  }
+
+  // Map WMO weather code to icon
+  WeatherIcon wmoToIcon(int code) {
+    if (code <= 1) return WEATHER_CLEAR;
+    if (code <= 3) return WEATHER_CLOUDY;
+    if (code <= 67 || (code >= 80 && code <= 82)) return WEATHER_RAIN;
+    if (code <= 77 || (code >= 85 && code <= 86)) return WEATHER_SNOW;
+    if (code >= 95) return WEATHER_STORM;
+    return WEATHER_CLOUDY;
+  }
+
+  // Non-blocking fetch (called from update)
+  void fetchWeather() {
+    if (!hasLocation || fetching) return;
+
+    // Check if WiFi is in STA mode with internet
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    fetching = true;
+    HTTPClient http;
+
+    char url[128];
+    snprintf(url, sizeof(url),
+      "http://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code",
+      latitude, longitude);
+
+    http.begin(url);
+    http.setTimeout(5000);
+    int httpCode = http.GET();
+
+    if (httpCode == 200) {
+      String payload = http.getString();
+
+      // Simple JSON parsing (avoid full JSON library for memory)
+      int tempIdx = payload.indexOf("\"temperature_2m\":");
+      if (tempIdx > 0) {
+        int start = tempIdx + 17;
+        temperature = payload.substring(start).toFloat();
+      }
+
+      int codeIdx = payload.indexOf("\"weather_code\":");
+      if (codeIdx > 0) {
+        int start = codeIdx + 15;
+        int wmoCode = payload.substring(start).toInt();
+        icon = wmoToIcon(wmoCode);
+      }
+    }
+
+    http.end();
+    fetching = false;
+    lastFetchTime = millis();
+  }
+
+  void update() {
+    if (!enabled || !hasLocation) return;
+
+    // Periodic fetch
+    if (lastFetchTime == 0 || (millis() - lastFetchTime > fetchIntervalMs)) {
+      fetchWeather();
+    }
+  }
+
+  // Draw procedural weather icon
+  void drawWeatherIcon(int16_t cx, int16_t cy, int16_t size) {
+    switch (icon) {
+      case WEATHER_CLEAR:
+        // Sun: filled circle with rays
+        gfx->fillCircle(cx, cy, size / 3, 0xFFE0);  // Yellow
+        for (int i = 0; i < 8; i++) {
+          float angle = i * PI / 4;
+          int16_t x1 = cx + (int16_t)(cosf(angle) * size * 0.45f);
+          int16_t y1 = cy + (int16_t)(sinf(angle) * size * 0.45f);
+          int16_t x2 = cx + (int16_t)(cosf(angle) * size * 0.7f);
+          int16_t y2 = cy + (int16_t)(sinf(angle) * size * 0.7f);
+          gfx->drawLine(x1, y1, x2, y2, 0xFFE0);
+        }
+        break;
+
+      case WEATHER_CLOUDY:
+        // Cloud: overlapping circles
+        gfx->fillCircle(cx - 4, cy, size / 3, 0xC618);
+        gfx->fillCircle(cx + 4, cy - 2, size / 4, 0xC618);
+        gfx->fillCircle(cx + 2, cy + 2, size / 4, 0xC618);
+        break;
+
+      case WEATHER_RAIN:
+        // Cloud + rain drops
+        gfx->fillCircle(cx - 3, cy - 3, size / 4, 0xC618);
+        gfx->fillCircle(cx + 3, cy - 3, size / 5, 0xC618);
+        // Rain drops
+        for (int i = 0; i < 3; i++) {
+          int16_t dx = cx - 4 + i * 4;
+          gfx->drawLine(dx, cy + 2, dx - 1, cy + size / 2, 0x001F);
+        }
+        break;
+
+      case WEATHER_SNOW:
+        // Snowflake: asterisk pattern
+        for (int i = 0; i < 3; i++) {
+          float angle = i * PI / 3;
+          int16_t x1 = cx + (int16_t)(cosf(angle) * size / 3);
+          int16_t y1 = cy + (int16_t)(sinf(angle) * size / 3);
+          int16_t x2 = cx - (int16_t)(cosf(angle) * size / 3);
+          int16_t y2 = cy - (int16_t)(sinf(angle) * size / 3);
+          gfx->drawLine(x1, y1, x2, y2, 0xFFFF);
+        }
+        break;
+
+      case WEATHER_STORM:
+        // Cloud + lightning bolt
+        gfx->fillCircle(cx - 3, cy - 4, size / 4, 0x7BEF);
+        gfx->fillCircle(cx + 3, cy - 4, size / 5, 0x7BEF);
+        // Lightning bolt
+        gfx->fillTriangle(cx, cy - 1, cx - 3, cy + 3, cx + 1, cy + 2, 0xFFE0);
+        gfx->fillTriangle(cx - 1, cy + 2, cx + 3, cy - 1, cx, cy + size / 2, 0xFFE0);
+        break;
+
+      default:
+        // Question mark
+        gfx->setTextSize(1);
+        gfx->setTextColor(0x7BEF);
+        gfx->setCursor(cx - 3, cy - 4);
+        gfx->print("?");
+        break;
+    }
+  }
+
+  void render() {
+    if (!enabled || !hasLocation || gfx == nullptr) return;
+    if (icon == WEATHER_UNKNOWN && lastFetchTime == 0) return;
+
+    // Weather display in top-left corner
+    gfx->fillRoundRect(2, 2, 56, 20, 4, 0x2104);  // Dark gray bg
+
+    // Temperature
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d°", (int)temperature);
+    gfx->setTextSize(1);
+    gfx->setTextColor(0xFFFF);
+    gfx->setCursor(6, 8);
+    gfx->print(buf);
+
+    // Weather icon
+    drawWeatherIcon(46, 12, 14);
+  }
+};
+
 #else
 
 // Stubs when LCD not available
@@ -285,6 +481,15 @@ struct BotNotification {
 struct BotTimeOverlay {
   bool enabled;
   void init() { enabled = false; }
+  void render() {}
+};
+
+struct BotWeatherOverlay {
+  bool enabled;
+  bool hasLocation;
+  void init() { enabled = false; hasLocation = false; }
+  void setLocation(float lat, float lon) {}
+  void update() {}
   void render() {}
 };
 

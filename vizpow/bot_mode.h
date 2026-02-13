@@ -37,16 +37,51 @@ enum BotState : uint8_t {
 // Bot Mode Configuration
 // ============================================================================
 
-#define BOT_IDLE_TIMEOUT_MS     60000    // 1 min of no interaction -> idle
-#define BOT_SLEEPY_TIMEOUT_MS  180000    // 3 min of no interaction -> sleepy
-#define BOT_SLEEP_TIMEOUT_MS   300000    // 5 min of no interaction -> sleeping
 #define BOT_WAKE_THRESHOLD     1.8f      // Acceleration magnitude to wake from sleep
 #define BOT_FRAME_DELAY_MS     33        // ~30 FPS target
-#define BOT_RANDOM_EXPR_MIN_MS 15000     // Min time between random idle expressions
-#define BOT_RANDOM_EXPR_MAX_MS 45000     // Max time between random idle expressions
-#define BOT_IDLE_SAY_MIN_MS    20000     // Min time between idle sayings
-#define BOT_IDLE_SAY_MAX_MS    60000     // Max time between idle sayings
-#define BOT_SAY_CHANCE_PERCENT 40        // % chance of saying something on reaction
+
+// ============================================================================
+// Personality Presets
+// ============================================================================
+// Each personality adjusts idle behavior, saying frequency, and expression
+// distribution. Configurable via web UI.
+
+#define BOT_NUM_PERSONALITIES 4
+#define PERSONALITY_CHILL   0
+#define PERSONALITY_HYPER   1
+#define PERSONALITY_GRUMPY  2
+#define PERSONALITY_SLEEPY  3
+
+struct BotPersonality {
+  const char* name;
+  uint16_t idleTimeoutMs;       // Time before idle state
+  uint16_t sleepyTimeoutMs;     // Time before sleepy state
+  uint16_t sleepTimeoutMs;      // Time before sleeping state
+  uint16_t exprMinMs;           // Min time between random expressions
+  uint16_t exprMaxMs;           // Max time between random expressions
+  uint16_t sayMinMs;            // Min time between idle sayings
+  uint16_t sayMaxMs;            // Max time between idle sayings
+  uint8_t  sayChancePercent;    // % chance of saying on reaction
+  uint8_t  favoriteExprs[5];    // Weighted idle expression pool
+};
+
+const BotPersonality botPersonalities[BOT_NUM_PERSONALITIES] = {
+  // CHILL: relaxed, balanced, default behavior
+  { "Chill", 60000, 180000, 300000, 15000, 45000, 25000, 70000, 35,
+    { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_NEUTRAL, EXPR_NEUTRAL } },
+
+  // HYPER: energetic, frequent expressions and sayings
+  { "Hyper", 120000, 300000, 600000, 5000, 15000, 8000, 25000, 70,
+    { EXPR_HAPPY, EXPR_EXCITED, EXPR_HAPPY, EXPR_SURPRISED, EXPR_EXCITED } },
+
+  // GRUMPY: annoyed, slow to engage, sarcastic
+  { "Grumpy", 30000, 90000, 180000, 20000, 60000, 30000, 90000, 50,
+    { EXPR_ANGRY, EXPR_NEUTRAL, EXPR_MISCHIEF, EXPR_NEUTRAL, EXPR_ANGRY } },
+
+  // SLEEPY: drowsy, falls asleep quickly, minimal energy
+  { "Sleepy", 20000, 45000, 90000, 30000, 60000, 40000, 90000, 20,
+    { EXPR_SLEEPY, EXPR_NEUTRAL, EXPR_SLEEPY, EXPR_NEUTRAL, EXPR_THINKING } },
+};
 
 // ============================================================================
 // Bot Mode State
@@ -63,6 +98,7 @@ struct BotModeState {
   BotSpeechBubble speechBubble;
   BotNotification notification;
   BotTimeOverlay timeOverlay;
+  BotWeatherOverlay weatherOverlay;
 
   // Timing
   unsigned long lastInteraction;     // Last touch/shake event
@@ -80,6 +116,10 @@ struct BotModeState {
   bool shakeReacting;
   unsigned long shakeReactEnd;
 
+  // Personality
+  uint8_t personalityIndex;
+  const BotPersonality* personality;
+
   // Custom saying from web
   char customSaying[32];
   bool hasCustomSaying;
@@ -95,10 +135,13 @@ struct BotModeState {
     speechBubble.init();
     notification.init();
     timeOverlay.init();
+    weatherOverlay.init();
+    personalityIndex = PERSONALITY_CHILL;
+    personality = &botPersonalities[PERSONALITY_CHILL];
     lastInteraction = millis();
     lastFrameTime = millis();
-    nextRandomExpr = millis() + random(BOT_RANDOM_EXPR_MIN_MS, BOT_RANDOM_EXPR_MAX_MS);
-    nextIdleSaying = millis() + random(BOT_IDLE_SAY_MIN_MS, BOT_IDLE_SAY_MAX_MS);
+    nextRandomExpr = millis() + random(personality->exprMinMs, personality->exprMaxMs);
+    nextIdleSaying = millis() + random(personality->sayMinMs, personality->sayMaxMs);
     stateEnteredTime = millis();
     sleepBreathPhase = 0;
     lastZzzTime = 0;
@@ -132,8 +175,8 @@ struct BotModeState {
     state = BOT_ACTIVE;
     stateEnteredTime = millis();
     lastInteraction = millis();
-    nextRandomExpr = millis() + random(BOT_RANDOM_EXPR_MIN_MS, BOT_RANDOM_EXPR_MAX_MS);
-    nextIdleSaying = millis() + random(BOT_IDLE_SAY_MIN_MS, BOT_IDLE_SAY_MAX_MS);
+    nextRandomExpr = millis() + random(personality->exprMinMs, personality->exprMaxMs);
+    nextIdleSaying = millis() + random(personality->sayMinMs, personality->sayMaxMs);
   }
 
   // Called when bot receives a tap
@@ -146,7 +189,7 @@ struct BotModeState {
     face.transitionTo(pick, 150);
 
     // Maybe show a tap saying
-    if (random(100) < BOT_SAY_CHANCE_PERCENT) {
+    if (random(100) < personality->sayChancePercent) {
       char buf[32];
       getRandomSayingText(SAY_REACT_TAP, buf, sizeof(buf));
       speechBubble.show(buf, 2500);
@@ -208,19 +251,19 @@ void updateBotMode() {
   // Skip if menu is visible
   if (menuVisible) return;
 
-  // ---- State machine: activity level transitions ----
+  // ---- State machine: activity level transitions (personality-driven) ----
+  const BotPersonality* p = botMode.personality;
   switch (botMode.state) {
     case BOT_ACTIVE:
-      if (timeSinceInteraction > BOT_SLEEPY_TIMEOUT_MS) {
+      if (timeSinceInteraction > p->sleepyTimeoutMs) {
         botMode.state = BOT_SLEEPY;
         botMode.stateEnteredTime = now;
         botMode.face.transitionTo(EXPR_SLEEPY, 1000);
 
-        // Show sleepy saying
         char buf[32];
         getRandomSayingText(SAY_SLEEP, buf, sizeof(buf));
         botMode.speechBubble.show(buf, 3000);
-      } else if (timeSinceInteraction > BOT_IDLE_TIMEOUT_MS) {
+      } else if (timeSinceInteraction > p->idleTimeoutMs) {
         if (botMode.state != BOT_IDLE) {
           botMode.state = BOT_IDLE;
           botMode.stateEnteredTime = now;
@@ -229,7 +272,7 @@ void updateBotMode() {
       break;
 
     case BOT_IDLE:
-      if (timeSinceInteraction > BOT_SLEEPY_TIMEOUT_MS) {
+      if (timeSinceInteraction > p->sleepyTimeoutMs) {
         botMode.state = BOT_SLEEPY;
         botMode.stateEnteredTime = now;
         botMode.face.transitionTo(EXPR_SLEEPY, 1000);
@@ -241,7 +284,7 @@ void updateBotMode() {
       break;
 
     case BOT_SLEEPY:
-      if (timeSinceInteraction > BOT_SLEEP_TIMEOUT_MS) {
+      if (timeSinceInteraction > p->sleepTimeoutMs) {
         botMode.state = BOT_SLEEPING;
         botMode.stateEnteredTime = now;
       }
@@ -266,21 +309,20 @@ void updateBotMode() {
     }
   }
 
-  // ---- Random idle expression changes (only in ACTIVE state) ----
+  // ---- Random idle expression changes (personality-driven) ----
   if (botMode.state == BOT_ACTIVE && !botMode.shakeReacting && now >= botMode.nextRandomExpr) {
-    uint8_t idleExprs[] = { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_NEUTRAL, EXPR_NEUTRAL };
-    uint8_t pick = idleExprs[random(0, 5)];
+    uint8_t pick = p->favoriteExprs[random(0, 5)];
     botMode.face.transitionTo(pick, 500);
-    botMode.nextRandomExpr = now + random(BOT_RANDOM_EXPR_MIN_MS, BOT_RANDOM_EXPR_MAX_MS);
+    botMode.nextRandomExpr = now + random(p->exprMinMs, p->exprMaxMs);
   }
 
-  // ---- Random idle sayings (ACTIVE or IDLE state) ----
+  // ---- Random idle sayings (personality-driven) ----
   if ((botMode.state == BOT_ACTIVE || botMode.state == BOT_IDLE) &&
       !botMode.speechBubble.active && now >= botMode.nextIdleSaying) {
     char buf[32];
     getRandomSayingText(SAY_IDLE, buf, sizeof(buf));
     botMode.speechBubble.show(buf, 3500);
-    botMode.nextIdleSaying = now + random(BOT_IDLE_SAY_MIN_MS, BOT_IDLE_SAY_MAX_MS);
+    botMode.nextIdleSaying = now + random(p->sayMinMs, p->sayMaxMs);
   }
 
   // ---- Update animation systems ----
@@ -316,6 +358,7 @@ void updateBotMode() {
   // Update overlays
   botMode.speechBubble.update();
   botMode.notification.update();
+  botMode.weatherOverlay.update();
 }
 
 // ============================================================================
@@ -365,6 +408,7 @@ void renderBotMode() {
   botMode.speechBubble.render();
   botMode.notification.render();
   botMode.timeOverlay.render();
+  botMode.weatherOverlay.render();
 }
 
 // ============================================================================
@@ -445,6 +489,30 @@ bool isBotTimeOverlayEnabled() {
   return botMode.timeOverlay.enabled;
 }
 
+void setBotPersonality(uint8_t index) {
+  if (index >= BOT_NUM_PERSONALITIES) index = 0;
+  botMode.personalityIndex = index;
+  botMode.personality = &botPersonalities[index];
+  botMode.registerInteraction();
+
+  // Show notification
+  char buf[32];
+  snprintf(buf, sizeof(buf), "Personality: %s", botMode.personality->name);
+  botMode.showNotification(buf, 2000);
+}
+
+uint8_t getBotPersonality() {
+  return botMode.personalityIndex;
+}
+
+void setBotWeatherEnabled(bool enabled) {
+  botMode.weatherOverlay.enabled = enabled;
+}
+
+void setBotWeatherLocation(float lat, float lon) {
+  botMode.weatherOverlay.setLocation(lat, lon);
+}
+
 #else
 
 // Stubs when LCD is not available
@@ -456,6 +524,10 @@ inline void setBotFaceColor(uint16_t color) {}
 inline void showBotSaying(const char* text, uint16_t durationMs) {}
 inline void toggleBotTimeOverlay() {}
 inline bool isBotTimeOverlayEnabled() { return false; }
+inline void setBotPersonality(uint8_t index) {}
+inline uint8_t getBotPersonality() { return 0; }
+inline void setBotWeatherEnabled(bool enabled) {}
+inline void setBotWeatherLocation(float lat, float lon) {}
 
 #endif // DISPLAY_LCD_ONLY || DISPLAY_DUAL
 
