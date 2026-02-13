@@ -120,11 +120,11 @@
 // Debug serial output (comment out to save ~700 bytes of flash)
 // #define DEBUG_SERIAL
 #ifdef DEBUG_SERIAL
-  #define DBG(x) Serial.print(x)
-  #define DBGLN(x) Serial.println(x)
+  #define DBG(...) Serial.print(__VA_ARGS__)
+  #define DBGLN(...) Serial.println(__VA_ARGS__)
 #else
-  #define DBG(x)
-  #define DBGLN(x)
+  #define DBG(...)
+  #define DBGLN(...)
 #endif
 
 // XY mapping - trying NO serpentine (straight rows)
