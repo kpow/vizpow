@@ -18,8 +18,7 @@ extern uint8_t currentMode;
 extern CRGBPalette16 currentPalette;
 
 // System status (populated by boot_sequence.h)
-struct SystemStatus;
-extern SystemStatus sysStatus;
+#include "system_status.h"
 
 // Web interface HTML
 const char webpage[] PROGMEM = R"rawliteral(
