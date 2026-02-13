@@ -140,16 +140,13 @@ void readIMU() {
 
 // Start or restart the WiFi AP hotspot
 void startWifiAP() {
-  // On restart/toggle, turn off first to reset state cleanly
-  if (wifiEnabled) {
-    WiFi.softAPdisconnect(true);
-    WiFi.mode(WIFI_OFF);
-    delay(200);
+  if (!wifiEnabled) {
+    // First-time init: set mode once, start web server
+    WiFi.mode(WIFI_AP);
+    delay(100);
+    WiFi.setSleep(false);
   }
-  WiFi.mode(WIFI_AP);
-  delay(100);
-  WiFi.setSleep(false);    // Keep radio awake
-  delay(100);
+  // (Re)start the soft AP — no WIFI_OFF cycle, avoids netif re-registration
   bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
   DBGLN("--- WiFi AP Setup ---");
   DBG("softAP returned: ");
@@ -170,8 +167,7 @@ void startWifiAP() {
 
 // Stop the WiFi AP hotspot
 void stopWifiAP() {
-  WiFi.softAPdisconnect(true);
-  WiFi.mode(WIFI_OFF);
+  WiFi.softAPdisconnect(true);  // Disconnect clients & stop AP, but keep netif alive
   wifiEnabled = false;
   DBGLN("WiFi AP stopped");
 }
