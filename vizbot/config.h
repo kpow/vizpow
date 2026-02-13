@@ -95,27 +95,15 @@
 #define NTP_GMT_OFFSET -18000    // EST = UTC-5 = -5*3600
 #define NTP_DAYLIGHT_OFFSET 3600 // EDT +1 hour
 
-// Display modes
-#define MODE_MOTION 0
-#define MODE_AMBIENT 1
-#define MODE_EMOJI 2
-#define MODE_BOT 3         // Bot Mode: animated companion face (LCD only)
-#define NUM_MODES 4        // Total number of display modes
+// Display mode
+#define MODE_BOT 0
 
-// Effect counts
-#define NUM_MOTION_EFFECTS 7
+// Ambient effect count (used for bot background overlay)
 #define NUM_AMBIENT_EFFECTS 13
 #define NUM_PALETTES 15
 
-// Emoji settings
-#define MAX_EMOJI_QUEUE 16
-
-// Shake-to-change-mode settings
+// Shake detection threshold (for bot reactions)
 #define SHAKE_THRESHOLD 2.0      // Acceleration magnitude to count as a shake (g)
-#define SHAKE_COUNT 3            // Number of shakes needed to trigger mode change
-#define SHAKE_WINDOW_MS 1500     // Time window to count shakes (ms)
-#define SHAKE_COOLDOWN_MS 2000   // Cooldown after mode change (ms)
-#define RANDOM_EMOJI_COUNT 8     // Number of random emojis to add when entering emoji mode
 
 // Debug serial output (comment out to save ~700 bytes of flash)
 // #define DEBUG_SERIAL
