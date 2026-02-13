@@ -34,6 +34,7 @@
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
 #endif
+#include "boot_sequence.h"
 
 // Global objects
 CRGB leds[NUM_LEDS];
@@ -138,37 +139,32 @@ void readIMU() {
   }
 }
 
-// Start or restart the WiFi AP hotspot
+// Start or restart the WiFi AP hotspot (used by touch menu toggle)
 void startWifiAP() {
   if (!wifiEnabled) {
-    // First-time init: set mode once, start web server
     WiFi.mode(WIFI_AP);
     delay(100);
     WiFi.setSleep(false);
   }
-  // (Re)start the soft AP — no WIFI_OFF cycle, avoids netif re-registration
   bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
-  DBGLN("--- WiFi AP Setup ---");
+  DBGLN("--- WiFi AP restart ---");
   DBG("softAP returned: ");
   DBGLN(apStarted ? "YES" : "NO");
-  DBG("AP SSID: ");
-  DBGLN(WIFI_SSID);
-  DBG("AP IP: ");
-  DBGLN(WiFi.softAPIP());
-  DBG("AP MAC: ");
-  DBGLN(WiFi.softAPmacAddress());
-  delay(500);
-  if (!wifiEnabled) {
+  delay(300);
+  if (!wifiEnabled && !sysStatus.webServerReady) {
     setupWebServer();
-    DBGLN("Web server started");
+    sysStatus.webServerReady = true;
   }
   wifiEnabled = true;
+  sysStatus.wifiReady = true;
+  sysStatus.apIP = WiFi.softAPIP();
 }
 
 // Stop the WiFi AP hotspot
 void stopWifiAP() {
-  WiFi.softAPdisconnect(true);  // Disconnect clients & stop AP, but keep netif alive
+  WiFi.softAPdisconnect(true);
   wifiEnabled = false;
+  sysStatus.wifiReady = false;
   DBGLN("WiFi AP stopped");
 }
 
@@ -186,44 +182,12 @@ void setup() {
   delay(500);  // Give ESP32-S3 time to stabilize before init
   DBGLN("\n=== vizBot starting ===");
 
-  // Initialize LEDs (needed for the leds[] buffer used by ambient effects)
-  FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
-  FastLED.setBrightness(brightness);
-
-  // Initialize LCD
+  // Initialize LCD first — we need it to show the boot screen
   initLCD();
 
-  // Run intro animation
-  introAnimation();
-
-  // Start WiFi AP hotspot (after hardware init so radio has time)
-  startWifiAP();
-
-  // Initialize IMU (for shake/motion detection)
-  Wire.begin(I2C_SDA, I2C_SCL);
-
-  if (imu.begin(Wire, QMI8658_L_SLAVE_ADDRESS, I2C_SDA, I2C_SCL)) {
-    imu.configAccelerometer(
-      SensorQMI8658::ACC_RANGE_4G,
-      SensorQMI8658::ACC_ODR_250Hz,
-      SensorQMI8658::LPF_MODE_0
-    );
-    imu.configGyroscope(
-      SensorQMI8658::GYR_RANGE_512DPS,
-      SensorQMI8658::GYR_ODR_896_8Hz,
-      SensorQMI8658::LPF_MODE_0
-    );
-    imu.enableAccelerometer();
-    imu.enableGyroscope();
-    DBGLN("IMU initialized");
-  } else {
-    DBGLN("IMU initialization failed");
-  }
-
-  // Initialize touch controller (shares I2C bus with IMU)
-  #if defined(TOUCH_ENABLED)
-    initTouch();
-  #endif
+  // Run the visual boot sequence (initializes all subsystems with onscreen feedback)
+  // This handles: LEDs, I2C, IMU, Touch, WiFi AP, Web Server
+  runBootSequence();
 
   // Set initial palette
   currentPalette = palettes[0];
@@ -241,10 +205,13 @@ void loop() {
     server.handleClient();
   }
 
-  readIMU();
+  // Only read IMU if it initialized successfully
+  if (sysStatus.imuReady) {
+    readIMU();
+  }
 
-  // Shake reaction for bot
-  if (botMode.initialized) {
+  // Shake reaction for bot (requires working IMU)
+  if (sysStatus.imuReady && botMode.initialized) {
     float mag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
     if (mag > SHAKE_THRESHOLD && !botMode.shakeReacting) {
       botMode.onShake();
@@ -254,9 +221,11 @@ void loop() {
     }
   }
 
-  // Handle touch gestures
+  // Handle touch gestures (only if touch initialized)
   #if defined(TOUCH_ENABLED)
+  if (sysStatus.touchReady) {
     handleTouch();
+  }
   #endif
 
   // Auto-cycle ambient effects and palettes (for bot background overlay)

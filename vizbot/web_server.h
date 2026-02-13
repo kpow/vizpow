@@ -17,6 +17,10 @@ extern void resetEffectShuffle();
 extern uint8_t currentMode;
 extern CRGBPalette16 currentPalette;
 
+// System status (populated by boot_sequence.h)
+struct SystemStatus;
+extern SystemStatus sysStatus;
+
 // Web interface HTML
 const char webpage[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -132,7 +136,17 @@ void handleRoot() {
 void handleState() {
   String json = "{\"brightness\":" + String(brightness) +
                 ",\"speed\":" + String(speed) +
-                ",\"autoCycle\":" + (autoCycle ? "true" : "false") + "}";
+                ",\"autoCycle\":" + (autoCycle ? "true" : "false") +
+                ",\"sys\":{" +
+                  "\"lcd\":" + (sysStatus.lcdReady ? "true" : "false") +
+                  ",\"leds\":" + (sysStatus.ledsReady ? "true" : "false") +
+                  ",\"i2c\":" + (sysStatus.i2cReady ? "true" : "false") +
+                  ",\"imu\":" + (sysStatus.imuReady ? "true" : "false") +
+                  ",\"touch\":" + (sysStatus.touchReady ? "true" : "false") +
+                  ",\"wifi\":" + (sysStatus.wifiReady ? "true" : "false") +
+                  ",\"bootMs\":" + String(sysStatus.bootTimeMs) +
+                  ",\"fails\":" + String(sysStatus.failCount) +
+                "}}";
   server.send(200, "application/json", json);
 }
 
