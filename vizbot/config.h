@@ -86,15 +86,6 @@
 #define WIFI_SSID "vizBot"
 #define WIFI_PASSWORD "12345678"
 
-// WiFi STA (home network) for NTP time sync
-#define WIFI_STA_SSID "powerhouse"
-#define WIFI_STA_PASSWORD "R00s3velt"
-
-// NTP configuration
-#define NTP_SERVER "pool.ntp.org"
-#define NTP_GMT_OFFSET -18000    // EST = UTC-5 = -5*3600
-#define NTP_DAYLIGHT_OFFSET 3600 // EDT +1 hour
-
 // Display mode
 #define MODE_BOT 0
 
