@@ -54,13 +54,13 @@ enum BotState : uint8_t {
 
 struct BotPersonality {
   const char* name;
-  uint16_t idleTimeoutMs;       // Time before idle state
-  uint16_t sleepyTimeoutMs;     // Time before sleepy state
-  uint16_t sleepTimeoutMs;      // Time before sleeping state
-  uint16_t exprMinMs;           // Min time between random expressions
-  uint16_t exprMaxMs;           // Max time between random expressions
-  uint16_t sayMinMs;            // Min time between idle sayings
-  uint16_t sayMaxMs;            // Max time between idle sayings
+  uint32_t idleTimeoutMs;       // Time before idle state
+  uint32_t sleepyTimeoutMs;     // Time before sleepy state
+  uint32_t sleepTimeoutMs;      // Time before sleeping state
+  uint32_t exprMinMs;           // Min time between random expressions
+  uint32_t exprMaxMs;           // Max time between random expressions
+  uint32_t sayMinMs;            // Min time between idle sayings
+  uint32_t sayMaxMs;            // Max time between idle sayings
   uint8_t  sayChancePercent;    // % chance of saying on reaction
   uint8_t  favoriteExprs[5];    // Weighted idle expression pool
 };
@@ -365,6 +365,9 @@ void updateBotMode() {
 // Bot Mode Render (called each frame after update)
 // ============================================================================
 
+// Background style (declared before renderBotMode which uses it)
+uint8_t botBackgroundStyle = 0;  // 0=solid black, 1=subtle gradient, 2=breathing, 3=starfield
+
 // Track previous frame's face bounds for minimal-clear approach
 static int16_t prevFaceTop = 0;
 static int16_t prevFaceBot = 0;
@@ -547,9 +550,6 @@ void setBotExpression(uint8_t index) {
 void setBotFaceColor(uint16_t color) {
   botFaceColor = color;
 }
-
-// Background style
-uint8_t botBackgroundStyle = 0;  // 0=solid black, 1=subtle gradient, 2=breathing, 3=starfield
 
 void setBotBackgroundStyle(uint8_t style) {
   botBackgroundStyle = style;
