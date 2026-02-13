@@ -135,7 +135,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];
     const botPersonalityNames = ["Chill", "Hyper", "Grumpy", "Sleepy"];
     const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
-    const botBgStyleNames = ["Black", "Gradient", "Breathing", "Starfield", "Ambient"];
+    const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
     let curPersonality = 0;
     let curBgStyle = 0;
 
@@ -178,8 +178,8 @@ const char webpage[] PROGMEM = R"rawliteral(
         document.getElementById('botColors').innerHTML = botColorNames.map((name, i) =>
           `<button onclick="setBotColor(${i})">${name}</button>`
         ).join('');
-        document.getElementById('botBgStyles').innerHTML = botBgStyleNames.map((name, i) =>
-          `<button class="${curBgStyle === i ? 'active' : ''}" onclick="setBotBgStyle(${i})">${name}</button>`
+        document.getElementById('botBgStyles').innerHTML = botBgStyles.map(s =>
+          `<button class="${curBgStyle === s.v ? 'active' : ''}" onclick="setBotBgStyle(${s.v})">${s.n}</button>`
         ).join('');
       } else if (!isEmoji) {
         document.getElementById('effects').innerHTML = effects.map((e, i) =>
