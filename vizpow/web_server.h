@@ -230,7 +230,7 @@ const char webpage[] PROGMEM = R"rawliteral(
   <div class="status">Connected to VizPow</div>
 
   <script>
-    const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Spin Trails", "Gravity Pixels", "Motion Noise", "Tilt Ripple", "Gyro Swirl", "Shake Explode", "Tilt Fire", "Motion Rainbow"];
+    const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Tilt Ripple", "Gyro Swirl", "Shake Explode"];
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
     const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];

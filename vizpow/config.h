@@ -103,7 +103,7 @@
 #define NUM_MODES 4        // Total number of display modes
 
 // Effect counts
-#define NUM_MOTION_EFFECTS 12
+#define NUM_MOTION_EFFECTS 7
 #define NUM_AMBIENT_EFFECTS 13
 #define NUM_PALETTES 15
 
