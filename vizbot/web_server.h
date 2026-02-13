@@ -149,19 +149,28 @@ void handleState() {
   server.send(200, "application/json", json);
 }
 
+// Command queue helpers (defined in task_manager.h)
+extern void cmdSetBrightness(uint8_t val);
+extern void cmdSetExpression(uint8_t val);
+extern void cmdSetFaceColor(uint16_t color);
+extern void cmdSetBgStyle(uint8_t val);
+extern void cmdSayText(const char* text, uint16_t durationMs);
+extern void cmdSetTimeOverlay(bool enabled);
+extern void cmdToggleTimeOverlay();
+
 void handleBrightness() {
   if (server.hasArg("v")) {
-    brightness = constrain(server.arg("v").toInt(), 1, 50);
-    FastLED.setBrightness(brightness);
+    uint8_t val = constrain(server.arg("v").toInt(), 1, 50);
+    cmdSetBrightness(val);
   }
   server.send(200, "text/plain", "OK");
 }
 
-// Bot mode handlers
+// Bot mode handlers — push commands to queue instead of direct writes
 void handleBotExpression() {
   if (server.hasArg("v")) {
     uint8_t expr = constrain(server.arg("v").toInt(), 0, BOT_NUM_EXPRESSIONS - 1);
-    setBotExpression(expr);
+    cmdSetExpression(expr);
   }
   server.send(200, "text/plain", "OK");
 }
@@ -173,7 +182,7 @@ void handleBotSay() {
     if (server.hasArg("dur")) {
       dur = constrain(server.arg("dur").toInt(), 1000, 10000);
     }
-    showBotSaying(text.c_str(), dur);
+    cmdSayText(text.c_str(), dur);
   }
   server.send(200, "text/plain", "OK");
 }
@@ -181,9 +190,9 @@ void handleBotSay() {
 void handleBotTime() {
   if (server.hasArg("v")) {
     if (server.arg("v").toInt() == 2) {
-      toggleBotTimeOverlay();
+      cmdToggleTimeOverlay();
     } else {
-      botMode.timeOverlay.enabled = (server.arg("v").toInt() == 1);
+      cmdSetTimeOverlay(server.arg("v").toInt() == 1);
     }
   }
   server.send(200, "text/plain", "OK");
@@ -193,11 +202,11 @@ void handleBotBackground() {
   if (server.hasArg("v")) {
     uint16_t colors[] = { 0xFFFF, 0x07FF, 0x07E0, 0xF81F, 0xFFE0 };
     uint8_t idx = constrain(server.arg("v").toInt(), 0, 4);
-    setBotFaceColor(colors[idx]);
+    cmdSetFaceColor(colors[idx]);
   }
   if (server.hasArg("style")) {
     uint8_t style = constrain(server.arg("style").toInt(), 0, 4);
-    setBotBackgroundStyle(style);
+    cmdSetBgStyle(style);
   }
   server.send(200, "text/plain", "OK");
 }

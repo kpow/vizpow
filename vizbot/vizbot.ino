@@ -34,6 +34,7 @@
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
 #endif
+#include "task_manager.h"
 #include "boot_sequence.h"
 
 // Global objects
@@ -133,10 +134,12 @@ void introAnimation() {
 }
 
 void readIMU() {
+  if (!i2cAcquire()) return;  // Skip this cycle if bus is busy
   if (imu.getDataReady()) {
     imu.getAccelerometer(accelX, accelY, accelZ);
     imu.getGyroscope(gyroX, gyroY, gyroZ);
   }
+  i2cRelease();
 }
 
 // Start or restart the WiFi AP hotspot (used by touch menu toggle)
@@ -190,6 +193,9 @@ void setup() {
   Serial.begin(115200);
   delay(500);  // Give ESP32-S3 time to stabilize before init
   DBGLN("\n=== vizBot starting ===");
+
+  // Initialize task infrastructure (I2C mutex + command queue)
+  initTaskManager();
 
   // Initialize LCD first — we need it to show the boot screen
   initLCD();
@@ -247,6 +253,9 @@ void loop() {
     paletteIndex = nextShuffledPalette();
     currentPalette = palettes[paletteIndex];
   }
+
+  // Apply queued commands from WiFi/touch before rendering
+  drainCommandQueue();
 
   // Run bot mode (handles its own LCD rendering)
   runBotMode();

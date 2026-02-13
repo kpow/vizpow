@@ -165,17 +165,27 @@ bool initTouch() {
   return false;
 }
 
-// Read touch coordinates
+// I2C mutex (defined in task_manager.h)
+extern bool i2cAcquire(uint32_t timeoutMs);
+extern void i2cRelease();
+
+// Read touch coordinates (with I2C mutex protection)
 bool readTouch(uint16_t &x, uint16_t &y) {
   if (!touchInitialized) return false;
+  if (!i2cAcquire(30)) return false;  // Skip if bus busy
 
   uint8_t fingerNum = touchReadRegister(TOUCH_REG_FINGER_NUM);
-  if (fingerNum == 0) return false;
+  if (fingerNum == 0) {
+    i2cRelease();
+    return false;
+  }
 
   uint8_t xh = touchReadRegister(TOUCH_REG_XPOS_H);
   uint8_t xl = touchReadRegister(TOUCH_REG_XPOS_L);
   uint8_t yh = touchReadRegister(TOUCH_REG_YPOS_H);
   uint8_t yl = touchReadRegister(TOUCH_REG_YPOS_L);
+
+  i2cRelease();
 
   x = ((xh & 0x0F) << 8) | xl;
   y = ((yh & 0x0F) << 8) | yl;
