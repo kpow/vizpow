@@ -85,6 +85,7 @@
 // WiFi AP configuration
 #define WIFI_SSID "vizBot"
 #define WIFI_PASSWORD "12345678"
+#define MDNS_HOSTNAME "vizbot"   // vizbot.local
 
 // Display mode
 #define MODE_BOT 0

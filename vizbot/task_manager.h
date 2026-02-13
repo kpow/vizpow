@@ -2,6 +2,7 @@
 #define TASK_MANAGER_H
 
 #include <Arduino.h>
+#include <DNSServer.h>
 #include "config.h"
 
 // ============================================================================
@@ -202,13 +203,14 @@ void drainCommandQueue() {
 }
 
 // ============================================================================
-// WiFi Server Task — runs handleClient() on Core 0
+// WiFi Server Task — runs handleClient() + DNS on Core 0
 // ============================================================================
-// The built-in WebServer is synchronous, but by running it in its own
-// FreeRTOS task pinned to Core 0 (where WiFi stack lives), we keep
-// HTTP handling completely off the render core (Core 1).
+// The built-in WebServer and DNS server are synchronous, but by running
+// them in their own FreeRTOS task pinned to Core 0 (where WiFi stack
+// lives), we keep all network handling off the render core (Core 1).
 
 extern WebServer server;
+extern DNSServer dnsServer;
 extern bool wifiEnabled;
 
 static TaskHandle_t wifiTaskHandle = nullptr;
@@ -216,7 +218,8 @@ static TaskHandle_t wifiTaskHandle = nullptr;
 void wifiServerTask(void* param) {
   for (;;) {
     if (wifiEnabled) {
-      server.handleClient();
+      dnsServer.processNextRequest();  // Captive portal DNS
+      server.handleClient();            // HTTP
     }
     vTaskDelay(pdMS_TO_TICKS(2));  // ~500 req/s max, yields to WiFi stack
   }

@@ -17,6 +17,8 @@ struct SystemStatus {
   bool touchReady;
   bool wifiReady;
   bool webServerReady;
+  bool dnsReady;
+  bool mdnsReady;
   IPAddress apIP;
   uint32_t bootTimeMs;
   uint8_t failCount;

@@ -2,12 +2,15 @@
 #define WEB_SERVER_H
 
 #include <WebServer.h>
+#include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <FastLED.h>
 #include "config.h"
 #include "palettes.h"
 
 // External references to globals
 extern WebServer server;
+extern DNSServer dnsServer;
 extern uint8_t effectIndex;
 extern uint8_t paletteIndex;
 extern uint8_t brightness;
@@ -65,7 +68,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
-  <div class="status">Connected to VizBot</div>
+  <div class="status">Connected to VizBot &middot; vizbot.local</div>
 
   <script>
     const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];
@@ -148,6 +151,8 @@ void handleState() {
                   ",\"imu\":" + (sysStatus.imuReady ? "true" : "false") +
                   ",\"touch\":" + (sysStatus.touchReady ? "true" : "false") +
                   ",\"wifi\":" + (sysStatus.wifiReady ? "true" : "false") +
+                  ",\"dns\":" + (sysStatus.dnsReady ? "true" : "false") +
+                  ",\"mdns\":" + (sysStatus.mdnsReady ? "true" : "false") +
                   ",\"bootMs\":" + String(sysStatus.bootTimeMs) +
                   ",\"fails\":" + String(sysStatus.failCount) +
                 "}}";
@@ -216,6 +221,19 @@ void handleBotBackground() {
   server.send(200, "text/plain", "OK");
 }
 
+// ============================================================================
+// Captive Portal — redirect OS connectivity checks to control page
+// ============================================================================
+// When a phone/laptop connects to vizBot WiFi, the OS sends a connectivity
+// check (e.g., http://captive.apple.com/hotspot-detect.html). DNS resolves
+// ALL domains to 192.168.4.1 (us). We return a 302 redirect so the OS
+// detects "captive portal" and auto-opens the control page.
+
+void handleCaptiveRedirect() {
+  server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/");
+  server.send(302, "text/plain", "");
+}
+
 void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/state", handleState);
@@ -227,8 +245,49 @@ void setupWebServer() {
   server.on("/bot/time", handleBotTime);
   server.on("/bot/background", handleBotBackground);
 
+  // Captive portal detection endpoints — all redirect to root
+  server.on("/generate_204", handleCaptiveRedirect);          // Android
+  server.on("/gen_204", handleCaptiveRedirect);                // Android alt
+  server.on("/hotspot-detect.html", handleCaptiveRedirect);    // Apple iOS/macOS
+  server.on("/library/test/success.html", handleCaptiveRedirect); // Apple legacy
+  server.on("/connecttest.txt", handleCaptiveRedirect);        // Windows
+  server.on("/ncsi.txt", handleCaptiveRedirect);               // Windows NCSI
+  server.on("/redirect", handleCaptiveRedirect);               // Firefox
+  server.on("/canonical.html", handleCaptiveRedirect);         // Firefox alt
+  server.on("/check_network_status.txt", handleCaptiveRedirect); // Kindle
+
+  // Catch-all: any unknown URL also redirects to control page
+  server.onNotFound(handleCaptiveRedirect);
+
   server.begin();
-  DBGLN("Web server started on port 80");
+  DBGLN("Web server started on port 80 (captive portal enabled)");
+}
+
+// Start DNS server (wildcard — all domains resolve to us)
+void startDNS() {
+  dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+  dnsServer.start(53, "*", WiFi.softAPIP());
+  DBGLN("DNS server started (wildcard -> 192.168.4.1)");
+}
+
+// Stop DNS server
+void stopDNS() {
+  dnsServer.stop();
+  DBGLN("DNS server stopped");
+}
+
+// Start mDNS (vizbot.local)
+bool startMDNS() {
+  bool ok = MDNS.begin(MDNS_HOSTNAME);
+  if (ok) {
+    MDNS.addService("http", "tcp", 80);
+    DBG("mDNS started: ");
+    DBG(MDNS_HOSTNAME);
+    DBGLN(".local");
+  } else {
+    DBGLN("mDNS failed to start");
+  }
+  return ok;
 }
 
 #endif

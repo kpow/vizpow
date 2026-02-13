@@ -23,6 +23,8 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <DNSServer.h>
+#include <ESPmDNS.h>
 #include "SensorQMI8658.hpp"
 
 #include "config.h"
@@ -41,6 +43,7 @@
 CRGB leds[NUM_LEDS];
 SensorQMI8658 imu;
 WebServer server(80);
+DNSServer dnsServer;
 bool wifiEnabled = false;
 
 // State variables
@@ -170,10 +173,23 @@ void startWifiAP() {
   wifiEnabled = true;
   sysStatus.wifiReady = true;
   sysStatus.apIP = WiFi.softAPIP();
+
+  // Start captive portal DNS + mDNS if not already running
+  if (!sysStatus.dnsReady) {
+    startDNS();
+    sysStatus.dnsReady = true;
+  }
+  if (!sysStatus.mdnsReady) {
+    sysStatus.mdnsReady = startMDNS();
+  }
 }
 
 // Stop the WiFi AP hotspot
 void stopWifiAP() {
+  stopDNS();
+  sysStatus.dnsReady = false;
+  sysStatus.mdnsReady = false;
+  MDNS.end();
   WiFi.softAPdisconnect(true);
   wifiEnabled = false;
   sysStatus.wifiReady = false;

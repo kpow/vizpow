@@ -6,11 +6,13 @@
 #include <FastLED.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <DNSServer.h>
+#include <ESPmDNS.h>
 #include "config.h"
 #include "system_status.h"
 
 // Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, IPAddress(0,0,0,0), 0, 0};
+SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, IPAddress(0,0,0,0), 0, 0};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
@@ -45,7 +47,7 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, IPAdd
 extern Arduino_GFX *gfx;
 
 static uint8_t bootStageIndex = 0;
-static const uint8_t BOOT_TOTAL_STAGES = 7;
+static const uint8_t BOOT_TOTAL_STAGES = 8;
 
 // Draw the boot header
 void bootDrawHeader() {
@@ -142,10 +144,13 @@ void bootDrawSummary() {
 extern CRGB leds[];
 extern SensorQMI8658 imu;
 extern WebServer server;
+extern DNSServer dnsServer;
 
 // Forward declarations for functions defined elsewhere
 extern void initLCD();
 extern void setupWebServer();
+extern void startDNS();
+extern bool startMDNS();
 extern bool initTouch();
 
 // Stage 1: LCD — already initialized before boot screen starts
@@ -289,6 +294,24 @@ bool bootStageWebServer() {
   return true;
 }
 
+// Stage 8: DNS + mDNS (captive portal)
+bool bootStageDNS() {
+  if (!sysStatus.wifiReady) {
+    sysStatus.dnsReady = false;
+    sysStatus.mdnsReady = false;
+    return false;
+  }
+
+  // Wildcard DNS — all domains resolve to our AP IP
+  startDNS();
+  sysStatus.dnsReady = true;
+
+  // mDNS — vizbot.local
+  sysStatus.mdnsReady = startMDNS();
+
+  return true;
+}
+
 // ============================================================================
 // Run Full Boot Sequence
 // ============================================================================
@@ -354,6 +377,16 @@ void runBootSequence() {
   bootDrawStage("Web Srv");
   ok = bootStageWebServer();
   bootDrawResult(ok, ok ? "Port 80" : "No WiFi");
+  delay(80);
+
+  // --- Stage 8: DNS + mDNS (Captive Portal) ---
+  bootDrawStage("Portal");
+  ok = bootStageDNS();
+  if (ok) {
+    bootDrawResult(true, sysStatus.mdnsReady ? "DNS + vizbot.local" : "DNS only");
+  } else {
+    bootDrawResult(false, "No WiFi");
+  }
   delay(80);
 
   // --- Summary ---
