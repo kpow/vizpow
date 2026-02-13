@@ -1,13 +1,13 @@
 #ifndef WEB_SERVER_H
 #define WEB_SERVER_H
 
-#include <ESPAsyncWebServer.h>
+#include <WebServer.h>
 #include <FastLED.h>
 #include "config.h"
 #include "palettes.h"
 
 // External references to globals
-extern AsyncWebServer server;
+extern WebServer server;
 extern uint8_t effectIndex;
 extern uint8_t paletteIndex;
 extern uint8_t brightness;
@@ -128,16 +128,16 @@ const char webpage[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 // ============================================================================
-// Async Web Server Handlers
+// Web Server Handlers
 // ============================================================================
-// These run on Core 0 (AsyncTCP task) — never touch globals directly,
-// always push to the command queue from Sprint 2.
+// These push to the command queue (Sprint 2) so state changes are
+// applied atomically between frames on Core 1.
 
-void handleRoot(AsyncWebServerRequest *request) {
-  request->send_P(200, "text/html", webpage);
+void handleRoot() {
+  server.send(200, "text/html", webpage);
 }
 
-void handleState(AsyncWebServerRequest *request) {
+void handleState() {
   String json = "{\"brightness\":" + String(brightness) +
                 ",\"speed\":" + String(speed) +
                 ",\"autoCycle\":" + (autoCycle ? "true" : "false") +
@@ -151,7 +151,7 @@ void handleState(AsyncWebServerRequest *request) {
                   ",\"bootMs\":" + String(sysStatus.bootTimeMs) +
                   ",\"fails\":" + String(sysStatus.failCount) +
                 "}}";
-  request->send(200, "application/json", json);
+  server.send(200, "application/json", json);
 }
 
 // Command queue helpers (defined in task_manager.h)
@@ -163,72 +163,72 @@ extern void cmdSayText(const char* text, uint16_t durationMs);
 extern void cmdSetTimeOverlay(bool enabled);
 extern void cmdToggleTimeOverlay();
 
-void handleBrightness(AsyncWebServerRequest *request) {
-  if (request->hasParam("v")) {
-    uint8_t val = constrain(request->getParam("v")->value().toInt(), 1, 50);
+void handleBrightness() {
+  if (server.hasArg("v")) {
+    uint8_t val = constrain(server.arg("v").toInt(), 1, 50);
     cmdSetBrightness(val);
   }
-  request->send(200, "text/plain", "OK");
+  server.send(200, "text/plain", "OK");
 }
 
 // Bot mode handlers — push commands to queue instead of direct writes
-void handleBotExpression(AsyncWebServerRequest *request) {
-  if (request->hasParam("v")) {
-    uint8_t expr = constrain(request->getParam("v")->value().toInt(), 0, BOT_NUM_EXPRESSIONS - 1);
+void handleBotExpression() {
+  if (server.hasArg("v")) {
+    uint8_t expr = constrain(server.arg("v").toInt(), 0, BOT_NUM_EXPRESSIONS - 1);
     cmdSetExpression(expr);
   }
-  request->send(200, "text/plain", "OK");
+  server.send(200, "text/plain", "OK");
 }
 
-void handleBotSay(AsyncWebServerRequest *request) {
-  if (request->hasParam("text")) {
-    String text = request->getParam("text")->value();
+void handleBotSay() {
+  if (server.hasArg("text")) {
+    String text = server.arg("text");
     uint16_t dur = 4000;
-    if (request->hasParam("dur")) {
-      dur = constrain(request->getParam("dur")->value().toInt(), 1000, 10000);
+    if (server.hasArg("dur")) {
+      dur = constrain(server.arg("dur").toInt(), 1000, 10000);
     }
     cmdSayText(text.c_str(), dur);
   }
-  request->send(200, "text/plain", "OK");
+  server.send(200, "text/plain", "OK");
 }
 
-void handleBotTime(AsyncWebServerRequest *request) {
-  if (request->hasParam("v")) {
-    if (request->getParam("v")->value().toInt() == 2) {
+void handleBotTime() {
+  if (server.hasArg("v")) {
+    if (server.arg("v").toInt() == 2) {
       cmdToggleTimeOverlay();
     } else {
-      cmdSetTimeOverlay(request->getParam("v")->value().toInt() == 1);
+      cmdSetTimeOverlay(server.arg("v").toInt() == 1);
     }
   }
-  request->send(200, "text/plain", "OK");
+  server.send(200, "text/plain", "OK");
 }
 
-void handleBotBackground(AsyncWebServerRequest *request) {
-  if (request->hasParam("v")) {
+void handleBotBackground() {
+  if (server.hasArg("v")) {
     uint16_t colors[] = { 0xFFFF, 0x07FF, 0x07E0, 0xF81F, 0xFFE0 };
-    uint8_t idx = constrain(request->getParam("v")->value().toInt(), 0, 4);
+    uint8_t idx = constrain(server.arg("v").toInt(), 0, 4);
     cmdSetFaceColor(colors[idx]);
   }
-  if (request->hasParam("style")) {
-    uint8_t style = constrain(request->getParam("style")->value().toInt(), 0, 4);
+  if (server.hasArg("style")) {
+    uint8_t style = constrain(server.arg("style").toInt(), 0, 4);
     cmdSetBgStyle(style);
   }
-  request->send(200, "text/plain", "OK");
+  server.send(200, "text/plain", "OK");
 }
 
 void setupWebServer() {
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/state", HTTP_GET, handleState);
-  server.on("/brightness", HTTP_GET, handleBrightness);
+  server.on("/", handleRoot);
+  server.on("/state", handleState);
+  server.on("/brightness", handleBrightness);
 
   // Bot mode endpoints
-  server.on("/bot/expression", HTTP_GET, handleBotExpression);
-  server.on("/bot/say", HTTP_GET, handleBotSay);
-  server.on("/bot/time", HTTP_GET, handleBotTime);
-  server.on("/bot/background", HTTP_GET, handleBotBackground);
+  server.on("/bot/expression", handleBotExpression);
+  server.on("/bot/say", handleBotSay);
+  server.on("/bot/time", handleBotTime);
+  server.on("/bot/background", handleBotBackground);
 
   server.begin();
-  DBGLN("Async web server started on port 80");
+  DBGLN("Web server started on port 80");
 }
 
 #endif

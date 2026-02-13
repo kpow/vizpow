@@ -5,6 +5,7 @@
 #include <Wire.h>
 #include <FastLED.h>
 #include <WiFi.h>
+#include <WebServer.h>
 #include "config.h"
 #include "system_status.h"
 
@@ -140,6 +141,7 @@ void bootDrawSummary() {
 // External references for hardware init
 extern CRGB leds[];
 extern SensorQMI8658 imu;
+extern WebServer server;
 
 // Forward declarations for functions defined elsewhere
 extern void initLCD();
