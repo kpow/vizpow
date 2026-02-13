@@ -261,11 +261,11 @@ struct BotTimeOverlay {
     snprintf(buf, sizeof(buf), "%02d:%02d", hours, minutes);
 
     // Large time display — text size 3 = 18x24 per char, "00:00" = 90px wide
-    gfx->fillRoundRect(LCD_WIDTH - 100, 2, 96, 30, 6, 0x2104);  // Dark gray bg
+    gfx->fillRoundRect(LCD_WIDTH - 104, 2, 102, 32, 6, 0x2104);  // Dark gray bg
 
     gfx->setTextSize(3);
     gfx->setTextColor(0x07FF);  // Cyan text
-    gfx->setCursor(LCD_WIDTH - 96, 5);
+    gfx->setCursor(LCD_WIDTH - 98, 6);
     gfx->print(buf);
   }
 };
