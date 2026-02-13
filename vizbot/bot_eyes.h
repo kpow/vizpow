@@ -196,9 +196,10 @@ struct BotIMUTracker {
 
   void update(int16_t &outX, int16_t &outY) {
     // Map accelerometer tilt to pupil offset
-    // accelX tilts left/right, accelY tilts forward/back
+    // Neutral position is standing upright (90 degrees), so subtract 1g from
+    // the vertical axis to zero out gravity when the device faces the user
     float rawX = constrain(accelY * TILT_SCALE, -MAX_OFFSET, MAX_OFFSET);
-    float rawY = constrain(accelX * TILT_SCALE, -MAX_OFFSET, MAX_OFFSET);
+    float rawY = constrain((accelX - 1.0f) * TILT_SCALE, -MAX_OFFSET, MAX_OFFSET);
 
     // Smooth with exponential filter
     smoothX += (rawX - smoothX) * SMOOTH_FACTOR;
