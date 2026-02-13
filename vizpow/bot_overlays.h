@@ -244,10 +244,18 @@ struct BotTimeOverlay {
   void render() {
     if (!enabled || gfx == nullptr) return;
 
-    // Show uptime in top-right corner (NTP not yet implemented)
-    unsigned long uptimeSec = (millis() - uptimeStart) / 1000;
-    uint8_t hours = (uptimeSec / 3600) % 24;
-    uint8_t minutes = (uptimeSec / 60) % 60;
+    uint8_t hours, minutes;
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo, 0)) {
+      hours = timeinfo.tm_hour;
+      minutes = timeinfo.tm_min;
+      ntpSynced = true;
+    } else {
+      // Fallback to uptime if NTP hasn't synced
+      unsigned long uptimeSec = (millis() - uptimeStart) / 1000;
+      hours = (uptimeSec / 3600) % 24;
+      minutes = (uptimeSec / 60) % 60;
+    }
 
     char buf[8];
     snprintf(buf, sizeof(buf), "%02d:%02d", hours, minutes);
