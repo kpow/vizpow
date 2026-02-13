@@ -140,12 +140,16 @@ void readIMU() {
 
 // Start or restart the WiFi AP hotspot
 void startWifiAP() {
-  WiFi.disconnect(true);   // Clear any stale connection state
-  WiFi.mode(WIFI_OFF);
-  delay(200);
+  // On restart/toggle, turn off first to reset state cleanly
+  if (wifiEnabled) {
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(200);
+  }
   WiFi.mode(WIFI_AP);
+  delay(100);
   WiFi.setSleep(false);    // Keep radio awake
-  delay(200);
+  delay(100);
   bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
   DBGLN("--- WiFi AP Setup ---");
   DBG("softAP returned: ");
