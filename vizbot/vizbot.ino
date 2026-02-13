@@ -140,17 +140,22 @@ void readIMU() {
 
 // Start or restart the WiFi AP hotspot
 void startWifiAP() {
+  WiFi.disconnect(true);   // Clear any stale connection state
   WiFi.mode(WIFI_OFF);
-  delay(100);
+  delay(200);
   WiFi.mode(WIFI_AP);
-  delay(100);
+  WiFi.setSleep(false);    // Keep radio awake
+  delay(200);
   bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
-  DBG("AP Started: ");
+  DBGLN("--- WiFi AP Setup ---");
+  DBG("softAP returned: ");
   DBGLN(apStarted ? "YES" : "NO");
   DBG("AP SSID: ");
   DBGLN(WIFI_SSID);
   DBG("AP IP: ");
   DBGLN(WiFi.softAPIP());
+  DBG("AP MAC: ");
+  DBGLN(WiFi.softAPmacAddress());
   delay(500);
   if (!wifiEnabled) {
     setupWebServer();
@@ -178,10 +183,8 @@ void toggleWifiAP() {
 
 void setup() {
   Serial.begin(115200);
-  delay(100);
-
-  // Start WiFi AP hotspot
-  startWifiAP();
+  delay(500);  // Give ESP32-S3 time to stabilize before init
+  DBGLN("\n=== vizBot starting ===");
 
   // Initialize LEDs (needed for the leds[] buffer used by ambient effects)
   FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
@@ -192,6 +195,9 @@ void setup() {
 
   // Run intro animation
   introAnimation();
+
+  // Start WiFi AP hotspot (after hardware init so radio has time)
+  startWifiAP();
 
   // Initialize IMU (for shake/motion detection)
   Wire.begin(I2C_SDA, I2C_SCL);
