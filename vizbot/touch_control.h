@@ -196,7 +196,11 @@ void drawMenuHeader() {
 
   gfx->setCursor(10, 6);
   gfx->setTextColor(0x07FF);  // Cyan
+  #if defined(HIRES_ENABLED)
+  gfx->print(hiResMode ? "Bot HR" : "Bot PX");
+  #else
   gfx->print("Bot");
+  #endif
 
   // Current background effect
   gfx->setCursor(10, 24);
@@ -232,14 +236,18 @@ void drawMenu() {
 
   if (menuPage == 0) {
     // === MAIN PAGE ===
-    // Row 1: Background effect
+    // Row 1: Background effect prev/next
     drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "< BG", 0x001F);
     drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "BG >", 0x001F);
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 2: Palette | Auto
+    // Row 2: Palette | Hi-Res toggle
     drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "PALETTE", 0x4008);
-    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "AUTO", autoCycle ? 0x0400 : 0x4000);
+    #if defined(HIRES_ENABLED)
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, hiResMode ? "HI-RES" : "PIXEL", hiResMode ? 0x0400 : 0x4008);
+    #else
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "PIXEL", 0x2104);
+    #endif
     rowY += BTN_HEIGHT + BTN_GAP;
 
     // Row 3: Brightness
@@ -247,8 +255,9 @@ void drawMenu() {
     drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "BRIGHT", 0x0400);
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 4: Close (full width)
-    drawButton(col1X, rowY, BTN_WIDTH * 2 + BTN_GAP, BTN_HEIGHT, "CLOSE", 0x7800);
+    // Row 4: Auto cycle | Close
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "AUTO", autoCycle ? 0x0400 : 0x4000);
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "CLOSE", 0x7800);
   }
 
   menuVisible = true;
@@ -308,20 +317,24 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
   int col = (x < LCD_WIDTH / 2) ? 0 : 1;
 
   switch (row) {
-    case 0:  // Background effect
+    case 0:  // Background effect prev/next
       if (col == 0) touchPrevEffect();
       else touchNextEffect();
       break;
-    case 1:  // Palette / Auto
+    case 1:  // Palette / Hi-Res toggle
       if (col == 0) touchNextPalette();
-      else touchToggleAutoCycle();
+      #if defined(HIRES_ENABLED)
+      else toggleHiResMode();
+      #endif
       break;
     case 2:  // Brightness
       if (col == 0) touchBrightnessDown();
       else touchBrightnessUp();
       break;
-    case 3:  // Close
-      return true;
+    case 3:  // Auto / Close
+      if (col == 0) touchToggleAutoCycle();
+      else return true;
+      break;
   }
   return false;
 }
