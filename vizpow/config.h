@@ -118,7 +118,7 @@
 #define RANDOM_EMOJI_COUNT 8     // Number of random emojis to add when entering emoji mode
 
 // Debug serial output (comment out to save ~700 bytes of flash)
-// #define DEBUG_SERIAL
+#define DEBUG_SERIAL  // TEMP: diagnosing AP not broadcasting
 #ifdef DEBUG_SERIAL
   #define DBG(...) Serial.print(__VA_ARGS__)
   #define DBGLN(...) Serial.println(__VA_ARGS__)
