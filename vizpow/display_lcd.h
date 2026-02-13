@@ -34,8 +34,8 @@ inline void toggleHiResMode() {
   if (gfx != nullptr) {
     gfx->fillScreen(COLOR_BLACK);  // Clear screen when switching modes
   }
-  Serial.print("Hi-Res Mode: ");
-  Serial.println(hiResMode ? "ON" : "OFF");
+  DBG("Hi-Res Mode: ");
+  DBGLN(hiResMode ? "ON" : "OFF");
 }
 
 // Check if hi-res mode is enabled
@@ -80,7 +80,7 @@ void initLCD() {
   pinMode(LCD_BL, OUTPUT);
   digitalWrite(LCD_BL, HIGH);
 
-  Serial.println("LCD initialized");
+  DBGLN("LCD initialized");
 }
 
 // External variable for menu visibility (defined in touch_control.h)

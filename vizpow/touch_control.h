@@ -137,8 +137,8 @@ bool initTouch() {
     if (Wire.endTransmission() == 0) {
       touchI2CAddr = addresses[i];
       touchInitialized = true;
-      Serial.print("Touch OK at 0x");
-      Serial.println(touchI2CAddr, HEX);
+      DBG("Touch OK at 0x");
+      DBGLN(touchI2CAddr, HEX);
       return true;
     }
   }
@@ -157,17 +157,17 @@ bool initTouch() {
       if (Wire.endTransmission() == 0) {
         touchI2CAddr = addresses[i];
         touchInitialized = true;
-        Serial.print("Touch OK at 0x");
-        Serial.print(touchI2CAddr, HEX);
-        Serial.print(" (RST pin ");
-        Serial.print(rstPins[p]);
-        Serial.println(")");
+        DBG("Touch OK at 0x");
+        DBG(touchI2CAddr, HEX);
+        DBG(" (RST pin ");
+        DBG(rstPins[p]);
+        DBGLN(")");
         return true;
       }
     }
   }
 
-  Serial.println("Touch not found");
+  DBGLN("Touch not found");
   return false;
 }
 
@@ -318,7 +318,7 @@ void drawMenu() {
 void hideMenu() {
   if (gfx == nullptr) return;
 
-  Serial.println("Closing menu");
+  DBGLN("Closing menu");
 
   // Clear entire screen - LED display will redraw on next frame
   gfx->fillScreen(0x0000);
@@ -367,8 +367,8 @@ void touchBrightnessUp() {
     lcdBrightness += 25;
     if (lcdBrightness > 255) lcdBrightness = 255;
     analogWrite(LCD_BL, lcdBrightness);
-    Serial.print("LCD Brightness UP: ");
-    Serial.println(lcdBrightness);
+    DBG("LCD Brightness UP: ");
+    DBGLN(lcdBrightness);
   }
 }
 
@@ -378,8 +378,8 @@ void touchBrightnessDown() {
     lcdBrightness -= 25;
     if (lcdBrightness < 25) lcdBrightness = 25;
     analogWrite(LCD_BL, lcdBrightness);
-    Serial.print("LCD Brightness DOWN: ");
-    Serial.println(lcdBrightness);
+    DBG("LCD Brightness DOWN: ");
+    DBGLN(lcdBrightness);
   }
 }
 
@@ -397,8 +397,8 @@ void touchSpeedUp() {
   if (speed > 5) {
     speed -= 5;
     if (speed < 5) speed = 5;
-    Serial.print("Speed UP (delay): ");
-    Serial.println(speed);
+    DBG("Speed UP (delay): ");
+    DBGLN(speed);
   }
 }
 
@@ -407,8 +407,8 @@ void touchSpeedDown() {
   if (speed < 100) {
     speed += 5;
     if (speed > 100) speed = 100;
-    Serial.print("Speed DOWN (delay): ");
-    Serial.println(speed);
+    DBG("Speed DOWN (delay): ");
+    DBGLN(speed);
   }
 }
 
@@ -425,12 +425,12 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
   // Calculate which column (0 = left, 1 = right)
   int col = (x < LCD_WIDTH / 2) ? 0 : 1;
 
-  Serial.print("Page ");
-  Serial.print(menuPage);
-  Serial.print(" row=");
-  Serial.print(row);
-  Serial.print(" col=");
-  Serial.println(col);
+  DBG("Page ");
+  DBG(menuPage);
+  DBG(" row=");
+  DBG(row);
+  DBG(" col=");
+  DBGLN(col);
 
   if (menuPage == 0) {
     // === MAIN PAGE ===
@@ -506,7 +506,7 @@ void handleTouch() {
 
       // Check if long press threshold reached
       if (!longPressTriggered && (now - touchStartTime >= LONG_PRESS_MS)) {
-        Serial.println("Long press - opening menu");
+        DBGLN("Long press - opening menu");
         longPressTriggered = true;
         lastActionTime = now;
         drawMenu();
@@ -522,10 +522,10 @@ void handleTouch() {
     }
     lastActionTime = now;
 
-    Serial.print("Touch X=");
-    Serial.print(x);
-    Serial.print(" Y=");
-    Serial.println(y);
+    DBG("Touch X=");
+    DBG(x);
+    DBG(" Y=");
+    DBGLN(y);
 
     // Process menu touch
     bool shouldClose = processMenuTouch(x, y);
@@ -544,7 +544,7 @@ void handleTouch() {
         currentMode == MODE_BOT && (now - touchStartTime < LONG_PRESS_MS)) {
       // Short tap in bot mode — trigger reaction
       botMode.onTap();
-      Serial.println("Bot tap reaction");
+      DBGLN("Bot tap reaction");
     }
     #endif
 
