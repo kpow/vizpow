@@ -23,7 +23,6 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <Preferences.h>
 #include "SensorQMI8658.hpp"
 
 #include "config.h"
@@ -44,15 +43,7 @@
 CRGB leds[NUM_LEDS];
 SensorQMI8658 imu;
 WebServer server(80);
-Preferences preferences;
 bool wifiEnabled = false;
-
-// WiFi STA credentials (loaded from NVS, fallback to config.h defaults)
-char wifiStaSSID[33] = "";
-char wifiStaPassword[65] = "";
-bool staConnected = false;
-unsigned long lastNTPRetry = 0;
-bool ntpSynced = false;
 
 // State variables
 uint8_t effectIndex = 0;
@@ -172,16 +163,7 @@ void setup() {
   #endif
 
   if (wifiEnabled) {
-    // Load saved WiFi STA credentials from NVS (fallback to config.h defaults)
-    preferences.begin("vizpow", true);  // read-only
-    String savedSSID = preferences.getString("sta_ssid", WIFI_STA_SSID);
-    String savedPass = preferences.getString("sta_pass", WIFI_STA_PASSWORD);
-    preferences.end();
-    savedSSID.toCharArray(wifiStaSSID, sizeof(wifiStaSSID));
-    savedPass.toCharArray(wifiStaPassword, sizeof(wifiStaPassword));
-
-    // AP+STA: keep web server AP and connect to home network for NTP
-    WiFi.mode(WIFI_AP_STA);
+    WiFi.mode(WIFI_AP);
     delay(100);
     bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
     #if defined(WIFI_TX_POWER)
@@ -193,39 +175,6 @@ void setup() {
     DBGLN(WIFI_SSID);
     DBG("AP IP: ");
     DBGLN(WiFi.softAPIP());
-
-    // Connect to home network for NTP
-    if (strlen(wifiStaSSID) > 0) {
-      WiFi.begin(wifiStaSSID, wifiStaPassword);
-      DBG("Connecting to ");
-      DBG(wifiStaSSID);
-      int tries = 0;
-      while (WiFi.status() != WL_CONNECTED && tries < 30) {
-        delay(300);
-        DBG(".");
-        tries++;
-      }
-      if (WiFi.status() == WL_CONNECTED) {
-        staConnected = true;
-        DBG("\nConnected! IP: ");
-        DBGLN(WiFi.localIP());
-        configTime(NTP_GMT_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER);
-        DBGLN("NTP time sync started");
-
-        // Wait briefly for NTP to actually sync
-        struct tm timeinfo;
-        if (getLocalTime(&timeinfo, 3000)) {
-          ntpSynced = true;
-          DBGLN("NTP synced!");
-        } else {
-          DBGLN("NTP pending (will retry in loop)");
-        }
-      } else {
-        DBGLN("\nHome network connection failed - will retry in background");
-      }
-    } else {
-      DBGLN("No WiFi STA SSID configured");
-    }
 
     setupWebServer();
     DBGLN("Web server started");
@@ -382,32 +331,6 @@ void checkModeShake() {
 void loop() {
   if (wifiEnabled) {
     server.handleClient();
-
-    // Background WiFi STA reconnect + NTP retry
-    if (!staConnected && strlen(wifiStaSSID) > 0) {
-      wl_status_t ws = WiFi.status();
-      if (ws == WL_CONNECT_FAILED || ws == WL_NO_SSID_AVAIL || ws == WL_DISCONNECTED) {
-        unsigned long now = millis();
-        if (now - lastNTPRetry > 30000) {  // Retry every 30s
-          lastNTPRetry = now;
-          WiFi.disconnect(false);  // false = don't tear down WiFi (keeps AP alive)
-          delay(200);
-          WiFi.begin(wifiStaSSID, wifiStaPassword);
-        }
-      }
-    }
-    if (!staConnected && WiFi.status() == WL_CONNECTED) {
-      staConnected = true;
-      configTime(NTP_GMT_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER);
-      DBGLN("WiFi STA reconnected + NTP started");
-    }
-    if (staConnected && !ntpSynced) {
-      struct tm timeinfo;
-      if (getLocalTime(&timeinfo, 0)) {
-        ntpSynced = true;
-        DBGLN("NTP synced!");
-      }
-    }
   }
   readIMU();
   #if defined(POWER_SAVE_ENABLED)
