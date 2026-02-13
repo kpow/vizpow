@@ -96,6 +96,8 @@ const char webpage[] PROGMEM = R"rawliteral(
       <div class="grid4" id="botPersonalities"></div>
       <h2 style="margin-top:15px">Face Color</h2>
       <div class="grid4" id="botColors"></div>
+      <h2 style="margin-top:15px">Background</h2>
+      <div class="grid" id="botBgStyles"></div>
       <div class="toggle-row" style="margin-top:12px">
         <span>Time Overlay</span>
         <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
@@ -133,7 +135,9 @@ const char webpage[] PROGMEM = R"rawliteral(
     const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];
     const botPersonalityNames = ["Chill", "Hyper", "Grumpy", "Sleepy"];
     const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
+    const botBgStyleNames = ["Black", "Gradient", "Breathing", "Starfield", "Ambient"];
     let curPersonality = 0;
+    let curBgStyle = 0;
 
     let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };
     let emojiQueue = [];
@@ -173,6 +177,9 @@ const char webpage[] PROGMEM = R"rawliteral(
         ).join('');
         document.getElementById('botColors').innerHTML = botColorNames.map((name, i) =>
           `<button onclick="setBotColor(${i})">${name}</button>`
+        ).join('');
+        document.getElementById('botBgStyles').innerHTML = botBgStyleNames.map((name, i) =>
+          `<button class="${curBgStyle === i ? 'active' : ''}" onclick="setBotBgStyle(${i})">${name}</button>`
         ).join('');
       } else if (!isEmoji) {
         document.getElementById('effects').innerHTML = effects.map((e, i) =>
@@ -253,6 +260,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     }
     function setBotPers(i) { curPersonality = i; render(); api('/bot/personality?v=' + i); }
     function setBotColor(i) { api('/bot/background?v=' + i); }
+    function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
 
     document.getElementById('brightness').oninput = function() {
       state.brightness = this.value;
