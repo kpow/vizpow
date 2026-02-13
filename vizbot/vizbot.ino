@@ -22,7 +22,7 @@
 #include <FastLED.h>
 #include <Wire.h>
 #include <WiFi.h>
-#include <WebServer.h>
+#include <ESPAsyncWebServer.h>
 #include "SensorQMI8658.hpp"
 
 #include "config.h"
@@ -40,7 +40,7 @@
 // Global objects
 CRGB leds[NUM_LEDS];
 SensorQMI8658 imu;
-WebServer server(80);
+AsyncWebServer server(80);
 bool wifiEnabled = false;
 
 // State variables
@@ -216,9 +216,7 @@ void setup() {
 }
 
 void loop() {
-  if (wifiEnabled) {
-    server.handleClient();
-  }
+  // AsyncWebServer handles requests on Core 0 — no handleClient() needed
 
   // Only read IMU if it initialized successfully
   if (sysStatus.imuReady) {
