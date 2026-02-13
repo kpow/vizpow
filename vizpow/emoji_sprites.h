@@ -218,52 +218,6 @@ const uint8_t ICON_SHIELD[64] PROGMEM = {
   ___, ___, ___, BLU, BLU, ___, ___, ___
 };
 
-// ==================== ARROWS ====================
-
-const uint8_t ICON_ARROW_UP[64] PROGMEM = {
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  ___, ___, WHT, WHT, WHT, WHT, ___, ___,
-  ___, WHT, WHT, WHT, WHT, WHT, WHT, ___,
-  WHT, WHT, ___, WHT, WHT, ___, WHT, WHT,
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  ___, ___, ___, WHT, WHT, ___, ___, ___
-};
-
-const uint8_t ICON_ARROW_DOWN[64] PROGMEM = {
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  WHT, WHT, ___, WHT, WHT, ___, WHT, WHT,
-  ___, WHT, WHT, WHT, WHT, WHT, WHT, ___,
-  ___, ___, WHT, WHT, WHT, WHT, ___, ___,
-  ___, ___, ___, WHT, WHT, ___, ___, ___
-};
-
-const uint8_t ICON_ARROW_LEFT[64] PROGMEM = {
-  ___, ___, ___, WHT, ___, ___, ___, ___,
-  ___, ___, WHT, WHT, ___, ___, ___, ___,
-  ___, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  ___, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  ___, ___, WHT, WHT, ___, ___, ___, ___,
-  ___, ___, ___, WHT, ___, ___, ___, ___
-};
-
-const uint8_t ICON_ARROW_RIGHT[64] PROGMEM = {
-  ___, ___, ___, ___, ___, WHT, ___, ___,
-  ___, ___, ___, ___, ___, WHT, WHT, ___,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, ___,
-  ___, ___, ___, ___, ___, WHT, WHT, ___,
-  ___, ___, ___, ___, ___, WHT, ___, ___
-};
-
 // ==================== CHARACTERS ====================
 
 // Skull
@@ -326,70 +280,6 @@ const uint8_t ICON_PACMAN_GHOST[64] PROGMEM = {
   GHO, ___, GHO, ___, GHO, ___, GHO, ___
 };
 
-// Shy Guy (Mario enemy)
-const uint8_t ICON_SHY_GUY[64] PROGMEM = {
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, WHT, WHT, WHT, WHT, SHY, SHD, ___,
-  WHT, ___, WHT, ___, WHT, WHT, SHY, SHD,
-  WHT, ___, WHT, ___, WHT, WHT, SHY, ___,
-  WHT, WHT, ___, WHT, WHT, WHT, SHY, SHD,
-  ___, WHT, WHT, WHT, WHT, SHY, SHY, SHD,
-  ___, ___, SHY, SHY, SHY, SHY, SHD, ___,
-  ___, SHD, SHD, ___, SHD, SHD, ___, ___
-};
-
-// ==================== MUSIC ====================
-
-// Music note
-const uint8_t ICON_MUSIC[64] PROGMEM = {
-  ___, ___, ___, ___, WHT, WHT, WHT, WHT,
-  ___, ___, ___, ___, WHT, ___, ___, WHT,
-  ___, ___, ___, ___, WHT, ___, ___, WHT,
-  ___, ___, ___, ___, WHT, ___, ___, ___,
-  ___, ___, ___, ___, WHT, ___, ___, ___,
-  ___, WHT, WHT, ___, WHT, ___, ___, ___,
-  WHT, WHT, WHT, WHT, WHT, ___, ___, ___,
-  ___, WHT, WHT, ___, ___, ___, ___, ___
-};
-
-// ==================== TECH ====================
-
-// WiFi signal
-const uint8_t ICON_WIFI[64] PROGMEM = {
-  ___, GRN, GRN, GRN, GRN, GRN, GRN, ___,
-  GRN, ___, ___, ___, ___, ___, ___, GRN,
-  ___, ___, GRN, GRN, GRN, GRN, ___, ___,
-  ___, GRN, ___, ___, ___, ___, GRN, ___,
-  ___, ___, ___, GRN, GRN, ___, ___, ___,
-  ___, ___, GRN, ___, ___, GRN, ___, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, ___, ___, GRN, GRN, ___, ___, ___
-};
-
-// Battery
-const uint8_t ICON_BATTERY[64] PROGMEM = {
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, WHT, WHT, WHT, WHT, WHT, WHT, ___,
-  WHT, WHT, GRN, GRN, GRN, GRN, WHT, WHT,
-  WHT, WHT, GRN, GRN, GRN, GRN, WHT, WHT,
-  WHT, WHT, GRN, GRN, GRN, GRN, WHT, WHT,
-  WHT, WHT, GRN, GRN, GRN, GRN, WHT, WHT,
-  ___, WHT, WHT, WHT, WHT, WHT, WHT, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___
-};
-
-// Power button
-const uint8_t ICON_POWER[64] PROGMEM = {
-  ___, ___, ___, RED, RED, ___, ___, ___,
-  ___, ___, RED, RED, RED, RED, ___, ___,
-  ___, RED, ___, RED, RED, ___, RED, ___,
-  RED, RED, ___, RED, RED, ___, RED, RED,
-  RED, RED, ___, ___, ___, ___, RED, RED,
-  ___, RED, ___, ___, ___, ___, RED, ___,
-  ___, ___, RED, ___, ___, RED, ___, ___,
-  ___, ___, ___, RED, RED, ___, ___, ___
-};
-
 // ==================== RAINBOW ====================
 
 // Full color rainbow circle
@@ -414,78 +304,6 @@ const uint8_t ICON_MUSHROOM[64] PROGMEM = {
   ___, ___, MST, MST, MST, MSP, ___, ___,
   ___, ___, MST, MST, MST, MSP, ___, ___,
   ___, ___, ___, MST, MSP, ___, ___, ___
-};
-
-// Skelly
-const uint8_t ICON_SKELLY[64] PROGMEM = {
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, WHT, WHT, WHT, WHT, SKS, ___, ___,
-  WHT, ___, ___, WHT, ___, ___, SKS, ___,
-  WHT, ___, RED, WHT, RED, ___, SKS, ___,
-  WHT, WHT, WHT, WHT, WHT, WHT, SKS, ___,
-  WHT, WHT, WHT, ___, WHT, WHT, SKS, ___,
-  ___, WHT, WHT, WHT, WHT, SKS, ___, ___,
-  ___, WHT, ___, WHT, ___, SKS, ___, ___
-};
-
-// Chicken
-const uint8_t ICON_CHICKEN[64] PROGMEM = {
-  ___, ___, RED, RED, RED, ___, ___, ___,
-  ___, ___, WHT, WHT, WHT, ___, ___, ___,
-  ___, WHT, WHT, WHT, WHT, WHT, ___, ___,
-  ___, WHT, ___, WHT, WHT, WHT, WHT, ___,
-  CBK, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  ___, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  ___, ___, WHT, WHT, WHT, WHT, WHT, ___,
-  ___, ___, ___, CBK, CBK, ___, ___, ___
-};
-
-// Invader
-const uint8_t ICON_INVADER[64] PROGMEM = {
-  ITL, ___, ITL, ITL, ITL, ISH, ITL, ISH,
-  ___, ITL, ITL, ITL, ITL, ITL, ISH, ___,
-  ITL, ITL, ___, ITL, ___, ITL, ITL, ISH,
-  IDT, IDT, ___, IDT, ___, IDT, IDT, ISH,
-  IDT, IDT, IDT, IDT, IDT, IDT, IDT, ISH,
-  IDB, ___, IDB, ___, IDB, ___, IDB, ___,
-  IDB, ___, IDB, ___, IDB, ___, IDB, ___,
-  IDB, ___, IDB, ___, IDB, ___, IDB, ___
-};
-
-// Dragon
-const uint8_t ICON_DRAGON[64] PROGMEM = {
-  ___, ___, DRH, ___, DRH, ___, ___, ___,
-  ___, DRB, DRB, DRB, DRB, ___, ___, ___,
-  DRB, ___, DRB, ___, DRB, DRF, ___, ___,
-  DRB, DRB, DRB, DRB, DRB, ___, ___, ___,
-  ___, ___, DRL, DRL, DRB, DRF, ___, ___,
-  ___, DRB, DRL, DRB, DRB, ___, ___, DRB,
-  ___, ___, DRL, DRL, DRB, DRB, DRB, ___,
-  ___, ___, DRB, ___, DRB, ___, ___, ___
-};
-
-// Twinkle heart
-const uint8_t ICON_TWINKLE_HEART[64] PROGMEM = {
-  ___, RED, RED, ___, RED, RED, ___, ___,
-  RED, RED, RED, RED, RED, RED, RED, ___,
-  RED, RED, RED, RED, RED, ___, RED, ___,
-  ___, RED, RED, RED, ___, TWS, ___, ___,
-  ___, ___, RED, ___, TWS, TWC, TWS, ___,
-  ___, ___, ___, RED, ___, TWS, ___, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___
-};
-
-// Popsicle
-const uint8_t ICON_POPSICLE[64] PROGMEM = {
-  ___, ___, ___, PPK, PPK, ___, ___, ___,
-  ___, ___, PPK, PHL, PPK, PPK, ___, ___,
-  ___, ___, PHL, PPK, PPK, PPK, ___, ___,
-  ___, ___, PPK, PPK, PPK, PPK, ___, ___,
-  ___, ___, PPK, PPK, PPK, PPK, ___, ___,
-  ___, ___, PPK, PPK, PPK, PPK, ___, ___,
-  ___, ___, ___, PST, PST, ___, ___, ___,
-  ___, ___, ___, PST, PST, ___, ___, ___
 };
 
 // Clean up index macros to avoid polluting namespace
@@ -529,31 +347,24 @@ const uint8_t ICON_POPSICLE[64] PROGMEM = {
 #undef PST
 
 // ==================== ICON COUNT ====================
-#define ICON_COUNT 28
+#define ICON_COUNT 15
 
 // Array of all icons for easy iteration
 const uint8_t* const ALL_ICONS[ICON_COUNT] PROGMEM = {
-  ICON_HEART, ICON_STAR, ICON_CHECK,
-  ICON_X, ICON_FIRE,
-  ICON_POTION, ICON_SWORD,
-  ICON_SHIELD, ICON_ARROW_UP, ICON_ARROW_DOWN, ICON_ARROW_LEFT,
-  ICON_ARROW_RIGHT, ICON_SKULL, ICON_GHOST, ICON_ALIEN,
-  ICON_PACMAN, ICON_PACMAN_GHOST, ICON_SHY_GUY, ICON_MUSIC,
-  ICON_WIFI, ICON_RAINBOW, ICON_MUSHROOM, ICON_SKELLY,
-  ICON_CHICKEN, ICON_INVADER, ICON_DRAGON, ICON_TWINKLE_HEART,
-  ICON_POPSICLE
+  ICON_HEART, ICON_STAR, ICON_CHECK, ICON_X, ICON_FIRE,
+  ICON_POTION, ICON_SWORD, ICON_SHIELD,
+  ICON_SKULL, ICON_GHOST, ICON_ALIEN,
+  ICON_PACMAN, ICON_PACMAN_GHOST,
+  ICON_RAINBOW, ICON_MUSHROOM
 };
 
 // Icon names for debugging
 const char* const ICON_NAMES[ICON_COUNT] PROGMEM = {
-  "Heart", "Star", "Check",
-  "X", "Fire",
-  "Potion", "Sword",
-  "Shield", "ArrowUp", "ArrowDown", "ArrowLeft",
-  "ArrowRight", "Skull", "Ghost", "Alien",
-  "Pacman", "PacGhost", "ShyGuy", "Music",
-  "WiFi", "Rainbow", "Mushroom", "Skelly",
-  "chicken", "invader", "dragon", "twinkleheart", "popsicle"
+  "Heart", "Star", "Check", "X", "Fire",
+  "Potion", "Sword", "Shield",
+  "Skull", "Ghost", "Alien",
+  "Pacman", "PacGhost",
+  "Rainbow", "Mushroom"
 };
 
 // Compatibility aliases for emoji system

@@ -30,7 +30,7 @@
 #elif defined(TARGET_LCD)
   #define BOARD_ESP32S3_TOUCH_LCD
   #define DISPLAY_LCD_ONLY
-  #define HIRES_ENABLED  // Enable hi-res rendering mode for LCD
+  // #define HIRES_ENABLED  // Disabled to save flash (~10KB)
   // Full power profile for USB-powered LCD board
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
@@ -118,7 +118,7 @@
 #define RANDOM_EMOJI_COUNT 8     // Number of random emojis to add when entering emoji mode
 
 // Debug serial output (comment out to save ~700 bytes of flash)
-#define DEBUG_SERIAL  // TEMP: diagnosing AP not broadcasting
+// #define DEBUG_SERIAL
 #ifdef DEBUG_SERIAL
   #define DBG(...) Serial.print(__VA_ARGS__)
   #define DBGLN(...) Serial.println(__VA_ARGS__)

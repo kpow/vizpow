@@ -139,16 +139,12 @@ const char webpage[] PROGMEM = R"rawliteral(
     let emojiQueue = [];
     let emojiAutoCycle = true;
 
-    // Icon names matching emoji_sprites.h (41 icons)
     const emojiNames = [
-      "Heart", "Star", "Smiley", "Check",
-      "X", "Question", "Exclaim", "Sun",
-      "Moon", "Cloud", "Rain", "Lightning",
-      "Fire", "Snow", "Tree", "Coin",
-      "Key", "Gem", "Potion", "Sword",
-      "Shield", "ArrowUp", "ArrowDown", "ArrowLeft",
-      "ArrowRight", "Skull", "Ghost", "Alien",
-      "Pacman", "PacGhost", "ShyGuy", "Music", "WiFi", "Rainbow", "Mushroom", "Skelly", "chicken", "invader", "dragon", "twinkleheart", "popsicle"];
+      "Heart", "Star", "Check", "X", "Fire",
+      "Potion", "Sword", "Shield",
+      "Skull", "Ghost", "Alien",
+      "Pacman", "PacGhost",
+      "Rainbow", "Mushroom"];
 
     function render() {
       const effects = state.currentMode === 0 ? motionEffects : ambientEffects;
