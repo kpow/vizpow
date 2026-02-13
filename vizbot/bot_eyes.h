@@ -32,6 +32,12 @@ extern float accelX, accelY, accelZ;
 // Configurable face color (can be changed via palette)
 uint16_t botFaceColor = BOT_COLOR_WHITE;
 
+// Stroke thickness for face outline on ambient backgrounds
+#define BOT_STROKE_PX 3
+
+// External background style (from bot_mode.h) — used for stroke rendering
+extern uint8_t botBackgroundStyle;
+
 // ============================================================================
 // Blink System
 // ============================================================================
@@ -394,10 +400,18 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
   }
 
+  // ---- Black stroke behind face elements (only on ambient background) ----
+  bool drawStroke = (botBackgroundStyle == 4);
+
   // ---- Draw eyes ----
   // Eye whites are drawn every frame — they naturally cover old pupils
   switch (face.eyeMode) {
     case EYE_NORMAL: {
+      // Black stroke outlines (drawn first, slightly larger)
+      if (drawStroke) {
+        gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
+      }
       // Large white ellipses
       gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
       gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
@@ -423,6 +437,10 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case EYE_CARET: {
+      if (drawStroke) {
+        drawCaretEye(leftEyeCX, eyeCY, face.eyeWhiteW * 2 / 3 + BOT_STROKE_PX, face.eyeWhiteH + BOT_STROKE_PX, BOT_COLOR_BG);
+        drawCaretEye(rightEyeCX, eyeCY, face.eyeWhiteW * 2 / 3 + BOT_STROKE_PX, face.eyeWhiteH + BOT_STROKE_PX, BOT_COLOR_BG);
+      }
       drawCaretEye(leftEyeCX, eyeCY, face.eyeWhiteW * 2 / 3, face.eyeWhiteH, botFaceColor);
       drawCaretEye(rightEyeCX, eyeCY, face.eyeWhiteW * 2 / 3, face.eyeWhiteH, botFaceColor);
       break;
@@ -430,6 +448,10 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
 
     case EYE_HEART: {
       int16_t heartSize = min(face.eyeWhiteW, face.eyeWhiteH) * 3 / 4;
+      if (drawStroke) {
+        drawHeart(leftEyeCX, eyeCY, heartSize + BOT_STROKE_PX, BOT_COLOR_BG);
+        drawHeart(rightEyeCX, eyeCY, heartSize + BOT_STROKE_PX, BOT_COLOR_BG);
+      }
       drawHeart(leftEyeCX, eyeCY, heartSize, botFaceColor);
       drawHeart(rightEyeCX, eyeCY, heartSize, botFaceColor);
       break;
@@ -437,12 +459,20 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
 
     case EYE_X: {
       int16_t xSize = min(face.eyeWhiteW, face.eyeWhiteH) * 2 / 3;
+      if (drawStroke) {
+        drawXEye(leftEyeCX, eyeCY, xSize + BOT_STROKE_PX, BOT_COLOR_BG);
+        drawXEye(rightEyeCX, eyeCY, xSize + BOT_STROKE_PX, BOT_COLOR_BG);
+      }
       drawXEye(leftEyeCX, eyeCY, xSize, botFaceColor);
       drawXEye(rightEyeCX, eyeCY, xSize, botFaceColor);
       break;
     }
 
     case EYE_SPIRAL: {
+      if (drawStroke) {
+        gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
+      }
       gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
       gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
       float phase = (float)(millis() % 2000) / 2000.0f * TWO_PI;
@@ -455,6 +485,10 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     case EYE_STAR: {
       int16_t starOuter = min(face.eyeWhiteW, face.eyeWhiteH) * 3 / 4;
       int16_t starInner = starOuter * 2 / 5;
+      if (drawStroke) {
+        drawStar(leftEyeCX, eyeCY, starOuter + BOT_STROKE_PX, starInner + BOT_STROKE_PX, BOT_COLOR_BG);
+        drawStar(rightEyeCX, eyeCY, starOuter + BOT_STROKE_PX, starInner + BOT_STROKE_PX, BOT_COLOR_BG);
+      }
       drawStar(leftEyeCX, eyeCY, starOuter, starInner, botFaceColor);
       drawStar(rightEyeCX, eyeCY, starOuter, starInner, botFaceColor);
       break;
@@ -475,6 +509,9 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     int16_t lbx1 = leftEyeCX + face.browLength;
     int16_t lby0 = browY + (int16_t)(sinf(-radL) * face.browLength);
     int16_t lby1 = browY + (int16_t)(sinf(radL) * face.browLength);
+    if (drawStroke) {
+      drawThickLine(lbx0, lby0, lbx1, lby1, face.browThickness + BOT_STROKE_PX * 2, BOT_COLOR_BG);
+    }
     drawThickLine(lbx0, lby0, lbx1, lby1, face.browThickness, botFaceColor);
 
     float radR = face.browAngleR * PI / 180.0f;
@@ -482,6 +519,9 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     int16_t rbx1 = rightEyeCX + face.browLength;
     int16_t rby0 = browY + (int16_t)(sinf(radR) * face.browLength);
     int16_t rby1 = browY + (int16_t)(sinf(-radR) * face.browLength);
+    if (drawStroke) {
+      drawThickLine(rbx0, rby0, rbx1, rby1, face.browThickness + BOT_STROKE_PX * 2, BOT_COLOR_BG);
+    }
     drawThickLine(rbx0, rby0, rbx1, rby1, face.browThickness, botFaceColor);
 
     // Track brow positions
@@ -507,6 +547,10 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
       break;
 
     case MOUTH_LINE: {
+      if (drawStroke) {
+        drawThickLine(mouthCX - face.mouthWidth, mouthCY,
+                       mouthCX + face.mouthWidth, mouthCY, 3 + BOT_STROKE_PX * 2, BOT_COLOR_BG);
+      }
       drawThickLine(mouthCX - face.mouthWidth, mouthCY,
                      mouthCX + face.mouthWidth, mouthCY, 3, botFaceColor);
       mLeft = mouthCX - face.mouthWidth; mRight = mouthCX + face.mouthWidth;
@@ -515,6 +559,13 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_SMILE: {
+      if (drawStroke) {
+        for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
+          float t = (float)x / face.mouthWidth;
+          int16_t y = (int16_t)(face.mouthCurve * t * t);
+          gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
+        }
+      }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
         int16_t y = (int16_t)(face.mouthCurve * t * t);
@@ -526,6 +577,13 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_FROWN: {
+      if (drawStroke) {
+        for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
+          float t = (float)x / face.mouthWidth;
+          int16_t y = -(int16_t)(face.mouthCurve * t * t);
+          gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
+        }
+      }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
         int16_t y = -(int16_t)(face.mouthCurve * t * t);
@@ -537,6 +595,9 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_OPEN_O: {
+      if (drawStroke) {
+        gfx->fillCircle(mouthCX, mouthCY, face.mouthCurve + BOT_STROKE_PX, BOT_COLOR_BG);
+      }
       gfx->fillCircle(mouthCX, mouthCY, face.mouthCurve, botFaceColor);
       gfx->fillCircle(mouthCX, mouthCY, face.mouthCurve - 3, BOT_COLOR_BG);
       mLeft = mouthCX - face.mouthCurve - 1; mRight = mouthCX + face.mouthCurve + 1;
@@ -545,6 +606,13 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_GRIN: {
+      if (drawStroke) {
+        for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
+          float t = (float)x / face.mouthWidth;
+          int16_t y = (int16_t)(face.mouthCurve * t * t);
+          gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
+        }
+      }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
         int16_t y = (int16_t)(face.mouthCurve * t * t);
@@ -558,6 +626,13 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_WAVY: {
+      if (drawStroke) {
+        for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
+          float t = (float)x / face.mouthWidth;
+          int16_t y = (int16_t)(sinf(t * PI * 3.0f) * face.mouthCurve);
+          gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
+        }
+      }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
         int16_t y = (int16_t)(sinf(t * PI * 3.0f) * face.mouthCurve);
@@ -569,6 +644,14 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_SMIRK: {
+      if (drawStroke) {
+        for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
+          float t = (float)x / face.mouthWidth;
+          float normalized = (t + 1.0f) / 2.0f;
+          int16_t y = (int16_t)(face.mouthCurve * normalized * normalized);
+          gfx->fillCircle(mouthCX + x, mouthCY + y - face.mouthCurve / 3, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
+        }
+      }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
         float normalized = (t + 1.0f) / 2.0f;

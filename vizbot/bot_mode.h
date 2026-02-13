@@ -349,15 +349,9 @@ void updateBotMode() {
     botMode.lookAround.update(lookX, lookY);
   }
 
-  // IMU tracking (always active except sleeping)
-  int16_t imuX = 0, imuY = 0;
-  if (botMode.state != BOT_SLEEPING) {
-    botMode.imuTracker.update(imuX, imuY);
-  }
-
-  // Combine dynamic pupil offsets
-  botMode.face.dynamicPupilX = lookX + imuX;
-  botMode.face.dynamicPupilY = lookY + imuY;
+  // Dynamic pupil offsets — random look-around only (IMU tracking disabled for now)
+  botMode.face.dynamicPupilX = lookX;
+  botMode.face.dynamicPupilY = lookY;
 
   // Update expression transition
   botMode.face.update();
@@ -375,37 +369,42 @@ void updateBotMode() {
 // Background style (declared before renderBotMode which uses it)
 uint8_t botBackgroundStyle = 0;  // 0=solid black, 1=subtle gradient, 2=breathing, 3=starfield, 4=ambient
 
-// Ambient background sub-mode state
-uint8_t botAmbientEffectIndex = 0;       // Current ambient effect in bot bg mode
-unsigned long botAmbientLastChange = 0;  // Last ambient effect change time
-unsigned long botAmbientCycleMs = 15000; // Cycle ambient effects every 15s
-unsigned long botPaletteLastChange = 0;  // Palette auto-cycle for ambient bg
-
-// External palette references (for ambient bg cycling)
+// External references for ambient background
 extern CRGBPalette16 currentPalette;
 extern CRGBPalette16 palettes[];
 extern uint8_t paletteIndex;
+extern uint8_t effectIndex;
+extern CRGB leds[];
 
-// Use the function pointer table from effects_ambient.h
+// Use the function pointer tables from effects_ambient.h
 extern const AmbientFunc ambientHiResFuncs[];
+extern const AmbientFunc ambientLedFuncs[];
 
-// Render ambient hi-res effect as bot background
+// Render ambient effect as bot background (respects hiResMode)
 void renderBotAmbientBackground() {
-  if (botAmbientEffectIndex < NUM_AMBIENT_EFFECTS) {
-    ambientHiResFuncs[botAmbientEffectIndex]();
-  }
+  uint8_t idx = effectIndex % NUM_AMBIENT_EFFECTS;
 
-  // Auto-cycle ambient effect and palette
-  unsigned long now = millis();
-  if (now - botAmbientLastChange > botAmbientCycleMs) {
-    botAmbientLastChange = now;
-    botAmbientEffectIndex = (botAmbientEffectIndex + 1) % NUM_AMBIENT_EFFECTS;
+  #if defined(HIRES_ENABLED)
+  if (hiResMode) {
+    // Hi-res: render effect directly to LCD canvas
+    ambientHiResFuncs[idx]();
+  } else {
+    // Pixel mode: run LED effect, then render leds[] as blocky background
+    ambientLedFuncs[idx]();
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+      for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+        uint16_t ledIndex = XY(x, y);
+        CRGB color = leds[ledIndex];
+        uint16_t c565 = crgbToRgb565(color);
+        int16_t screenX = GRID_OFFSET_X + x * (PIXEL_SIZE + PIXEL_GAP);
+        int16_t screenY = GRID_OFFSET_Y + y * (PIXEL_SIZE + PIXEL_GAP);
+        gfx->fillRect(screenX, screenY, PIXEL_SIZE, PIXEL_SIZE, c565);
+      }
+    }
   }
-  if (now - botPaletteLastChange > 5000) {
-    botPaletteLastChange = now;
-    paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
-    currentPalette = palettes[paletteIndex];
-  }
+  #else
+  ambientHiResFuncs[idx]();
+  #endif
 }
 
 // ============================================================================
@@ -468,6 +467,11 @@ void renderBotMode() {
     }
   } else if (botBackgroundStyle == 4) {
     // Ambient effect as background — face renders on top
+    #if defined(HIRES_ENABLED)
+    if (!hiResMode) {
+      gfx->fillScreen(BOT_COLOR_BG);  // Clear first for pixel mode (grid doesn't cover full screen)
+    }
+    #endif
     renderBotAmbientBackground();
     bgColor = 0x0000;  // Face erase uses black (though prevFrame is invalidated)
   }
