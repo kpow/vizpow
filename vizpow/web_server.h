@@ -463,14 +463,6 @@ void handleBotTime() {
   server.send(200, "text/plain", "OK");
 }
 
-void handleBotPersonality() {
-  if (server.hasArg("v")) {
-    uint8_t p = constrain(server.arg("v").toInt(), 0, BOT_NUM_PERSONALITIES - 1);
-    setBotPersonality(p);
-  }
-  server.send(200, "text/plain", "OK");
-}
-
 void handleBotBackground() {
   if (server.hasArg("v")) {
     // Map index to color: 0=white, 1=cyan, 2=green, 3=magenta, 4=yellow
@@ -485,36 +477,6 @@ void handleBotBackground() {
   server.send(200, "text/plain", "OK");
 }
 
-void handleBotWeather() {
-  if (server.hasArg("v")) {
-    setBotWeatherEnabled(server.arg("v").toInt() == 1);
-  }
-  server.send(200, "text/plain", "OK");
-}
-
-void handleBotWeatherConfig() {
-  if (server.hasArg("lat") && server.hasArg("lon")) {
-    float lat = server.arg("lat").toFloat();
-    float lon = server.arg("lon").toFloat();
-    setBotWeatherLocation(lat, lon);
-  }
-  server.send(200, "text/plain", "OK");
-}
-
-void handleBotState() {
-  // Cloud-ready full bot state JSON
-  String json = "{\"expression\":" + String(getBotExpression()) +
-                ",\"state\":" + String(getBotState()) +
-                ",\"personality\":" + String(getBotPersonality()) +
-                ",\"timeOverlay\":" + (isBotTimeOverlayEnabled() ? "true" : "false") +
-                ",\"faceColor\":" + String(botFaceColor) +
-                ",\"background\":" + String(getBotBackgroundStyle()) +
-                ",\"numExpressions\":" + String(BOT_NUM_EXPRESSIONS) +
-                ",\"numPersonalities\":" + String(BOT_NUM_PERSONALITIES) +
-                ",\"speechBubbleActive\":" + (botMode.speechBubble.active ? "true" : "false") +
-                "}";
-  server.send(200, "application/json", json);
-}
 #endif
 
 // Setup all web server routes
@@ -572,11 +534,7 @@ void setupWebServer() {
   server.on("/bot/expression", handleBotExpression);
   server.on("/bot/say", handleBotSay);
   server.on("/bot/time", handleBotTime);
-  server.on("/bot/personality", handleBotPersonality);
   server.on("/bot/background", handleBotBackground);
-  server.on("/bot/weather", handleBotWeather);
-  server.on("/bot/weather/config", handleBotWeatherConfig);
-  server.on("/bot/state", handleBotState);
   #endif
 
   server.begin();
