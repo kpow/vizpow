@@ -33,7 +33,7 @@ extern float accelX, accelY, accelZ;
 uint16_t botFaceColor = BOT_COLOR_WHITE;
 
 // Stroke thickness for face outline on ambient backgrounds
-#define BOT_STROKE_PX 3
+#define BOT_STROKE_PX 5
 
 // External background style (from bot_mode.h) — used for stroke rendering
 extern uint8_t botBackgroundStyle;
