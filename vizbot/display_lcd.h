@@ -88,6 +88,7 @@ void initLCD() {
 extern bool menuVisible;
 #endif
 
+// External mode variable for bot mode check
 extern uint8_t currentMode;
 
 // Render the leds[] buffer to the LCD display
@@ -97,6 +98,9 @@ void renderToLCD() {
   #if defined(TOUCH_ENABLED)
   if (menuVisible) return;
   #endif
+
+  // Don't render 8x8 grid when Bot Mode is active (it renders directly)
+  if (currentMode == MODE_BOT) return;
 
   // Don't render 8x8 grid if a hi-res effect already rendered this frame
   if (hiResRenderedThisFrame) {

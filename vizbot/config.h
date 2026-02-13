@@ -30,7 +30,7 @@
 #elif defined(TARGET_LCD)
   #define BOARD_ESP32S3_TOUCH_LCD
   #define DISPLAY_LCD_ONLY
-  #define HIRES_ENABLED  // Hi-res ambient effects on LCD
+  #define HIRES_ENABLED  // Hi-res ambient for bot background overlay
   // Full power profile for USB-powered LCD board
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
@@ -99,7 +99,8 @@
 #define MODE_MOTION 0
 #define MODE_AMBIENT 1
 #define MODE_EMOJI 2
-#define NUM_MODES 3        // Total number of display modes
+#define MODE_BOT 3         // Bot Mode: animated companion face (LCD only)
+#define NUM_MODES 4        // Total number of display modes
 
 // Effect counts
 #define NUM_MOTION_EFFECTS 7
