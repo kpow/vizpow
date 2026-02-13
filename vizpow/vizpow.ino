@@ -168,7 +168,8 @@ void setup() {
   #endif
 
   if (wifiEnabled) {
-    WiFi.mode(WIFI_AP);
+    // AP+STA: keep web server AP and connect to home network for NTP
+    WiFi.mode(WIFI_AP_STA);
     delay(100);
     bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
     #if defined(WIFI_TX_POWER)
@@ -176,10 +177,29 @@ void setup() {
     #endif
     Serial.print("AP Started: ");
     Serial.println(apStarted ? "YES" : "NO");
-    Serial.print("SSID: ");
+    Serial.print("AP SSID: ");
     Serial.println(WIFI_SSID);
-    Serial.print("IP: ");
+    Serial.print("AP IP: ");
     Serial.println(WiFi.softAPIP());
+
+    // Connect to home network for NTP
+    WiFi.begin(WIFI_STA_SSID, WIFI_STA_PASSWORD);
+    Serial.print("Connecting to ");
+    Serial.print(WIFI_STA_SSID);
+    int tries = 0;
+    while (WiFi.status() != WL_CONNECTED && tries < 20) {
+      delay(250);
+      Serial.print(".");
+      tries++;
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.print("\nConnected! IP: ");
+      Serial.println(WiFi.localIP());
+      configTime(NTP_GMT_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER);
+      Serial.println("NTP time sync started");
+    } else {
+      Serial.println("\nHome network connection failed - time will use uptime");
+    }
 
     setupWebServer();
     Serial.println("Web server started");
