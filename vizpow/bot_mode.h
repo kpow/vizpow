@@ -377,75 +377,54 @@ void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
 
-  // Anti-flicker strategy: only clear the area where the face was drawn
-  // on the previous frame, then immediately redraw. This minimizes the
-  // time any pixel is black, reducing perceived flicker on SPI displays.
   if (botFirstFrame) {
     gfx->fillScreen(BOT_COLOR_BG);
+    prevFrame.invalidate();
     botFirstFrame = false;
   }
 
-  // ---- Draw background based on style ----
-  switch (botBackgroundStyle) {
-    case 0:
-      // Solid black — just clear the face region
-      {
-        int16_t clearTop = BOT_FACE_CY - 90;
-        if (clearTop < 0) clearTop = 0;
-        gfx->fillRect(0, clearTop, LCD_WIDTH, 250 - clearTop, BOT_COLOR_BG);
-      }
-      break;
-
-    case 1:
-      // Subtle dark gradient — dark blue at top fading to black
-      for (int16_t y = 0; y < LCD_HEIGHT; y += 4) {
-        uint8_t b = (uint8_t)((1.0f - (float)y / LCD_HEIGHT) * 12);
-        uint16_t c = ((b >> 3) << 11) | ((b >> 2) << 5) | (b >> 1);
-        gfx->fillRect(0, y, LCD_WIDTH, 4, c);
-      }
-      break;
-
-    case 2:
-      // Breathing color — slow pulse of dark accent color
-      {
-        float breathT = (float)(millis() % 6000) / 6000.0f;
-        uint8_t intensity = (uint8_t)(sinf(breathT * TWO_PI) * 4.0f + 4.0f);
-        uint16_t bgColor = ((intensity >> 3) << 11) | ((intensity >> 2) << 5) | (intensity >> 1);
-        int16_t clearTop = BOT_FACE_CY - 90;
-        if (clearTop < 0) clearTop = 0;
-        gfx->fillRect(0, clearTop, LCD_WIDTH, 250 - clearTop, bgColor);
-      }
-      break;
-
-    case 3:
-      // Starfield — black with a few dim white dots
-      {
-        int16_t clearTop = BOT_FACE_CY - 90;
-        if (clearTop < 0) clearTop = 0;
-        gfx->fillRect(0, clearTop, LCD_WIDTH, 250 - clearTop, BOT_COLOR_BG);
-        // Draw a few "stars" that twinkle
-        for (int i = 0; i < 8; i++) {
-          // Deterministic positions based on index (not random per frame)
-          int16_t sx = (i * 31 + 17) % LCD_WIDTH;
-          int16_t sy = (i * 47 + 11) % LCD_HEIGHT;
-          // Twinkle: brightness varies with time offset
-          float twinkle = sinf((float)(millis() + i * 500) / 1500.0f);
-          if (twinkle > 0.3f) {
-            uint8_t bright = (uint8_t)(twinkle * 8);
-            uint16_t starColor = ((bright >> 3) << 11) | ((bright >> 2) << 5) | (bright >> 3);
-            gfx->fillRect(sx, sy, 2, 2, starColor);
-          }
-        }
-      }
-      break;
-
-    default:
-      gfx->fillRect(0, BOT_FACE_CY - 90, LCD_WIDTH, 250 - (BOT_FACE_CY - 90), BOT_COLOR_BG);
-      break;
+  // Determine the current background color for erasing elements
+  uint16_t bgColor = BOT_COLOR_BG;
+  if (botBackgroundStyle == 2) {
+    // Breathing: compute current bg color but DON'T clear the whole face
+    float breathT = (float)(millis() % 6000) / 6000.0f;
+    uint8_t intensity = (uint8_t)(sinf(breathT * TWO_PI) * 4.0f + 4.0f);
+    bgColor = ((intensity >> 3) << 11) | ((intensity >> 2) << 5) | (intensity >> 1);
   }
 
-  // Render the face
-  renderBotFace(botMode.face);
+  // Background styles 1 and 3 need periodic refresh of non-face areas only
+  if (botBackgroundStyle == 1) {
+    // Subtle gradient — only redraw strips outside the face zone
+    int16_t faceTop = BOT_FACE_CY - 70;
+    int16_t faceBot = BOT_FACE_CY + 90;
+    for (int16_t y = 0; y < faceTop; y += 4) {
+      uint8_t b = (uint8_t)((1.0f - (float)y / LCD_HEIGHT) * 12);
+      uint16_t c = ((b >> 3) << 11) | ((b >> 2) << 5) | (b >> 1);
+      gfx->fillRect(0, y, LCD_WIDTH, 4, c);
+    }
+    for (int16_t y = faceBot; y < LCD_HEIGHT; y += 4) {
+      uint8_t b = (uint8_t)((1.0f - (float)y / LCD_HEIGHT) * 12);
+      uint16_t c = ((b >> 3) << 11) | ((b >> 2) << 5) | (b >> 1);
+      gfx->fillRect(0, y, LCD_WIDTH, 4, c);
+    }
+  } else if (botBackgroundStyle == 3) {
+    // Starfield — just draw the stars (tiny 2x2 rects), no clearing
+    for (int i = 0; i < 8; i++) {
+      int16_t sx = (i * 31 + 17) % LCD_WIDTH;
+      int16_t sy = (i * 47 + 11) % LCD_HEIGHT;
+      float twinkle = sinf((float)(millis() + i * 500) / 1500.0f);
+      if (twinkle > 0.3f) {
+        uint8_t bright = (uint8_t)(twinkle * 8);
+        uint16_t starColor = ((bright >> 3) << 11) | ((bright >> 2) << 5) | (bright >> 3);
+        gfx->fillRect(sx, sy, 2, 2, starColor);
+      } else {
+        gfx->fillRect(sx, sy, 2, 2, BOT_COLOR_BG);
+      }
+    }
+  }
+
+  // Render the face (handles its own targeted erasing internally)
+  renderBotFace(botMode.face, bgColor);
 
   // ---- Sleeping: draw Zzz animation ----
   if (botMode.state == BOT_SLEEPING) {
@@ -454,6 +433,9 @@ void renderBotMode() {
 
     int16_t zBaseX = BOT_FACE_CX + 50;
     int16_t zBaseY = BOT_FACE_CY - 40;
+
+    // Clear Zzz zone before redrawing (small targeted rect)
+    gfx->fillRect(zBaseX - 6, zBaseY - 55, 50, 60, bgColor);
 
     gfx->setTextColor(botFaceColor);
 
@@ -489,6 +471,7 @@ void renderBotMode() {
 
 void enterBotMode() {
   botFirstFrame = true;  // Force full clear on entry
+  prevFrame.invalidate();
 
   if (!botMode.initialized) {
     botMode.init();

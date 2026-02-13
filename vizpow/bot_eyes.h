@@ -292,11 +292,55 @@ void drawCaretEye(int16_t cx, int16_t cy, int16_t width, int16_t height, uint16_
 }
 
 // ============================================================================
-// Main Eye Render Function
+// Previous-frame tracking for flicker-free rendering
+// ============================================================================
+// Instead of clearing the whole face region each frame (which causes flicker),
+// we track where things were drawn last frame and erase only those specific
+// small areas before redrawing in the new position.
+
+struct BotPrevFrame {
+  // Previous eye bounds (for clearing when eye mode/size changes)
+  int16_t eyeW, eyeH;
+  BotEyeMode eyeMode;
+
+  // Previous pupil positions (absolute screen coords)
+  int16_t leftPupilX, leftPupilY;
+  int16_t rightPupilX, rightPupilY;
+  int16_t pupilRadius;
+
+  // Previous brow endpoints (for targeted clear)
+  int16_t browLx0, browLy0, browLx1, browLy1;
+  int16_t browRx0, browRy0, browRx1, browRy1;
+  int16_t browThickness;
+  bool browWasVisible;
+
+  // Previous mouth bounds
+  int16_t mouthTop, mouthBot, mouthLeft, mouthRight;
+  BotMouthType mouthType;
+
+  bool valid;  // false on first frame
+
+  void invalidate() { valid = false; }
+};
+
+static BotPrevFrame prevFrame = { .valid = false };
+
+// Erase a thick line from previous frame by overwriting with background
+void erasePrevThickLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t thickness, uint16_t bgColor) {
+  // Clear a bounding rect around the line — simpler and faster than redrawing
+  int16_t minX = min(x0, x1) - thickness / 2 - 1;
+  int16_t maxX = max(x0, x1) + thickness / 2 + 1;
+  int16_t minY = min(y0, y1) - thickness / 2 - 1;
+  int16_t maxY = max(y0, y1) + thickness / 2 + 1;
+  gfx->fillRect(minX, minY, maxX - minX + 1, maxY - minY + 1, bgColor);
+}
+
+// ============================================================================
+// Main Eye Render Function — flicker-free
 // ============================================================================
 
 // Render the complete face based on current BotFaceState
-void renderBotFace(BotFaceState &face) {
+void renderBotFace(BotFaceState &face, uint16_t bgColor) {
   if (gfx == nullptr) return;
 
   int16_t cx = BOT_FACE_CX;
@@ -318,16 +362,47 @@ void renderBotFace(BotFaceState &face) {
     if (effectiveEyeH < 2) effectiveEyeH = 2;
   }
 
-  // ---- Draw based on eye mode ----
+  // ---- Erase previous frame's elements that moved/changed ----
+  if (prevFrame.valid) {
+    // If eye mode changed or eyes shrank, clear old eye areas
+    if (prevFrame.eyeMode != face.eyeMode ||
+        prevFrame.eyeW > face.eyeWhiteW + 2 ||
+        prevFrame.eyeH > effectiveEyeH + 2) {
+      // Clear old eye bounding boxes
+      gfx->fillRect(leftEyeCX - prevFrame.eyeW - 2, eyeCY - prevFrame.eyeH - 2,
+                     prevFrame.eyeW * 2 + 4, prevFrame.eyeH * 2 + 4, bgColor);
+      gfx->fillRect(rightEyeCX - prevFrame.eyeW - 2, eyeCY - prevFrame.eyeH - 2,
+                     prevFrame.eyeW * 2 + 4, prevFrame.eyeH * 2 + 4, bgColor);
+    }
+
+    // Erase old brows if they were visible
+    if (prevFrame.browWasVisible) {
+      erasePrevThickLine(prevFrame.browLx0, prevFrame.browLy0,
+                         prevFrame.browLx1, prevFrame.browLy1,
+                         prevFrame.browThickness, bgColor);
+      erasePrevThickLine(prevFrame.browRx0, prevFrame.browRy0,
+                         prevFrame.browRx1, prevFrame.browRy1,
+                         prevFrame.browThickness, bgColor);
+    }
+
+    // Erase old mouth area
+    if (prevFrame.mouthType != MOUTH_NONE) {
+      gfx->fillRect(prevFrame.mouthLeft - 1, prevFrame.mouthTop - 1,
+                     prevFrame.mouthRight - prevFrame.mouthLeft + 2,
+                     prevFrame.mouthBot - prevFrame.mouthTop + 2, bgColor);
+    }
+  }
+
+  // ---- Draw eyes ----
+  // Eye whites are drawn every frame — they naturally cover old pupils
   switch (face.eyeMode) {
     case EYE_NORMAL: {
-      // Large white ellipses (overlapping at center for connected look)
+      // Large white ellipses
       gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
       gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
 
       // Pupils (only if eyes are reasonably open)
       if (effectiveEyeH > 8) {
-        // Constrain pupils to stay within eye whites
         int16_t maxPupilX = face.eyeWhiteW - face.pupilRadius - 4;
         int16_t maxPupilY = effectiveEyeH - face.pupilRadius - 4;
         int16_t pX = constrain(finalPupilX, -maxPupilX, maxPupilX);
@@ -335,19 +410,24 @@ void renderBotFace(BotFaceState &face) {
 
         gfx->fillCircle(leftEyeCX + pX, eyeCY + pY, face.pupilRadius, BOT_COLOR_PUPIL);
         gfx->fillCircle(rightEyeCX + pX, eyeCY + pY, face.pupilRadius, BOT_COLOR_PUPIL);
+
+        // Track pupil positions
+        prevFrame.leftPupilX = leftEyeCX + pX;
+        prevFrame.leftPupilY = eyeCY + pY;
+        prevFrame.rightPupilX = rightEyeCX + pX;
+        prevFrame.rightPupilY = eyeCY + pY;
+        prevFrame.pupilRadius = face.pupilRadius;
       }
       break;
     }
 
     case EYE_CARET: {
-      // Happy squint: ^ ^ shapes
       drawCaretEye(leftEyeCX, eyeCY, face.eyeWhiteW * 2 / 3, face.eyeWhiteH, botFaceColor);
       drawCaretEye(rightEyeCX, eyeCY, face.eyeWhiteW * 2 / 3, face.eyeWhiteH, botFaceColor);
       break;
     }
 
     case EYE_HEART: {
-      // Heart-shaped eyes
       int16_t heartSize = min(face.eyeWhiteW, face.eyeWhiteH) * 3 / 4;
       drawHeart(leftEyeCX, eyeCY, heartSize, botFaceColor);
       drawHeart(rightEyeCX, eyeCY, heartSize, botFaceColor);
@@ -355,7 +435,6 @@ void renderBotFace(BotFaceState &face) {
     }
 
     case EYE_X: {
-      // X-eyes (dead/extreme)
       int16_t xSize = min(face.eyeWhiteW, face.eyeWhiteH) * 2 / 3;
       drawXEye(leftEyeCX, eyeCY, xSize, botFaceColor);
       drawXEye(rightEyeCX, eyeCY, xSize, botFaceColor);
@@ -363,7 +442,6 @@ void renderBotFace(BotFaceState &face) {
     }
 
     case EYE_SPIRAL: {
-      // Spiral dizzy eyes — draw white base then spiral over it
       gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
       gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
       float phase = (float)(millis() % 2000) / 2000.0f * TWO_PI;
@@ -374,7 +452,6 @@ void renderBotFace(BotFaceState &face) {
     }
 
     case EYE_STAR: {
-      // Star/sparkle eyes
       int16_t starOuter = min(face.eyeWhiteW, face.eyeWhiteH) * 3 / 4;
       int16_t starInner = starOuter * 2 / 5;
       drawStar(leftEyeCX, eyeCY, starOuter, starInner, botFaceColor);
@@ -383,12 +460,15 @@ void renderBotFace(BotFaceState &face) {
     }
   }
 
+  // Track eye state for next frame
+  prevFrame.eyeW = face.eyeWhiteW;
+  prevFrame.eyeH = effectiveEyeH;
+  prevFrame.eyeMode = face.eyeMode;
+
   // ---- Eyebrows ----
   if (face.browVisible && face.blinkAmount < 0.8f) {
-    // Brow position: above each eye
     int16_t browY = eyeCY - effectiveEyeH + face.browOffsetY;
 
-    // Left brow (angle: negative = inner edge down for sad)
     float radL = face.browAngleL * PI / 180.0f;
     int16_t lbx0 = leftEyeCX - face.browLength;
     int16_t lbx1 = leftEyeCX + face.browLength;
@@ -396,92 +476,118 @@ void renderBotFace(BotFaceState &face) {
     int16_t lby1 = browY + (int16_t)(sinf(radL) * face.browLength);
     drawThickLine(lbx0, lby0, lbx1, lby1, face.browThickness, botFaceColor);
 
-    // Right brow (mirrored angle)
     float radR = face.browAngleR * PI / 180.0f;
     int16_t rbx0 = rightEyeCX - face.browLength;
     int16_t rbx1 = rightEyeCX + face.browLength;
     int16_t rby0 = browY + (int16_t)(sinf(radR) * face.browLength);
     int16_t rby1 = browY + (int16_t)(sinf(-radR) * face.browLength);
     drawThickLine(rbx0, rby0, rbx1, rby1, face.browThickness, botFaceColor);
+
+    // Track brow positions
+    prevFrame.browLx0 = lbx0; prevFrame.browLy0 = lby0;
+    prevFrame.browLx1 = lbx1; prevFrame.browLy1 = lby1;
+    prevFrame.browRx0 = rbx0; prevFrame.browRy0 = rby0;
+    prevFrame.browRx1 = rbx1; prevFrame.browRy1 = rby1;
+    prevFrame.browThickness = face.browThickness;
+    prevFrame.browWasVisible = true;
+  } else {
+    prevFrame.browWasVisible = false;
   }
 
   // ---- Mouth ----
   int16_t mouthCX = cx;
   int16_t mouthCY = cy + face.mouthOffsetY;
 
+  // Track mouth bounds as we draw
+  int16_t mTop = mouthCY, mBot = mouthCY, mLeft = mouthCX, mRight = mouthCX;
+
   switch (face.mouthType) {
     case MOUTH_NONE:
       break;
 
     case MOUTH_LINE: {
-      // Flat horizontal line
       drawThickLine(mouthCX - face.mouthWidth, mouthCY,
                      mouthCX + face.mouthWidth, mouthCY, 3, botFaceColor);
+      mLeft = mouthCX - face.mouthWidth; mRight = mouthCX + face.mouthWidth;
+      mTop = mouthCY - 2; mBot = mouthCY + 2;
       break;
     }
 
     case MOUTH_SMILE: {
-      // Upward arc: draw using small circle segments
-      for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
-        float t = (float)x / face.mouthWidth;
-        int16_t y = (int16_t)(face.mouthCurve * t * t);  // Parabola
-        gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
-      }
-      break;
-    }
-
-    case MOUTH_FROWN: {
-      // Downward arc (inverted smile)
-      for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
-        float t = (float)x / face.mouthWidth;
-        int16_t y = -(int16_t)(face.mouthCurve * t * t);
-        gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
-      }
-      break;
-    }
-
-    case MOUTH_OPEN_O: {
-      // O-shape: filled circle with black center
-      gfx->fillCircle(mouthCX, mouthCY, face.mouthCurve, botFaceColor);
-      gfx->fillCircle(mouthCX, mouthCY, face.mouthCurve - 3, BOT_COLOR_BG);
-      break;
-    }
-
-    case MOUTH_GRIN: {
-      // Wide smile with teeth line
-      // Draw smile arc
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
         int16_t y = (int16_t)(face.mouthCurve * t * t);
         gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
       }
-      // Horizontal teeth line through middle
+      mLeft = mouthCX - face.mouthWidth - 2; mRight = mouthCX + face.mouthWidth + 2;
+      mTop = mouthCY - 2; mBot = mouthCY + face.mouthCurve + 2;
+      break;
+    }
+
+    case MOUTH_FROWN: {
+      for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
+        float t = (float)x / face.mouthWidth;
+        int16_t y = -(int16_t)(face.mouthCurve * t * t);
+        gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
+      }
+      mLeft = mouthCX - face.mouthWidth - 2; mRight = mouthCX + face.mouthWidth + 2;
+      mTop = mouthCY - face.mouthCurve - 2; mBot = mouthCY + 2;
+      break;
+    }
+
+    case MOUTH_OPEN_O: {
+      gfx->fillCircle(mouthCX, mouthCY, face.mouthCurve, botFaceColor);
+      gfx->fillCircle(mouthCX, mouthCY, face.mouthCurve - 3, BOT_COLOR_BG);
+      mLeft = mouthCX - face.mouthCurve - 1; mRight = mouthCX + face.mouthCurve + 1;
+      mTop = mouthCY - face.mouthCurve - 1; mBot = mouthCY + face.mouthCurve + 1;
+      break;
+    }
+
+    case MOUTH_GRIN: {
+      for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
+        float t = (float)x / face.mouthWidth;
+        int16_t y = (int16_t)(face.mouthCurve * t * t);
+        gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
+      }
       drawThickLine(mouthCX - face.mouthWidth + 4, mouthCY + 2,
                      mouthCX + face.mouthWidth - 4, mouthCY + 2, 2, BOT_COLOR_BG);
+      mLeft = mouthCX - face.mouthWidth - 2; mRight = mouthCX + face.mouthWidth + 2;
+      mTop = mouthCY - 2; mBot = mouthCY + face.mouthCurve + 2;
       break;
     }
 
     case MOUTH_WAVY: {
-      // Wavy line (dizzy)
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
         int16_t y = (int16_t)(sinf(t * PI * 3.0f) * face.mouthCurve);
         gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
       }
+      mLeft = mouthCX - face.mouthWidth - 2; mRight = mouthCX + face.mouthWidth + 2;
+      mTop = mouthCY - face.mouthCurve - 2; mBot = mouthCY + face.mouthCurve + 2;
       break;
     }
 
     case MOUTH_SMIRK: {
-      // Asymmetric half-smile: flat on left, curved up on right
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
-        float normalized = (t + 1.0f) / 2.0f;  // 0 to 1
+        float normalized = (t + 1.0f) / 2.0f;
         int16_t y = (int16_t)(face.mouthCurve * normalized * normalized);
         gfx->fillCircle(mouthCX + x, mouthCY + y - face.mouthCurve / 3, 2, botFaceColor);
       }
+      mLeft = mouthCX - face.mouthWidth - 2; mRight = mouthCX + face.mouthWidth + 2;
+      mTop = mouthCY - face.mouthCurve / 3 - 2; mBot = mouthCY + face.mouthCurve + 2;
       break;
     }
   }
+
+  // Store mouth bounds for next-frame erase
+  prevFrame.mouthLeft = mLeft;
+  prevFrame.mouthRight = mRight;
+  prevFrame.mouthTop = mTop;
+  prevFrame.mouthBot = mBot;
+  prevFrame.mouthType = face.mouthType;
+
+  prevFrame.valid = true;
 }
 
 #endif // BOT_EYES_H
