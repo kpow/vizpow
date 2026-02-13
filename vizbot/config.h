@@ -97,7 +97,7 @@
 #define SHAKE_THRESHOLD 2.0      // Acceleration magnitude to count as a shake (g)
 
 // Debug serial output (comment out to save ~700 bytes of flash)
-// #define DEBUG_SERIAL
+#define DEBUG_SERIAL
 #ifdef DEBUG_SERIAL
   #define DBG(...) Serial.print(__VA_ARGS__)
   #define DBGLN(...) Serial.println(__VA_ARGS__)
