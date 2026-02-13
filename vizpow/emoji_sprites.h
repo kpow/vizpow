@@ -71,18 +71,6 @@ const CRGB ICON_STAR[64] = {
   YEL, YEL, ___, ___, ___, ___, YEL, YEL
 };
 
-// Smiley face
-const CRGB ICON_SMILEY[64] = {
-  ___, ___, YEL, YEL, YEL, YEL, ___, ___,
-  ___, YEL, YEL, YEL, YEL, YEL, YEL, ___,
-  YEL, YEL, ___, YEL, YEL, ___, YEL, YEL,
-  YEL, YEL, YEL, YEL, YEL, YEL, YEL, YEL,
-  YEL, YEL, YEL, YEL, YEL, YEL, YEL, YEL,
-  YEL, ___, YEL, YEL, YEL, YEL, ___, YEL,
-  ___, YEL, ___, ___, ___, ___, YEL, ___,
-  ___, ___, YEL, YEL, YEL, YEL, ___, ___
-};
-
 // Checkmark (green)
 const CRGB ICON_CHECK[64] = {
   ___, ___, ___, ___, ___, ___, ___, ___,
@@ -107,91 +95,7 @@ const CRGB ICON_X[64] = {
   RED, RED, ___, ___, ___, ___, RED, RED
 };
 
-// Question mark (blue)
-const CRGB ICON_QUESTION[64] = {
-  ___, ___, BLU, BLU, BLU, BLU, ___, ___,
-  ___, BLU, BLU, ___, ___, BLU, BLU, ___,
-  ___, ___, ___, ___, ___, BLU, BLU, ___,
-  ___, ___, ___, ___, BLU, BLU, ___, ___,
-  ___, ___, ___, BLU, BLU, ___, ___, ___,
-  ___, ___, ___, BLU, BLU, ___, ___, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, ___, ___, BLU, BLU, ___, ___, ___
-};
-
-// Exclamation mark (orange)
-const CRGB ICON_EXCLAIM[64] = {
-  ___, ___, ___, ORG, ORG, ___, ___, ___,
-  ___, ___, ___, ORG, ORG, ___, ___, ___,
-  ___, ___, ___, ORG, ORG, ___, ___, ___,
-  ___, ___, ___, ORG, ORG, ___, ___, ___,
-  ___, ___, ___, ORG, ORG, ___, ___, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, ___, ___, ORG, ORG, ___, ___, ___,
-  ___, ___, ___, ORG, ORG, ___, ___, ___
-};
-
 // ==================== NATURE ====================
-
-// Sun
-const CRGB ICON_SUN[64] = {
-  ___, ___, ___, YEL, YEL, ___, ___, ___,
-  ___, YEL, ___, ___, ___, ___, YEL, ___,
-  ___, ___, YEL, YEL, YEL, YEL, ___, ___,
-  YEL, ___, YEL, YEL, YEL, YEL, ___, YEL,
-  YEL, ___, YEL, YEL, YEL, YEL, ___, YEL,
-  ___, ___, YEL, YEL, YEL, YEL, ___, ___,
-  ___, YEL, ___, ___, ___, ___, YEL, ___,
-  ___, ___, ___, YEL, YEL, ___, ___, ___
-};
-
-// Moon (crescent)
-const CRGB ICON_MOON[64] = {
-  ___, ___, ___, WHT, WHT, WHT, ___, ___,
-  ___, ___, WHT, WHT, WHT, ___, ___, ___,
-  ___, WHT, WHT, WHT, ___, ___, ___, ___,
-  ___, WHT, WHT, WHT, ___, ___, ___, ___,
-  ___, WHT, WHT, WHT, ___, ___, ___, ___,
-  ___, WHT, WHT, WHT, ___, ___, ___, ___,
-  ___, ___, WHT, WHT, WHT, ___, ___, ___,
-  ___, ___, ___, WHT, WHT, WHT, ___, ___
-};
-
-// Cloud
-const CRGB ICON_CLOUD[64] = {
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, ___, WHT, WHT, WHT, ___, ___, ___,
-  ___, WHT, WHT, WHT, WHT, WHT, ___, ___,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, ___,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  WHT, WHT, WHT, WHT, WHT, WHT, WHT, WHT,
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___
-};
-
-// Rain cloud
-const CRGB ICON_RAIN[64] = {
-  ___, ___, GRY, GRY, GRY, ___, ___, ___,
-  ___, GRY, GRY, GRY, GRY, GRY, ___, ___,
-  GRY, GRY, GRY, GRY, GRY, GRY, GRY, ___,
-  GRY, GRY, GRY, GRY, GRY, GRY, GRY, GRY,
-  ___, ___, ___, ___, ___, ___, ___, ___,
-  ___, BLU, ___, BLU, ___, BLU, ___, ___,
-  BLU, ___, BLU, ___, BLU, ___, BLU, ___,
-  ___, BLU, ___, BLU, ___, BLU, ___, ___
-};
-
-// Lightning bolt
-const CRGB ICON_LIGHTNING[64] = {
-  ___, ___, ___, ___, YEL, YEL, ___, ___,
-  ___, ___, ___, YEL, YEL, ___, ___, ___,
-  ___, ___, YEL, YEL, ___, ___, ___, ___,
-  ___, YEL, YEL, YEL, YEL, YEL, ___, ___,
-  ___, ___, ___, YEL, YEL, ___, ___, ___,
-  ___, ___, YEL, YEL, ___, ___, ___, ___,
-  ___, YEL, YEL, ___, ___, ___, ___, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___
-};
 
 // Fire
 const CRGB ICON_FIRE[64] = {
@@ -205,67 +109,7 @@ const CRGB ICON_FIRE[64] = {
   ___, RED, ORG, ORG, ORG, RED, ___, ___
 };
 
-// Snowflake
-const CRGB ICON_SNOW[64] = {
-  ___, ___, ___, CYN, CYN, ___, ___, ___,
-  ___, CYN, ___, CYN, CYN, ___, CYN, ___,
-  ___, ___, CYN, CYN, CYN, CYN, ___, ___,
-  CYN, CYN, CYN, CYN, CYN, CYN, CYN, CYN,
-  CYN, CYN, CYN, CYN, CYN, CYN, CYN, CYN,
-  ___, ___, CYN, CYN, CYN, CYN, ___, ___,
-  ___, CYN, ___, CYN, CYN, ___, CYN, ___,
-  ___, ___, ___, CYN, CYN, ___, ___, ___
-};
-
-// Tree
-const CRGB ICON_TREE[64] = {
-  ___, ___, ___, GRN, GRN, ___, ___, ___,
-  ___, ___, GRN, GRN, GRN, GRN, ___, ___,
-  ___, GRN, GRN, GRN, GRN, GRN, GRN, ___,
-  GRN, GRN, GRN, GRN, GRN, GRN, GRN, GRN,
-  GRN, GRN, GRN, GRN, GRN, GRN, GRN, GRN,
-  ___, ___, ___, BRN, BRN, ___, ___, ___,
-  ___, ___, ___, BRN, BRN, ___, ___, ___,
-  ___, ___, ___, BRN, BRN, ___, ___, ___
-};
-
 // ==================== OBJECTS ====================
-
-// Coin (gold)
-const CRGB ICON_COIN[64] = {
-  ___, ___, YEL, YEL, YEL, YEL, ___, ___,
-  ___, YEL, ORG, ORG, ORG, ORG, YEL, ___,
-  YEL, ORG, YEL, ORG, ORG, YEL, ORG, YEL,
-  YEL, ORG, ORG, YEL, YEL, ORG, ORG, YEL,
-  YEL, ORG, ORG, YEL, YEL, ORG, ORG, YEL,
-  YEL, ORG, YEL, ORG, ORG, YEL, ORG, YEL,
-  ___, YEL, ORG, ORG, ORG, ORG, YEL, ___,
-  ___, ___, YEL, YEL, YEL, YEL, ___, ___
-};
-
-// Key
-const CRGB ICON_KEY[64] = {
-  ___, ___, YEL, YEL, YEL, ___, ___, ___,
-  ___, YEL, ___, ___, ___, YEL, ___, ___,
-  ___, YEL, ___, ___, ___, YEL, ___, ___,
-  ___, ___, YEL, YEL, YEL, ___, ___, ___,
-  ___, ___, ___, YEL, ___, ___, ___, ___,
-  ___, ___, ___, YEL, YEL, ___, ___, ___,
-  ___, ___, ___, YEL, ___, ___, ___, ___,
-  ___, ___, ___, YEL, YEL, ___, ___, ___
-};
-
-// Gem (diamond)
-const CRGB ICON_GEM[64] = {
-  ___, ___, CYN, CYN, CYN, CYN, ___, ___,
-  ___, CYN, WHT, CYN, CYN, WHT, CYN, ___,
-  CYN, WHT, CYN, CYN, CYN, CYN, WHT, CYN,
-  ___, CYN, CYN, CYN, CYN, CYN, CYN, ___,
-  ___, ___, CYN, CYN, CYN, CYN, ___, ___,
-  ___, ___, ___, CYN, CYN, ___, ___, ___,
-  ___, ___, ___, CYN, CYN, ___, ___, ___,
-  ___, ___, ___, ___, ___, ___, ___, ___
-};
 
 // Potion (red)
 const CRGB ICON_POTION[64] = {
@@ -438,18 +282,6 @@ const CRGB ICON_MUSIC[64] = {
   ___, WHT, WHT, ___, ___, ___, ___, ___
 };
 
-// Speaker
-const CRGB ICON_SPEAKER[64] = {
-  ___, ___, ___, WHT, WHT, ___, ___, ___,
-  ___, ___, WHT, WHT, WHT, ___, GRY, ___,
-  ___, WHT, WHT, WHT, WHT, ___, ___, GRY,
-  WHT, WHT, WHT, WHT, WHT, ___, GRY, GRY,
-  WHT, WHT, WHT, WHT, WHT, ___, GRY, GRY,
-  ___, WHT, WHT, WHT, WHT, ___, ___, GRY,
-  ___, ___, WHT, WHT, WHT, ___, GRY, ___,
-  ___, ___, ___, WHT, WHT, ___, ___, ___
-};
-
 // ==================== TECH ====================
 
 // WiFi signal
@@ -587,15 +419,13 @@ const CRGB ICON_POPSICLE[64] = {
 };
 
 // ==================== ICON COUNT ====================
-#define ICON_COUNT 41
+#define ICON_COUNT 28
 
 // Array of all icons for easy iteration
 const CRGB* ALL_ICONS[ICON_COUNT] = {
-  ICON_HEART, ICON_STAR, ICON_SMILEY, ICON_CHECK,
-  ICON_X, ICON_QUESTION, ICON_EXCLAIM, ICON_SUN,
-  ICON_MOON, ICON_CLOUD, ICON_RAIN, ICON_LIGHTNING,
-  ICON_FIRE, ICON_SNOW, ICON_TREE, ICON_COIN,
-  ICON_KEY, ICON_GEM, ICON_POTION, ICON_SWORD,
+  ICON_HEART, ICON_STAR, ICON_CHECK,
+  ICON_X, ICON_FIRE,
+  ICON_POTION, ICON_SWORD,
   ICON_SHIELD, ICON_ARROW_UP, ICON_ARROW_DOWN, ICON_ARROW_LEFT,
   ICON_ARROW_RIGHT, ICON_SKULL, ICON_GHOST, ICON_ALIEN,
   ICON_PACMAN, ICON_PACMAN_GHOST, ICON_SHY_GUY, ICON_MUSIC, ICON_WIFI, ICON_RAINBOW, ICON_MUSHROOM, ICON_SKELLY, ICON_CHICKEN, ICON_INVADER, ICON_DRAGON, ICON_TWINKLE_HEART, ICON_POPSICLE
@@ -603,11 +433,9 @@ const CRGB* ALL_ICONS[ICON_COUNT] = {
 
 // Icon names for debugging
 const char* ICON_NAMES[ICON_COUNT] = {
-  "Heart", "Star", "Smiley", "Check",
-  "X", "Question", "Exclaim", "Sun",
-  "Moon", "Cloud", "Rain", "Lightning",
-  "Fire", "Snow", "Tree", "Coin",
-  "Key", "Gem", "Potion", "Sword",
+  "Heart", "Star", "Check",
+  "X", "Fire",
+  "Potion", "Sword",
   "Shield", "ArrowUp", "ArrowDown", "ArrowLeft",
   "ArrowRight", "Skull", "Ghost", "Alien",
   "Pacman", "PacGhost", "ShyGuy", "Music", "WiFi", "Rainbow", "Mushroom", "Skelly", "chicken", "invader", "dragon", "twinkleheart", "popsicle"
