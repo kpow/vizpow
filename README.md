@@ -2,7 +2,7 @@
 
 A motion-reactive display controller platform for wearable/portable/alternate displays. Supports two platforms:
 
-- **ESP32-S3** — Full-featured with IMU, LCD display, touch control, and 3 display modes
+- **ESP32-S3** — Full-featured with IMU, LCD display, touch control, and 4 display modes
 - **ESP8266** — Lightweight WiFi-only port with 2 display modes (ambient + emoji)
 
 Both platforms drive an 8x8 WS2812B LED matrix (64 LEDs) with a web interface for control from any phone or browser.
@@ -10,14 +10,18 @@ Both platforms drive an 8x8 WS2812B LED matrix (64 LEDs) with a web interface fo
 ## Features
 
 ### ESP32-S3 Version
-- **3 Display Modes**: Motion-reactive, ambient, and emoji
+- **4 Display Modes**: Motion-reactive, ambient, emoji, and bot companion
 - **38 LED Effects**: 12 motion-reactive + 13 ambient + 13 hi-res LCD effects
-- **41 Emoji Sprites**: Built-in pixel art icons with auto-cycling and fade transitions
+- **Bot Mode**: Animated desktop companion face with 20 expressions, 4 personalities, speech bubbles, weather, and time overlays
+- **Ambient Overlay**: Bot face rendered on top of animated ambient effects as a living background
+- **28 Emoji Sprites**: Built-in pixel art icons with palette-indexed compression and fade transitions
 - **Shake to Change Mode**: Shake 3 times to cycle through modes
 - **Hi-Res LCD Rendering**: Full 240x280 resolution effects on the touch LCD
 - **Touch Menu**: Long-press touch menu for settings, effects, palettes, brightness, speed
 - **15 High-Contrast Palettes**: Custom gradients designed for small LED displays
 - **Motion Control**: Accelerometer and gyroscope-driven animations with tunable sensitivity
+- **WiFi Configuration**: Configurable home network credentials via web API, saved to flash
+- **NTP Time Sync**: Automatic time sync with background retry and reconnect
 - **Web Interface**: Control via WiFi AP from any phone/browser
 
 ### ESP8266 Version
@@ -137,11 +141,12 @@ Install via Arduino Library Manager:
 
 Shake the device 3 times within 1.5 seconds to cycle through modes:
 
-**Motion** -> **Ambient** -> **Emoji** -> **Motion** ...
+**Motion** -> **Ambient** -> **Emoji** -> **Bot** -> **Motion** ...
 
 - A brief white flash confirms the mode change
 - 2-second cooldown prevents accidental re-triggers
 - When entering emoji mode with no queue, 8 random sprites are auto-loaded
+- Bot mode greets you on entry and responds to shakes and taps
 
 ### Touch Menu (TARGET_LCD only)
 
@@ -215,6 +220,63 @@ Heart, Star, Smiley, Check, X, Question, Exclaim, Sun, Moon, Cloud, Rain, Lightn
 - **Auto-cycle**: Automatically cycle through the queue
 - **Random fill**: Shake into emoji mode to get 8 random unique sprites (ESP32)
 
+### Bot Mode (TARGET_LCD only)
+
+An animated desktop companion character rendered on the 240x280 LCD. The bot has a full face with eyes, eyebrows, pupils, and mouth — all procedurally drawn and smoothly animated.
+
+#### Expressions (20 total)
+
+Neutral, Happy, Sad, Surprised, Sleepy, Angry, Love (heart eyes), Dizzy (spiral eyes), Thinking, Excited (star eyes), Mischievous, Dead (X eyes), Skeptical, Worried, Confused, Proud, Shy, Annoyed, Bliss, Focused
+
+#### Personalities (4 presets)
+
+| Personality | Behavior |
+|-------------|----------|
+| **Chill** | Lively and expressive, balanced idle behavior (default) |
+| **Hyper** | Constant expression changes and chatter, never sits still |
+| **Grumpy** | Annoyed and sarcastic, still chatty |
+| **Sleepy** | Drowsy, falls asleep quickly |
+
+#### Activity States
+
+**Active** -> **Idle** -> **Sleepy** -> **Sleeping**
+
+- Any interaction (touch, shake, motion) wakes the bot
+- Shake triggers dizzy reaction, tap triggers random expressions
+- Bot talks via speech bubbles (30+ idle phrases, reactions, greetings)
+- Eyes track IMU tilt and look around autonomously
+
+#### Background Styles
+
+| Style | Description |
+|-------|-------------|
+| 0 | Solid black (default) |
+| 1 | Subtle gradient |
+| 2 | Breathing glow |
+| 3 | Twinkling starfield |
+| 4 | **Ambient overlay** — hi-res ambient effects animate behind the bot face |
+
+The ambient overlay (style 4) renders the full hi-res ambient effects (plasma, fire, ocean, aurora, etc.) as the background, with the bot face drawn on top. Effects and palettes auto-cycle.
+
+#### Overlays
+
+- **Time**: NTP-synced clock display (top-right corner, cyan on dark gray)
+- **Weather**: Live temperature and weather icon via Open-Meteo API (top-left corner)
+- **Speech Bubbles**: Contextual phrases displayed above the face
+- **Notifications**: Status banners for mode/personality changes
+
+### WiFi Configuration
+
+The device creates its own WiFi access point (`VizPow` / `12345678`) and can also connect to your home network for internet features (NTP time, weather).
+
+To configure your home network from the web UI:
+
+```
+http://192.168.4.1/wifi/config?ssid=YourNetworkName&pass=YourPassword
+```
+
+Credentials are saved to flash and persist across reboots. The device will automatically reconnect in the background if the connection drops.
+
 ## Project Structure
 
 ```
@@ -226,8 +288,13 @@ vizpow/
 │   ├── effects_motion.h         # 12 motion-reactive effects
 │   ├── effects_ambient.h        # 13 ambient effects + 13 hi-res LCD variants
 │   ├── effects_emoji.h          # Emoji queue, display, transitions, random fill
-│   ├── emoji_sprites.h          # 41 pixel art sprite definitions
+│   ├── emoji_sprites.h          # 28 pixel art sprites (palette-indexed compression)
 │   ├── display_lcd.h            # LCD rendering (8x8 simulation + hi-res mode)
+│   ├── bot_mode.h               # Bot mode state machine, update/render pipeline
+│   ├── bot_faces.h              # 20 expression definitions + interpolation
+│   ├── bot_eyes.h               # Eye/pupil/brow/mouth rendering, look-around, blink
+│   ├── bot_sayings.h            # Categorized speech bubble phrase pools
+│   ├── bot_overlays.h           # Speech bubbles, time, weather, notification overlays
 │   ├── touch_control.h          # Touch menu gestures and UI
 │   ├── web_server.h             # Web UI HTML + API handlers
 │   └── SensorQMI8658.hpp        # IMU driver
@@ -254,7 +321,7 @@ vizpow/
 |----------|-------------|
 | `/` | Web interface |
 | `/state` | Current state (JSON) |
-| `/mode?v=0\|1\|2` | Set mode (ESP32: motion/ambient/emoji, ESP8266: 0-1 only) |
+| `/mode?v=0\|1\|2\|3` | Set mode (motion/ambient/emoji/bot) |
 | `/effect?v=N` | Set effect index |
 | `/palette?v=N` | Set palette index |
 | `/brightness?v=N` | Set brightness (1-50) |
@@ -263,6 +330,17 @@ vizpow/
 | `/emoji/add?v=N` | Add sprite N to emoji queue |
 | `/emoji/clear` | Clear emoji queue |
 | `/emoji/settings?cycle=MS&fade=MS&auto=0\|1` | Configure emoji playback |
+| `/wifi/config` | Get WiFi STA status (JSON) |
+| `/wifi/config?ssid=X&pass=Y` | Set home network credentials (saved to flash) |
+| `/bot/expression?v=N` | Set bot expression (0-19) |
+| `/bot/say?v=text` | Show speech bubble with custom text |
+| `/bot/personality?v=N` | Set personality (0=Chill, 1=Hyper, 2=Grumpy, 3=Sleepy) |
+| `/bot/background?v=N` | Set face color (0-4) |
+| `/bot/background?style=N` | Set background style (0-4, 4=ambient overlay) |
+| `/bot/time?v=1\|0` | Enable/disable time overlay |
+| `/bot/weather?v=1\|0` | Enable/disable weather overlay |
+| `/bot/weather/config?lat=X&lon=Y` | Set weather location |
+| `/bot/state` | Full bot state (JSON) |
 
 ## Roadmap
 
@@ -271,6 +349,10 @@ vizpow/
 - [x] Hi-res LCD rendering mode
 - [x] Touch menu control
 - [x] ESP8266 lightweight port
+- [x] Bot companion mode with 20 expressions and 4 personalities
+- [x] Ambient overlay — bot face over animated backgrounds
+- [x] NTP time sync with web-configurable WiFi
+- [x] Live weather overlay via Open-Meteo API
 - [ ] Bluetooth Low Energy control
 - [ ] Custom effect creator
 - [ ] Sound reactivity (external mic)
