@@ -390,8 +390,8 @@ void loop() {
         unsigned long now = millis();
         if (now - lastNTPRetry > 30000) {  // Retry every 30s
           lastNTPRetry = now;
-          WiFi.disconnect(true);
-          delay(500);
+          WiFi.disconnect(false);  // false = don't tear down WiFi (keeps AP alive)
+          delay(200);
           WiFi.begin(wifiStaSSID, wifiStaPassword);
         }
       }
