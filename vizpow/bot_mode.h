@@ -5,6 +5,8 @@
 #include "config.h"
 #include "bot_faces.h"
 #include "bot_eyes.h"
+#include "bot_sayings.h"
+#include "bot_overlays.h"
 
 // ============================================================================
 // Bot Mode — Main State Machine & Render Pipeline
@@ -42,6 +44,9 @@ enum BotState : uint8_t {
 #define BOT_FRAME_DELAY_MS     33        // ~30 FPS target
 #define BOT_RANDOM_EXPR_MIN_MS 15000     // Min time between random idle expressions
 #define BOT_RANDOM_EXPR_MAX_MS 45000     // Max time between random idle expressions
+#define BOT_IDLE_SAY_MIN_MS    20000     // Min time between idle sayings
+#define BOT_IDLE_SAY_MAX_MS    60000     // Max time between idle sayings
+#define BOT_SAY_CHANCE_PERCENT 40        // % chance of saying something on reaction
 
 // ============================================================================
 // Bot Mode State
@@ -54,10 +59,16 @@ struct BotModeState {
   BotLookAround lookAround;
   BotIMUTracker imuTracker;
 
+  // Overlays
+  BotSpeechBubble speechBubble;
+  BotNotification notification;
+  BotTimeOverlay timeOverlay;
+
   // Timing
   unsigned long lastInteraction;     // Last touch/shake event
   unsigned long lastFrameTime;
   unsigned long nextRandomExpr;      // Next random idle expression change
+  unsigned long nextIdleSaying;      // Next random idle saying
   unsigned long stateEnteredTime;    // When current state was entered
   unsigned long lastMotionMag;       // For motion detection
 
@@ -69,6 +80,10 @@ struct BotModeState {
   bool shakeReacting;
   unsigned long shakeReactEnd;
 
+  // Custom saying from web
+  char customSaying[32];
+  bool hasCustomSaying;
+
   bool initialized;
 
   void init() {
@@ -77,13 +92,19 @@ struct BotModeState {
     blink.init();
     lookAround.init();
     imuTracker.init();
+    speechBubble.init();
+    notification.init();
+    timeOverlay.init();
     lastInteraction = millis();
     lastFrameTime = millis();
     nextRandomExpr = millis() + random(BOT_RANDOM_EXPR_MIN_MS, BOT_RANDOM_EXPR_MAX_MS);
+    nextIdleSaying = millis() + random(BOT_IDLE_SAY_MIN_MS, BOT_IDLE_SAY_MAX_MS);
     stateEnteredTime = millis();
     sleepBreathPhase = 0;
     lastZzzTime = 0;
     shakeReacting = false;
+    hasCustomSaying = false;
+    customSaying[0] = '\0';
     initialized = true;
   }
 
@@ -102,11 +123,17 @@ struct BotModeState {
       face.transitionTo(EXPR_SURPRISED, 200);
       shakeReacting = true;
       shakeReactEnd = millis() + 800;
+
+      // Show wake-up saying
+      char buf[32];
+      getRandomSayingText(SAY_WAKE, buf, sizeof(buf));
+      speechBubble.show(buf, 2000);
     }
     state = BOT_ACTIVE;
     stateEnteredTime = millis();
     lastInteraction = millis();
     nextRandomExpr = millis() + random(BOT_RANDOM_EXPR_MIN_MS, BOT_RANDOM_EXPR_MAX_MS);
+    nextIdleSaying = millis() + random(BOT_IDLE_SAY_MIN_MS, BOT_IDLE_SAY_MAX_MS);
   }
 
   // Called when bot receives a tap
@@ -118,6 +145,13 @@ struct BotModeState {
     uint8_t pick = reactions[random(0, 4)];
     face.transitionTo(pick, 150);
 
+    // Maybe show a tap saying
+    if (random(100) < BOT_SAY_CHANCE_PERCENT) {
+      char buf[32];
+      getRandomSayingText(SAY_REACT_TAP, buf, sizeof(buf));
+      speechBubble.show(buf, 2500);
+    }
+
     // Schedule return to neutral
     shakeReacting = true;
     shakeReactEnd = millis() + 2000;
@@ -127,6 +161,12 @@ struct BotModeState {
   void onShake() {
     registerInteraction();
     face.transitionTo(EXPR_DIZZY, 150);
+
+    // Show shake saying
+    char buf[32];
+    getRandomSayingText(SAY_REACT_SHAKE, buf, sizeof(buf));
+    speechBubble.show(buf, 2500);
+
     shakeReacting = true;
     shakeReactEnd = millis() + 2500;
   }
@@ -135,8 +175,18 @@ struct BotModeState {
   void setExpression(uint8_t exprIndex, uint16_t duration = 0) {
     registerInteraction();
     face.transitionTo(exprIndex, duration);
-    // Don't auto-return for externally set expressions
     shakeReacting = false;
+  }
+
+  // Show a custom saying (from web UI)
+  void showSaying(const char* text, uint16_t durationMs = 4000) {
+    registerInteraction();
+    speechBubble.show(text, durationMs);
+  }
+
+  // Show a notification banner
+  void showNotification(const char* text, uint16_t durationMs = 2500) {
+    notification.show(text, durationMs);
   }
 };
 
@@ -155,7 +205,7 @@ void updateBotMode() {
   unsigned long now = millis();
   unsigned long timeSinceInteraction = now - botMode.lastInteraction;
 
-  // Skip rendering if menu is visible
+  // Skip if menu is visible
   if (menuVisible) return;
 
   // ---- State machine: activity level transitions ----
@@ -165,9 +215,16 @@ void updateBotMode() {
         botMode.state = BOT_SLEEPY;
         botMode.stateEnteredTime = now;
         botMode.face.transitionTo(EXPR_SLEEPY, 1000);
+
+        // Show sleepy saying
+        char buf[32];
+        getRandomSayingText(SAY_SLEEP, buf, sizeof(buf));
+        botMode.speechBubble.show(buf, 3000);
       } else if (timeSinceInteraction > BOT_IDLE_TIMEOUT_MS) {
-        botMode.state = BOT_IDLE;
-        botMode.stateEnteredTime = now;
+        if (botMode.state != BOT_IDLE) {
+          botMode.state = BOT_IDLE;
+          botMode.stateEnteredTime = now;
+        }
       }
       break;
 
@@ -176,6 +233,10 @@ void updateBotMode() {
         botMode.state = BOT_SLEEPY;
         botMode.stateEnteredTime = now;
         botMode.face.transitionTo(EXPR_SLEEPY, 1000);
+
+        char buf[32];
+        getRandomSayingText(SAY_SLEEP, buf, sizeof(buf));
+        botMode.speechBubble.show(buf, 3000);
       }
       break;
 
@@ -207,11 +268,19 @@ void updateBotMode() {
 
   // ---- Random idle expression changes (only in ACTIVE state) ----
   if (botMode.state == BOT_ACTIVE && !botMode.shakeReacting && now >= botMode.nextRandomExpr) {
-    // Pick a random friendly expression
     uint8_t idleExprs[] = { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_NEUTRAL, EXPR_NEUTRAL };
     uint8_t pick = idleExprs[random(0, 5)];
     botMode.face.transitionTo(pick, 500);
     botMode.nextRandomExpr = now + random(BOT_RANDOM_EXPR_MIN_MS, BOT_RANDOM_EXPR_MAX_MS);
+  }
+
+  // ---- Random idle sayings (ACTIVE or IDLE state) ----
+  if ((botMode.state == BOT_ACTIVE || botMode.state == BOT_IDLE) &&
+      !botMode.speechBubble.active && now >= botMode.nextIdleSaying) {
+    char buf[32];
+    getRandomSayingText(SAY_IDLE, buf, sizeof(buf));
+    botMode.speechBubble.show(buf, 3500);
+    botMode.nextIdleSaying = now + random(BOT_IDLE_SAY_MIN_MS, BOT_IDLE_SAY_MAX_MS);
   }
 
   // ---- Update animation systems ----
@@ -243,6 +312,10 @@ void updateBotMode() {
 
   // Update expression transition
   botMode.face.update();
+
+  // Update overlays
+  botMode.speechBubble.update();
+  botMode.notification.update();
 }
 
 // ============================================================================
@@ -262,23 +335,19 @@ void renderBotMode() {
   // ---- Sleeping: draw Zzz animation ----
   if (botMode.state == BOT_SLEEPING) {
     unsigned long now = millis();
-    // Floating Z characters
-    float t = (float)(now % 3000) / 3000.0f;  // 3-second cycle
+    float t = (float)(now % 3000) / 3000.0f;
 
     int16_t zBaseX = BOT_FACE_CX + 50;
     int16_t zBaseY = BOT_FACE_CY - 40;
 
-    gfx->setTextSize(2);
     gfx->setTextColor(botFaceColor);
 
-    // Three Z's at different phases, floating upward
     for (int i = 0; i < 3; i++) {
       float phase = fmodf(t + i * 0.33f, 1.0f);
       int16_t zx = zBaseX + i * 12 + (int16_t)(sinf(phase * PI * 2) * 4);
       int16_t zy = zBaseY - (int16_t)(phase * 50);
-      uint8_t alpha = (phase < 0.8f) ? 255 : (uint8_t)((1.0f - phase) * 5 * 255);
 
-      if (alpha > 128) {
+      if (phase < 0.8f) {
         gfx->setCursor(zx, zy);
         gfx->setTextSize(1 + i);
         gfx->print("Z");
@@ -288,11 +357,14 @@ void renderBotMode() {
 
   // ---- Sleepy: slow blink animation ----
   if (botMode.state == BOT_SLEEPY) {
-    // Override blink to do slow half-blinks
     float t = (float)(millis() % 4000) / 4000.0f;
-    // Slow sine wave between 0.3 and 0.7 (half-lidded)
     botMode.face.blinkAmount = 0.3f + 0.4f * (sinf(t * TWO_PI) * 0.5f + 0.5f);
   }
+
+  // ---- Render overlays (on top of face) ----
+  botMode.speechBubble.render();
+  botMode.notification.render();
+  botMode.timeOverlay.render();
 }
 
 // ============================================================================
@@ -302,6 +374,11 @@ void renderBotMode() {
 void enterBotMode() {
   if (!botMode.initialized) {
     botMode.init();
+
+    // Show greeting on first entry
+    char buf[32];
+    getRandomSayingText(SAY_GREETING, buf, sizeof(buf));
+    botMode.speechBubble.show(buf, 2500);
   } else {
     // Re-entering bot mode: reset to active
     botMode.state = BOT_ACTIVE;
@@ -309,6 +386,10 @@ void enterBotMode() {
     botMode.face.transitionTo(EXPR_HAPPY, 300);
     botMode.shakeReacting = true;
     botMode.shakeReactEnd = millis() + 1500;
+
+    char buf[32];
+    getRandomSayingText(SAY_GREETING, buf, sizeof(buf));
+    botMode.speechBubble.show(buf, 2000);
   }
 
   // Clear screen for bot mode
@@ -318,7 +399,6 @@ void enterBotMode() {
 }
 
 void exitBotMode() {
-  // Clean up — clear screen for next mode
   if (gfx != nullptr) {
     gfx->fillScreen(BOT_COLOR_BG);
   }
@@ -353,6 +433,18 @@ void setBotFaceColor(uint16_t color) {
   botFaceColor = color;
 }
 
+void showBotSaying(const char* text, uint16_t durationMs) {
+  botMode.showSaying(text, durationMs);
+}
+
+void toggleBotTimeOverlay() {
+  botMode.timeOverlay.enabled = !botMode.timeOverlay.enabled;
+}
+
+bool isBotTimeOverlayEnabled() {
+  return botMode.timeOverlay.enabled;
+}
+
 #else
 
 // Stubs when LCD is not available
@@ -361,6 +453,9 @@ inline void enterBotMode() {}
 inline void exitBotMode() {}
 inline void setBotExpression(uint8_t index) {}
 inline void setBotFaceColor(uint16_t color) {}
+inline void showBotSaying(const char* text, uint16_t durationMs) {}
+inline void toggleBotTimeOverlay() {}
+inline bool isBotTimeOverlayEnabled() { return false; }
 
 #endif // DISPLAY_LCD_ONLY || DISPLAY_DUAL
 

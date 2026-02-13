@@ -189,6 +189,16 @@ const char webpage[] PROGMEM = R"rawliteral(
     <div id="botPanel" class="hidden">
       <h2>Expressions</h2>
       <div class="grid" id="botExpressions"></div>
+      <h2 style="margin-top:15px">Say Something</h2>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="botSayInput" placeholder="Type a message..."
+          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
+        <button onclick="sendBotSay()" style="padding:10px 16px">Say</button>
+      </div>
+      <div class="toggle-row" style="margin-top:12px">
+        <span>Time Overlay</span>
+        <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
+      </div>
     </div>
   </div>
 
@@ -318,6 +328,19 @@ const char webpage[] PROGMEM = R"rawliteral(
     function setEffect(i) { state.effect = i; render(); api('/effect?v=' + i); }
     function setPalette(i) { state.palette = i; render(); api('/palette?v=' + i); }
     function setBotExpr(i) { api('/bot/expression?v=' + i); }
+    function sendBotSay() {
+      const input = document.getElementById('botSayInput');
+      if (input.value.trim()) {
+        api('/bot/say?text=' + encodeURIComponent(input.value.trim()));
+        input.value = '';
+      }
+    }
+    let botTimeOn = false;
+    function toggleBotTime() {
+      botTimeOn = !botTimeOn;
+      document.getElementById('botTimeToggle').className = 'toggle ' + (botTimeOn ? 'on' : '');
+      api('/bot/time?v=' + (botTimeOn ? 1 : 0));
+    }
 
     document.getElementById('brightness').oninput = function() {
       state.brightness = this.value;
@@ -504,9 +527,34 @@ void handleBotExpression() {
   server.send(200, "text/plain", "OK");
 }
 
+void handleBotSay() {
+  if (server.hasArg("text")) {
+    String text = server.arg("text");
+    uint16_t dur = 4000;
+    if (server.hasArg("dur")) {
+      dur = constrain(server.arg("dur").toInt(), 1000, 10000);
+    }
+    showBotSaying(text.c_str(), dur);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotTime() {
+  if (server.hasArg("v")) {
+    if (server.arg("v").toInt() == 2) {
+      toggleBotTimeOverlay();
+    } else {
+      // Explicit on/off
+      botMode.timeOverlay.enabled = (server.arg("v").toInt() == 1);
+    }
+  }
+  server.send(200, "text/plain", "OK");
+}
+
 void handleBotState() {
   String json = "{\"expression\":" + String(getBotExpression()) +
-                ",\"state\":" + String((uint8_t)getBotState()) +
+                ",\"state\":" + String(getBotState()) +
+                ",\"timeOverlay\":" + (isBotTimeOverlayEnabled() ? "true" : "false") +
                 ",\"faceColor\":" + String(botFaceColor) + "}";
   server.send(200, "application/json", json);
 }
@@ -531,6 +579,8 @@ void setupWebServer() {
   // Bot mode endpoints
   #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
   server.on("/bot/expression", handleBotExpression);
+  server.on("/bot/say", handleBotSay);
+  server.on("/bot/time", handleBotTime);
   server.on("/bot/state", handleBotState);
   #endif
 
