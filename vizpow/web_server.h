@@ -24,6 +24,7 @@ extern char wifiStaSSID[];
 extern char wifiStaPassword[];
 extern bool staConnected;
 extern bool ntpSynced;
+extern unsigned long lastNTPRetry;
 
 // Emoji-related externs (defined in effects_emoji.h)
 extern uint8_t emojiQueueCount;
