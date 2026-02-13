@@ -138,28 +138,50 @@ void readIMU() {
   }
 }
 
+// Start or restart the WiFi AP hotspot
+void startWifiAP() {
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+  WiFi.mode(WIFI_AP);
+  delay(100);
+  bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+  DBG("AP Started: ");
+  DBGLN(apStarted ? "YES" : "NO");
+  DBG("AP SSID: ");
+  DBGLN(WIFI_SSID);
+  DBG("AP IP: ");
+  DBGLN(WiFi.softAPIP());
+  delay(500);
+  if (!wifiEnabled) {
+    setupWebServer();
+    DBGLN("Web server started");
+  }
+  wifiEnabled = true;
+}
+
+// Stop the WiFi AP hotspot
+void stopWifiAP() {
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_OFF);
+  wifiEnabled = false;
+  DBGLN("WiFi AP stopped");
+}
+
+// Toggle WiFi AP on/off
+void toggleWifiAP() {
+  if (wifiEnabled) {
+    stopWifiAP();
+  } else {
+    startWifiAP();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(100);
 
-  wifiEnabled = true;  // LCD target: always enable WiFi
-
-  if (wifiEnabled) {
-    // AP-only mode: just start the hotspot
-    WiFi.mode(WIFI_AP);
-    delay(100);
-    bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
-    DBG("AP Started: ");
-    DBGLN(apStarted ? "YES" : "NO");
-    DBG("AP SSID: ");
-    DBGLN(WIFI_SSID);
-    DBG("AP IP: ");
-    DBGLN(WiFi.softAPIP());
-    delay(500);  // Let AP stabilize
-
-    setupWebServer();
-    DBGLN("Web server started");
-  }
+  // Start WiFi AP hotspot
+  startWifiAP();
 
   // Initialize LEDs (needed for the leds[] buffer used by ambient effects)
   FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);

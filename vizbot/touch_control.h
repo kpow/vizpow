@@ -83,6 +83,10 @@ extern uint8_t speed;
 extern void setBotBackgroundStyle(uint8_t style);
 extern uint8_t getBotBackgroundStyle();
 
+// WiFi AP toggle (defined in vizbot.ino)
+extern bool wifiEnabled;
+extern void toggleWifiAP();
+
 // Ambient effect names (for background overlay control)
 const char* ambientEffectNames[] = {
   "Plasma", "Rainbow", "Fire", "Ocean", "Sparkle",
@@ -265,8 +269,25 @@ void drawMenu() {
     drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "BRIGHT", 0x0400);
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 4: Auto cycle | Close
-    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "AUTO", autoCycle ? 0x0400 : 0x4000);
+    // Row 4: Settings | Close
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "SETTINGS", 0x4208);
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "CLOSE", 0x7800);
+  } else if (menuPage == 1) {
+    // === SETTINGS PAGE ===
+
+    // Row 1: WiFi toggle | Auto cycle
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, wifiEnabled ? "WIFI ON" : "WIFI OFF", wifiEnabled ? 0x0400 : 0x4000);
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, autoCycle ? "AUTO ON" : "AUTO OFF", autoCycle ? 0x0400 : 0x4000);
+    rowY += BTN_HEIGHT + BTN_GAP;
+
+    // Row 2: (empty for now)
+    rowY += BTN_HEIGHT + BTN_GAP;
+
+    // Row 3: (empty for now)
+    rowY += BTN_HEIGHT + BTN_GAP;
+
+    // Row 4: Back | Close
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "BACK", 0x4208);
     drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "CLOSE", 0x7800);
   }
 
@@ -326,29 +347,41 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
   if (row > 3) row = 3;
   int col = (x < LCD_WIDTH / 2) ? 0 : 1;
 
-  switch (row) {
-    case 0:  // Background on/off | Cycle effect
-      if (col == 0) {
-        // Toggle ambient background on/off
-        setBotBackgroundStyle(getBotBackgroundStyle() == 4 ? 0 : 4);
-      } else {
-        touchNextEffect();
-      }
-      break;
-    case 1:  // Palette / Hi-Res toggle
-      if (col == 0) touchNextPalette();
-      #if defined(HIRES_ENABLED)
-      else toggleHiResMode();
-      #endif
-      break;
-    case 2:  // Brightness
-      if (col == 0) touchBrightnessDown();
-      else touchBrightnessUp();
-      break;
-    case 3:  // Auto / Close
-      if (col == 0) touchToggleAutoCycle();
-      else return true;
-      break;
+  if (menuPage == 0) {
+    switch (row) {
+      case 0:  // Background on/off | Cycle effect
+        if (col == 0) {
+          setBotBackgroundStyle(getBotBackgroundStyle() == 4 ? 0 : 4);
+        } else {
+          touchNextEffect();
+        }
+        break;
+      case 1:  // Palette / Hi-Res toggle
+        if (col == 0) touchNextPalette();
+        #if defined(HIRES_ENABLED)
+        else toggleHiResMode();
+        #endif
+        break;
+      case 2:  // Brightness
+        if (col == 0) touchBrightnessDown();
+        else touchBrightnessUp();
+        break;
+      case 3:  // Settings | Close
+        if (col == 0) { menuPage = 1; }
+        else return true;
+        break;
+    }
+  } else if (menuPage == 1) {
+    switch (row) {
+      case 0:  // WiFi | Auto
+        if (col == 0) toggleWifiAP();
+        else touchToggleAutoCycle();
+        break;
+      case 3:  // Back | Close
+        if (col == 0) { menuPage = 0; }
+        else return true;
+        break;
+    }
   }
   return false;
 }
