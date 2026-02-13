@@ -2,7 +2,6 @@
 #define WEB_SERVER_H
 
 #include <WebServer.h>
-#include <Preferences.h>
 #include <FastLED.h>
 #include "config.h"
 #include "palettes.h"
@@ -17,15 +16,6 @@ extern bool autoCycle;
 extern void resetEffectShuffle();
 extern uint8_t currentMode;
 extern CRGBPalette16 currentPalette;
-
-// WiFi STA externs
-extern Preferences preferences;
-extern char wifiStaSSID[];
-extern char wifiStaPassword[];
-extern bool staConnected;
-extern bool ntpSynced;
-extern unsigned long lastNTPRetry;
-
 
 // Web interface HTML
 const char webpage[] PROGMEM = R"rawliteral(
@@ -199,44 +189,10 @@ void handleBotBackground() {
   server.send(200, "text/plain", "OK");
 }
 
-// WiFi STA configuration endpoint
-void handleWifiConfig() {
-  if (server.hasArg("ssid") && server.hasArg("pass")) {
-    String ssid = server.arg("ssid");
-    String pass = server.arg("pass");
-
-    // Save to NVS
-    preferences.begin("vizpow", false);
-    preferences.putString("sta_ssid", ssid);
-    preferences.putString("sta_pass", pass);
-    preferences.end();
-
-    // Update runtime credentials
-    ssid.toCharArray(wifiStaSSID, 33);
-    pass.toCharArray(wifiStaPassword, 65);
-
-    // Disconnect and reconnect with new credentials
-    WiFi.disconnect(false);
-    staConnected = false;
-    ntpSynced = false;
-    lastNTPRetry = millis();
-    delay(200);
-    WiFi.begin(wifiStaSSID, wifiStaPassword);
-
-    server.send(200, "application/json", "{\"ok\":true,\"ssid\":\"" + ssid + "\"}");
-  } else {
-    String json = "{\"ssid\":\"" + String(wifiStaSSID) + "\",\"connected\":" +
-                  (staConnected ? "true" : "false") + ",\"ntp\":" +
-                  (ntpSynced ? "true" : "false") + "}";
-    server.send(200, "application/json", json);
-  }
-}
-
 void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/state", handleState);
   server.on("/brightness", handleBrightness);
-  server.on("/wifi/config", handleWifiConfig);
 
   // Bot mode endpoints
   server.on("/bot/expression", handleBotExpression);
