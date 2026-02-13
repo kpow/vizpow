@@ -405,11 +405,16 @@ void loop() {
     server.handleClient();
 
     // Background WiFi STA reconnect + NTP retry
-    if (!staConnected && strlen(wifiStaSSID) > 0 && WiFi.status() != WL_CONNECTED) {
-      unsigned long now = millis();
-      if (now - lastNTPRetry > 30000) {  // Retry every 30s
-        lastNTPRetry = now;
-        WiFi.begin(wifiStaSSID, wifiStaPassword);
+    if (!staConnected && strlen(wifiStaSSID) > 0) {
+      wl_status_t ws = WiFi.status();
+      if (ws != WL_CONNECTED && ws != WL_IDLE_STATUS) {
+        unsigned long now = millis();
+        if (now - lastNTPRetry > 30000) {  // Retry every 30s
+          lastNTPRetry = now;
+          WiFi.disconnect(false);
+          delay(100);
+          WiFi.begin(wifiStaSSID, wifiStaPassword);
+        }
       }
     }
     if (!staConnected && WiFi.status() == WL_CONNECTED) {
