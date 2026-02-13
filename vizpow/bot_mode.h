@@ -368,47 +368,54 @@ void updateBotMode() {
 // Background style (declared before renderBotMode which uses it)
 uint8_t botBackgroundStyle = 0;  // 0=solid black, 1=subtle gradient, 2=breathing, 3=starfield
 
-// Track previous frame's face bounds for minimal-clear approach
-static int16_t prevFaceTop = 0;
-static int16_t prevFaceBot = 0;
+// ============================================================================
+// Offscreen Canvas — eliminates ALL flicker
+// ============================================================================
+// Instead of drawing directly to the screen (which flickers when elements are
+// erased then redrawn), we draw each frame to an offscreen RAM buffer first,
+// then flush the whole buffer to the display in one atomic SPI transfer.
+// This is the standard double-buffer / sprite technique for TFT displays.
+
+static Arduino_Canvas *botCanvas = nullptr;
+static Arduino_GFX *gfxReal = nullptr;   // The actual hardware display
 static bool botFirstFrame = true;
 
 void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
 
-  if (botFirstFrame) {
-    gfx->fillScreen(BOT_COLOR_BG);
-    prevFrame.invalidate();
-    botFirstFrame = false;
+  // ---- Initialize canvas on first use ----
+  if (botCanvas == nullptr) {
+    gfxReal = gfx;  // Save the real display pointer
+    botCanvas = new Arduino_Canvas(LCD_WIDTH, LCD_HEIGHT, gfxReal);
+    botCanvas->begin();
   }
 
-  // Determine the current background color for erasing elements
+  // Swap gfx to canvas — all drawing calls now go to offscreen buffer
+  gfx = botCanvas;
+
+  // ---- Clear canvas with background ----
   uint16_t bgColor = BOT_COLOR_BG;
-  if (botBackgroundStyle == 2) {
-    // Breathing: compute current bg color but DON'T clear the whole face
+
+  if (botBackgroundStyle == 0) {
+    // Solid black
+    gfx->fillScreen(BOT_COLOR_BG);
+  } else if (botBackgroundStyle == 1) {
+    // Subtle gradient
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 4) {
+      uint8_t b = (uint8_t)((1.0f - (float)y / LCD_HEIGHT) * 12);
+      uint16_t c = ((b >> 3) << 11) | ((b >> 2) << 5) | (b >> 1);
+      gfx->fillRect(0, y, LCD_WIDTH, 4, c);
+    }
+  } else if (botBackgroundStyle == 2) {
+    // Breathing
     float breathT = (float)(millis() % 6000) / 6000.0f;
     uint8_t intensity = (uint8_t)(sinf(breathT * TWO_PI) * 4.0f + 4.0f);
     bgColor = ((intensity >> 3) << 11) | ((intensity >> 2) << 5) | (intensity >> 1);
-  }
-
-  // Background styles 1 and 3 need periodic refresh of non-face areas only
-  if (botBackgroundStyle == 1) {
-    // Subtle gradient — only redraw strips outside the face zone
-    int16_t faceTop = BOT_FACE_CY - 70;
-    int16_t faceBot = BOT_FACE_CY + 90;
-    for (int16_t y = 0; y < faceTop; y += 4) {
-      uint8_t b = (uint8_t)((1.0f - (float)y / LCD_HEIGHT) * 12);
-      uint16_t c = ((b >> 3) << 11) | ((b >> 2) << 5) | (b >> 1);
-      gfx->fillRect(0, y, LCD_WIDTH, 4, c);
-    }
-    for (int16_t y = faceBot; y < LCD_HEIGHT; y += 4) {
-      uint8_t b = (uint8_t)((1.0f - (float)y / LCD_HEIGHT) * 12);
-      uint16_t c = ((b >> 3) << 11) | ((b >> 2) << 5) | (b >> 1);
-      gfx->fillRect(0, y, LCD_WIDTH, 4, c);
-    }
+    gfx->fillScreen(bgColor);
   } else if (botBackgroundStyle == 3) {
-    // Starfield — just draw the stars (tiny 2x2 rects), no clearing
+    // Starfield on black
+    gfx->fillScreen(BOT_COLOR_BG);
     for (int i = 0; i < 8; i++) {
       int16_t sx = (i * 31 + 17) % LCD_WIDTH;
       int16_t sy = (i * 47 + 11) % LCD_HEIGHT;
@@ -417,13 +424,14 @@ void renderBotMode() {
         uint8_t bright = (uint8_t)(twinkle * 8);
         uint16_t starColor = ((bright >> 3) << 11) | ((bright >> 2) << 5) | (bright >> 3);
         gfx->fillRect(sx, sy, 2, 2, starColor);
-      } else {
-        gfx->fillRect(sx, sy, 2, 2, BOT_COLOR_BG);
       }
     }
   }
 
-  // Render the face (handles its own targeted erasing internally)
+  // Since we redraw everything fresh each frame, skip the old targeted-erase logic
+  prevFrame.invalidate();
+
+  // ---- Render the face ----
   renderBotFace(botMode.face, bgColor);
 
   // ---- Sleeping: draw Zzz animation ----
@@ -433,9 +441,6 @@ void renderBotMode() {
 
     int16_t zBaseX = BOT_FACE_CX + 50;
     int16_t zBaseY = BOT_FACE_CY - 40;
-
-    // Clear Zzz zone before redrawing (small targeted rect)
-    gfx->fillRect(zBaseX - 6, zBaseY - 55, 50, 60, bgColor);
 
     gfx->setTextColor(botFaceColor);
 
@@ -463,6 +468,12 @@ void renderBotMode() {
   botMode.notification.render();
   botMode.timeOverlay.render();
   botMode.weatherOverlay.render();
+
+  // ---- Flush canvas to screen in one atomic transfer — zero flicker ----
+  botCanvas->flush();
+
+  // Restore real display pointer
+  gfx = gfxReal;
 }
 
 // ============================================================================
@@ -470,7 +481,7 @@ void renderBotMode() {
 // ============================================================================
 
 void enterBotMode() {
-  botFirstFrame = true;  // Force full clear on entry
+  botFirstFrame = true;
   prevFrame.invalidate();
 
   if (!botMode.initialized) {
@@ -493,13 +504,18 @@ void enterBotMode() {
     botMode.speechBubble.show(buf, 2000);
   }
 
-  // Clear screen for bot mode
-  if (gfx != nullptr) {
-    gfx->fillScreen(BOT_COLOR_BG);
+  // Clear the actual screen (use real display, not canvas)
+  Arduino_GFX *screen = (gfxReal != nullptr) ? gfxReal : gfx;
+  if (screen != nullptr) {
+    screen->fillScreen(BOT_COLOR_BG);
   }
 }
 
 void exitBotMode() {
+  // Restore gfx to real display when leaving bot mode
+  if (gfxReal != nullptr) {
+    gfx = gfxReal;
+  }
   if (gfx != nullptr) {
     gfx->fillScreen(BOT_COLOR_BG);
   }

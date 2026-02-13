@@ -185,9 +185,9 @@ struct BotLookAround {
 
 struct BotIMUTracker {
   float smoothX, smoothY;
-  static constexpr float SMOOTH_FACTOR = 0.15f;   // Low-pass filter (0-1, lower = smoother)
-  static constexpr float TILT_SCALE = 12.0f;      // Pixels per g of tilt
-  static constexpr float MAX_OFFSET = 18.0f;      // Max pupil offset from IMU
+  static constexpr float SMOOTH_FACTOR = 0.2f;    // Low-pass filter (0-1, lower = smoother)
+  static constexpr float TILT_SCALE = 35.0f;      // Pixels per g of tilt (high = sensitive)
+  static constexpr float MAX_OFFSET = 24.0f;      // Max pupil offset from IMU
 
   void init() {
     smoothX = 0;

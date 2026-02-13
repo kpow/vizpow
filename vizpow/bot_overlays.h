@@ -60,12 +60,12 @@ struct BotSpeechBubble {
 
     // Calculate bubble dimensions based on text
     uint8_t textLen = strlen(text);
-    // Text size 1 = 6x8 per char
-    bubbleW = textLen * 6 + 16;  // 8px padding each side
-    if (bubbleW > 220) bubbleW = 220;  // Max width
-    bubbleH = 24;  // Single line + padding
+    // Text size 2 = 12x16 per char
+    bubbleW = textLen * 12 + 20;  // 10px padding each side
+    if (bubbleW > 234) bubbleW = 234;  // Max width (near full screen)
+    bubbleH = 36;  // 16px text + 20px padding
     bubbleX = (LCD_WIDTH - bubbleW) / 2;  // Centered
-    bubbleY = 210;  // Below the face, above screen bottom
+    bubbleY = 220;  // Below the face
   }
 
   // Show from PROGMEM string
@@ -133,14 +133,14 @@ struct BotSpeechBubble {
 
     // Draw text (only when fully visible or popping in past 50%)
     if (scale > 0.5f) {
-      gfx->setTextSize(1);
+      gfx->setTextSize(2);
       gfx->setTextColor(OVERLAY_TEXT);
 
-      // Center text in bubble
+      // Center text in bubble (text size 2 = 12x16 per char)
       uint8_t textLen = strlen(text);
-      int16_t textW = textLen * 6;
+      int16_t textW = textLen * 12;
       int16_t textX = sx + (sw - textW) / 2;
-      int16_t textY = sy + (sh - 8) / 2;
+      int16_t textY = sy + (sh - 16) / 2;
 
       gfx->setCursor(textX, textY);
       gfx->print(text);
@@ -252,12 +252,12 @@ struct BotTimeOverlay {
     char buf[8];
     snprintf(buf, sizeof(buf), "%02d:%02d", hours, minutes);
 
-    // Semi-transparent background
-    gfx->fillRoundRect(LCD_WIDTH - 46, 2, 44, 16, 4, 0x2104);  // Dark gray
+    // Large time display — text size 3 = 18x24 per char, "00:00" = 90px wide
+    gfx->fillRoundRect(LCD_WIDTH - 100, 2, 96, 30, 6, 0x2104);  // Dark gray bg
 
-    gfx->setTextSize(1);
-    gfx->setTextColor(0x7BEF);  // Dim gray text
-    gfx->setCursor(LCD_WIDTH - 42, 6);
+    gfx->setTextSize(3);
+    gfx->setTextColor(0x07FF);  // Cyan text
+    gfx->setCursor(LCD_WIDTH - 96, 5);
     gfx->print(buf);
   }
 };
