@@ -54,6 +54,7 @@ const char webpage[] PROGMEM = R"rawliteral(
       <button class="tab active" id="tabMotion" onclick="setMode(0)">Motion</button>
       <button class="tab" id="tabAmbient" onclick="setMode(1)">Ambient</button>
       <button class="tab" id="tabEmoji" onclick="setMode(2)">Emoji</button>
+      <button class="tab" id="tabBot" onclick="setMode(3)">Bot</button>
     </div>
 
     <div id="effectsPanel">
@@ -79,6 +80,25 @@ const char webpage[] PROGMEM = R"rawliteral(
       <div class="toggle-row">
         <span>Auto Cycle</span>
         <div class="toggle on" id="emojiAutoCycle"></div>
+      </div>
+    </div>
+
+    <div id="botPanel" class="hidden">
+      <h2>Expressions</h2>
+      <div class="grid" id="botExpressions"></div>
+      <h2 style="margin-top:15px">Say Something</h2>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="botSayInput" placeholder="Type a message..."
+          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
+        <button onclick="sendBotSay()" style="padding:10px 16px">Say</button>
+      </div>
+      <h2 style="margin-top:15px">Face Color</h2>
+      <div class="grid4" id="botColors"></div>
+      <h2 style="margin-top:15px">Background</h2>
+      <div class="grid" id="botBgStyles"></div>
+      <div class="toggle-row" style="margin-top:12px">
+        <span>Time Overlay</span>
+        <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
       </div>
     </div>
   </div>
@@ -110,6 +130,11 @@ const char webpage[] PROGMEM = R"rawliteral(
     const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Tilt Ripple", "Gyro Swirl", "Shake Explode"];
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
+    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];
+    const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
+    const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
+    let curBgStyle = 0;
+
     let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };
     let emojiQueue = [];
     let emojiAutoCycle = true;
@@ -127,13 +152,26 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('tabMotion').className = 'tab ' + (state.currentMode === 0 ? 'active' : '');
       document.getElementById('tabAmbient').className = 'tab ' + (state.currentMode === 1 ? 'active' : '');
       document.getElementById('tabEmoji').className = 'tab ' + (state.currentMode === 2 ? 'active' : '');
+      document.getElementById('tabBot').className = 'tab ' + (state.currentMode === 3 ? 'active' : '');
 
+      const isBot = state.currentMode === 3;
       const isEmoji = state.currentMode === 2;
-      document.getElementById('effectsPanel').className = isEmoji ? 'hidden' : '';
+      document.getElementById('effectsPanel').className = (isEmoji || isBot) ? 'hidden' : '';
       document.getElementById('emojiPanel').className = isEmoji ? '' : 'hidden';
-      document.getElementById('paletteCard').className = isEmoji ? 'card hidden' : 'card';
+      document.getElementById('botPanel').className = isBot ? '' : 'hidden';
+      document.getElementById('paletteCard').className = (isEmoji || isBot) ? 'card hidden' : 'card';
 
-      if (!isEmoji) {
+      if (isBot) {
+        document.getElementById('botExpressions').innerHTML = botExprNames.map((name, i) =>
+          `<button onclick="setBotExpr(${i})">${name}</button>`
+        ).join('');
+        document.getElementById('botColors').innerHTML = botColorNames.map((name, i) =>
+          `<button onclick="setBotColor(${i})">${name}</button>`
+        ).join('');
+        document.getElementById('botBgStyles').innerHTML = botBgStyles.map(s =>
+          `<button class="${curBgStyle === s.v ? 'active' : ''}" onclick="setBotBgStyle(${s.v})">${s.n}</button>`
+        ).join('');
+      } else if (!isEmoji) {
         document.getElementById('effects').innerHTML = effects.map((e, i) =>
           `<button class="${state.effect === i ? 'active' : ''}" onclick="setEffect(${i})">${e}</button>`
         ).join('');
@@ -196,6 +234,22 @@ const char webpage[] PROGMEM = R"rawliteral(
     }
     function setEffect(i) { state.effect = i; render(); api('/effect?v=' + i); }
     function setPalette(i) { state.palette = i; render(); api('/palette?v=' + i); }
+    function setBotExpr(i) { api('/bot/expression?v=' + i); }
+    function sendBotSay() {
+      const input = document.getElementById('botSayInput');
+      if (input.value.trim()) {
+        api('/bot/say?text=' + encodeURIComponent(input.value.trim()));
+        input.value = '';
+      }
+    }
+    let botTimeOn = false;
+    function toggleBotTime() {
+      botTimeOn = !botTimeOn;
+      document.getElementById('botTimeToggle').className = 'toggle ' + (botTimeOn ? 'on' : '');
+      api('/bot/time?v=' + (botTimeOn ? 1 : 0));
+    }
+    function setBotColor(i) { api('/bot/background?v=' + i); }
+    function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
 
     document.getElementById('brightness').oninput = function() {
       state.brightness = this.value;
@@ -278,9 +332,20 @@ void handleState() {
   server.send(200, "application/json", json);
 }
 
+// Bot mode — functions defined in bot_mode.h (included before this file)
+#if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+// bot_faces.h, bot_eyes.h, bot_mode.h already included via vizpow.ino
+#endif
+
 void handleMode() {
   if (server.hasArg("v")) {
-    uint8_t newMode = constrain(server.arg("v").toInt(), 0, 2);  // 3 modes: motion, ambient, emoji
+    uint8_t newMode = constrain(server.arg("v").toInt(), 0, NUM_MODES - 1);
+    #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+      if (currentMode == MODE_BOT && newMode != MODE_BOT) exitBotMode();
+      if (newMode == MODE_BOT && currentMode != MODE_BOT) enterBotMode();
+    #else
+      if (newMode == MODE_BOT) newMode = MODE_MOTION;  // No bot on non-LCD
+    #endif
     currentMode = newMode;
     effectIndex = 0;
     resetEffectShuffle();
@@ -361,6 +426,57 @@ void handleEmojiClear() {
   server.send(200, "text/plain", "OK");
 }
 
+// Bot mode handlers
+#if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+void handleBotExpression() {
+  if (server.hasArg("v")) {
+    uint8_t expr = constrain(server.arg("v").toInt(), 0, BOT_NUM_EXPRESSIONS - 1);
+    setBotExpression(expr);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotSay() {
+  if (server.hasArg("text")) {
+    String text = server.arg("text");
+    uint16_t dur = 4000;
+    if (server.hasArg("dur")) {
+      dur = constrain(server.arg("dur").toInt(), 1000, 10000);
+    }
+    showBotSaying(text.c_str(), dur);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotTime() {
+  if (server.hasArg("v")) {
+    if (server.arg("v").toInt() == 2) {
+      toggleBotTimeOverlay();
+    } else {
+      // Explicit on/off
+      botMode.timeOverlay.enabled = (server.arg("v").toInt() == 1);
+    }
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotBackground() {
+  if (server.hasArg("v")) {
+    // Map index to color: 0=white, 1=cyan, 2=green, 3=magenta, 4=yellow
+    uint16_t colors[] = { 0xFFFF, 0x07FF, 0x07E0, 0xF81F, 0xFFE0 };
+    uint8_t idx = constrain(server.arg("v").toInt(), 0, 4);
+    setBotFaceColor(colors[idx]);
+  }
+  if (server.hasArg("style")) {
+    uint8_t style = constrain(server.arg("style").toInt(), 0, 4);
+    setBotBackgroundStyle(style);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+#endif
+
+// Setup all web server routes
 // WiFi STA configuration endpoint
 void handleWifiConfig() {
   if (server.hasArg("ssid") && server.hasArg("pass")) {
@@ -409,6 +525,14 @@ void setupWebServer() {
   server.on("/emoji/add", handleEmojiAdd);
   server.on("/emoji/settings", handleEmojiSettings);
   server.on("/emoji/clear", handleEmojiClear);
+
+  // Bot mode endpoints
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+  server.on("/bot/expression", handleBotExpression);
+  server.on("/bot/say", handleBotSay);
+  server.on("/bot/time", handleBotTime);
+  server.on("/bot/background", handleBotBackground);
+  #endif
 
   server.begin();
 }

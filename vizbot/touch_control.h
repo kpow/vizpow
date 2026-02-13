@@ -81,8 +81,10 @@ static uint8_t lcdBrightness = 200;
 // Speed control (external from main sketch)
 extern uint8_t speed;
 
+// Bot mode — functions defined in bot_mode.h (included before this file)
+
 // Mode names
-const char* modeNames[] = {"Motion", "Ambient", "Emoji"};
+const char* modeNames[] = {"Motion", "Ambient", "Emoji", "Bot"};
 
 // Effect names (abbreviated)
 const char* motionEffectNames[] = {
@@ -341,7 +343,14 @@ void touchPrevEffect() {
 }
 
 void touchNextMode() {
-  uint8_t nextMode = (currentMode + 1) % NUM_MODES;
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+    // Exit bot mode if leaving it
+    if (currentMode == MODE_BOT) exitBotMode();
+    uint8_t nextMode = (currentMode + 1) % NUM_MODES;
+    if (nextMode == MODE_BOT) enterBotMode();
+  #else
+    uint8_t nextMode = (currentMode + 1) % 3;
+  #endif
   if (nextMode == MODE_EMOJI && emojiQueueCount == 0) {
     addRandomEmojis(RANDOM_EMOJI_COUNT);
   }
@@ -487,7 +496,7 @@ void handleTouch() {
   if (touching) {
     lastTouchTime = now;
 
-    // Menu not visible - check for long press to open
+    // Menu not visible - check for long press to open, or short tap for bot reaction
     if (!menuVisible) {
       // Start tracking touch if not already
       if (touchStartTime == 0) {
@@ -529,6 +538,16 @@ void handleTouch() {
       waitingForLift = true;
     }
   } else {
+    // Finger lifted - check for short tap in bot mode
+    #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+    if (touchStartTime > 0 && !longPressTriggered && !menuVisible &&
+        currentMode == MODE_BOT && (now - touchStartTime < LONG_PRESS_MS)) {
+      // Short tap in bot mode — trigger reaction
+      botMode.onTap();
+      DBGLN("Bot tap reaction");
+    }
+    #endif
+
     // Reset long press tracking
     touchStartTime = 0;
     longPressTriggered = false;
