@@ -163,7 +163,8 @@ void setup() {
     savedPass.toCharArray(wifiStaPassword, sizeof(wifiStaPassword));
 
     // AP+STA: keep web server AP and connect to home network for NTP
-    WiFi.mode(WIFI_AP_STA);
+    // Start AP first and let it stabilize before touching STA
+    WiFi.mode(WIFI_AP);
     delay(100);
     bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
     DBG("AP Started: ");
@@ -172,6 +173,11 @@ void setup() {
     DBGLN(WIFI_SSID);
     DBG("AP IP: ");
     DBGLN(WiFi.softAPIP());
+    delay(500);  // Let AP stabilize before enabling STA
+
+    // Now enable STA alongside AP for home network NTP
+    WiFi.mode(WIFI_AP_STA);
+    delay(100);
 
     // Connect to home network for NTP
     if (strlen(wifiStaSSID) > 0) {
@@ -179,7 +185,7 @@ void setup() {
       DBG("Connecting to ");
       DBG(wifiStaSSID);
       int tries = 0;
-      while (WiFi.status() != WL_CONNECTED && tries < 30) {
+      while (WiFi.status() != WL_CONNECTED && tries < 20) {
         delay(300);
         DBG(".");
         tries++;
@@ -200,6 +206,9 @@ void setup() {
           DBGLN("NTP pending (will retry in loop)");
         }
       } else {
+        // STA failed — disconnect cleanly so it doesn't interfere with AP
+        WiFi.disconnect(true);
+        delay(100);
         DBGLN("\nHome network connection failed - will retry in background");
       }
     } else {
@@ -261,15 +270,13 @@ void loop() {
   if (wifiEnabled) {
     server.handleClient();
 
-    // Background WiFi STA reconnect + NTP retry
+    // Background WiFi STA reconnect + NTP retry (non-blocking)
     if (!staConnected && strlen(wifiStaSSID) > 0) {
       wl_status_t ws = WiFi.status();
-      if (ws == WL_CONNECT_FAILED || ws == WL_NO_SSID_AVAIL || ws == WL_DISCONNECTED) {
+      if (ws == WL_CONNECT_FAILED || ws == WL_NO_SSID_AVAIL || ws == WL_DISCONNECTED || ws == WL_IDLE_STATUS) {
         unsigned long now = millis();
-        if (now - lastNTPRetry > 30000) {  // Retry every 30s
+        if (now - lastNTPRetry > 60000) {  // Retry every 60s (less aggressive)
           lastNTPRetry = now;
-          WiFi.disconnect(true);
-          delay(500);
           WiFi.begin(wifiStaSSID, wifiStaPassword);
         }
       }
