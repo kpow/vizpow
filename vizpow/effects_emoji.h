@@ -88,11 +88,9 @@ bool addEmojiByIndex(uint8_t spriteIndex) {
     return false;
   }
 
-  // Get pointer to sprite data and copy to queue
-  const CRGB* spritePtr = emojiSprites[spriteIndex];
-  for (int i = 0; i < 64; i++) {
-    emojiQueue[emojiQueueCount].pixels[i] = spritePtr[i];
-  }
+  // Get pointer to palette-indexed sprite data and decode to CRGB
+  const uint8_t* spritePtr = (const uint8_t*)pgm_read_ptr(&emojiSprites[spriteIndex]);
+  decodeIcon(spritePtr, emojiQueue[emojiQueueCount].pixels);
   emojiQueue[emojiQueueCount].active = true;
   emojiQueueCount++;
   return true;
