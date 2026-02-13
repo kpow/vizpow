@@ -92,8 +92,6 @@ const char webpage[] PROGMEM = R"rawliteral(
           style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
         <button onclick="sendBotSay()" style="padding:10px 16px">Say</button>
       </div>
-      <h2 style="margin-top:15px">Personality</h2>
-      <div class="grid4" id="botPersonalities"></div>
       <h2 style="margin-top:15px">Face Color</h2>
       <div class="grid4" id="botColors"></div>
       <h2 style="margin-top:15px">Background</h2>
@@ -133,10 +131,8 @@ const char webpage[] PROGMEM = R"rawliteral(
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
     const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];
-    const botPersonalityNames = ["Chill", "Hyper", "Grumpy", "Sleepy"];
     const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
     const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
-    let curPersonality = 0;
     let curBgStyle = 0;
 
     let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };
@@ -171,9 +167,6 @@ const char webpage[] PROGMEM = R"rawliteral(
       if (isBot) {
         document.getElementById('botExpressions').innerHTML = botExprNames.map((name, i) =>
           `<button onclick="setBotExpr(${i})">${name}</button>`
-        ).join('');
-        document.getElementById('botPersonalities').innerHTML = botPersonalityNames.map((name, i) =>
-          `<button class="${curPersonality === i ? 'active' : ''}" onclick="setBotPers(${i})">${name}</button>`
         ).join('');
         document.getElementById('botColors').innerHTML = botColorNames.map((name, i) =>
           `<button onclick="setBotColor(${i})">${name}</button>`
@@ -258,7 +251,6 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('botTimeToggle').className = 'toggle ' + (botTimeOn ? 'on' : '');
       api('/bot/time?v=' + (botTimeOn ? 1 : 0));
     }
-    function setBotPers(i) { curPersonality = i; render(); api('/bot/personality?v=' + i); }
     function setBotColor(i) { api('/bot/background?v=' + i); }
     function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
 
