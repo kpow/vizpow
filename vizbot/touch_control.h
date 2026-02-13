@@ -36,7 +36,7 @@
 #define BTN_WIDTH 110        // Button width (2 per row with gap)
 #define BTN_HEIGHT 42        // Button height
 #define BTN_GAP 8            // Gap between buttons
-#define BTN_START_Y 66       // Y start for buttons (after header with palette)
+#define BTN_START_Y 66       // Y start for buttons (after header)
 
 // External variables
 extern uint8_t effectIndex;
@@ -49,8 +49,6 @@ extern CRGBPalette16 currentPalette;
 extern CRGB leds[];
 extern void resetEffectShuffle();
 extern CRGBPalette16 palettes[];
-extern uint8_t emojiQueueCount;
-extern uint8_t addRandomEmojis(uint8_t count);
 
 // External GFX object from display_lcd.h
 extern Arduino_GFX *gfx;
@@ -66,14 +64,14 @@ static bool touchInitialized = false;
 static uint8_t touchI2CAddr = TOUCH_I2C_ADDR;
 static unsigned long lastTouchTime = 0;
 static unsigned long lastActionTime = 0;
-static bool waitingForLift = false;  // Wait for finger to lift before accepting new touch
-static unsigned long touchStartTime = 0;  // When finger first touched
-static bool longPressTriggered = false;   // Whether long press already fired
+static bool waitingForLift = false;
+static unsigned long touchStartTime = 0;
+static bool longPressTriggered = false;
 bool menuVisible = false;  // Not static - accessed from display_lcd.h
-static uint8_t menuPage = 0;  // 0 = main, 1 = settings
+static uint8_t menuPage = 0;
 
 // Long press timing
-#define LONG_PRESS_MS 600  // Hold for 600ms to open menu
+#define LONG_PRESS_MS 600
 
 // LCD backlight brightness (0-255)
 static uint8_t lcdBrightness = 200;
@@ -81,15 +79,15 @@ static uint8_t lcdBrightness = 200;
 // Speed control (external from main sketch)
 extern uint8_t speed;
 
-// Mode names
-const char* modeNames[] = {"Motion", "Ambient", "Emoji"};
+// Bot background style control (defined in bot_mode.h)
+extern void setBotBackgroundStyle(uint8_t style);
+extern uint8_t getBotBackgroundStyle();
 
-// Effect names (abbreviated)
-const char* motionEffectNames[] = {
-  "TiltBall", "Plasma", "Sparkle", "TiltWave", "SpinTrail",
-  "Gravity", "Noise", "Ripple", "GyroSwirl", "Explode", "TiltFire", "Rainbow"
-};
+// WiFi AP toggle (defined in vizbot.ino)
+extern bool wifiEnabled;
+extern void toggleWifiAP();
 
+// Ambient effect names (for background overlay control)
 const char* ambientEffectNames[] = {
   "Plasma", "Rainbow", "Fire", "Ocean", "Sparkle",
   "Matrix", "Lava", "Aurora", "Confetti", "Comet",
@@ -128,7 +126,6 @@ bool initTouch() {
   resetTouch();
   delay(100);
 
-  // Try known addresses
   uint8_t addresses[] = {0x15, 0x5A, 0x38};
   for (int i = 0; i < 3; i++) {
     Wire.beginTransmission(addresses[i]);
@@ -141,7 +138,6 @@ bool initTouch() {
     }
   }
 
-  // Try alternate reset pins
   uint8_t rstPins[] = {16, 9, 13};
   for (int p = 0; p < 3; p++) {
     pinMode(rstPins[p], OUTPUT);
@@ -189,15 +185,10 @@ bool readTouch(uint16_t &x, uint16_t &y) {
 
 // Draw a solid button with centered text
 void drawButton(int16_t x, int16_t y, int16_t w, int16_t h, const char* label, uint16_t bgColor, bool selected = false) {
-  // Solid fill
   gfx->fillRect(x, y, w, h, bgColor);
-
-  // Border (thicker if selected)
-  uint16_t borderColor = selected ? 0x07E0 : 0xFFFF;  // Green if selected, white otherwise
+  uint16_t borderColor = selected ? 0x07E0 : 0xFFFF;
   gfx->drawRect(x, y, w, h, borderColor);
   gfx->drawRect(x + 1, y + 1, w - 2, h - 2, borderColor);
-
-  // Center text (size 2 = 12x16 pixels per char)
   int16_t textW = strlen(label) * 12;
   int16_t textX = x + (w - textW) / 2;
   int16_t textY = y + (h - 16) / 2;
@@ -207,24 +198,25 @@ void drawButton(int16_t x, int16_t y, int16_t w, int16_t h, const char* label, u
   gfx->print(label);
 }
 
-// Draw the header (shared between pages)
+// Draw the header
 void drawMenuHeader() {
   gfx->setTextSize(2);
 
-  // Mode name
   gfx->setCursor(10, 6);
   gfx->setTextColor(0x07FF);  // Cyan
-  gfx->print(modeNames[currentMode]);
+  #if defined(HIRES_ENABLED)
+  gfx->print(hiResMode ? "Bot HR" : "Bot PX");
+  #else
+  gfx->print("Bot");
+  #endif
 
-  // Effect name
+  // Current background effect
   gfx->setCursor(10, 24);
   gfx->setTextColor(0xFFFF);
-  if (currentMode == MODE_MOTION) {
-    gfx->print(motionEffectNames[effectIndex % NUM_MOTION_EFFECTS]);
-  } else if (currentMode == MODE_AMBIENT) {
+  if (getBotBackgroundStyle() == 4) {
     gfx->print(ambientEffectNames[effectIndex % NUM_AMBIENT_EFFECTS]);
   } else {
-    gfx->print("Emoji");
+    gfx->print("Black");
   }
 
   // Palette name
@@ -241,136 +233,100 @@ void drawMenuHeader() {
   gfx->setCursor(LCD_WIDTH - 58, 24);
   gfx->setTextColor(autoCycle ? 0x07E0 : 0xF800);
   gfx->print(autoCycle ? "AUTO" : "MAN");
-
-  // Speed indicator
-  gfx->setCursor(LCD_WIDTH - 58, 42);
-  gfx->setTextColor(0x07E0);  // Green
-  gfx->print("S:");
-  gfx->print(map(speed, 100, 5, 0, 100));  // Convert delay to speed %
 }
 
 // Draw full-screen menu
 void drawMenu() {
   if (gfx == nullptr) return;
 
-  // Fill entire screen black
   gfx->fillScreen(0x0000);
-
-  // Draw header
   drawMenuHeader();
 
-  // Button layout
   int col1X = BTN_GAP;
   int col2X = BTN_GAP + BTN_WIDTH + BTN_GAP;
   int rowY = BTN_START_Y;
 
   if (menuPage == 0) {
     // === MAIN PAGE ===
-    // Row 1: Effects
-    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "< EFF", 0x001F);
+    bool bgOn = (getBotBackgroundStyle() == 4);
+
+    // Row 1: Background on/off | Cycle effect
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, bgOn ? "BG: ON" : "BG: OFF", bgOn ? 0x0400 : 0x4000);
     drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "EFF >", 0x001F);
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 2: Palette | Mode
+    // Row 2: Palette | Hi-Res toggle
     drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "PALETTE", 0x4008);
-    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "MODE", 0x0410);
+    #if defined(HIRES_ENABLED)
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, hiResMode ? "HI-RES" : "PIXEL", hiResMode ? 0x0400 : 0x4008);
+    #else
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "PIXEL", 0x2104);
+    #endif
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 3: Auto | Settings
-    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "AUTO", autoCycle ? 0x0400 : 0x4000);
-    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "SETTINGS", 0x4210);
-    rowY += BTN_HEIGHT + BTN_GAP;
-
-    // Row 4: Close (full width)
-    drawButton(col1X, rowY, BTN_WIDTH * 2 + BTN_GAP, BTN_HEIGHT, "CLOSE", 0x7800);
-
-  } else {
-    // === SETTINGS PAGE ===
-    // Row 1: Brightness
+    // Row 3: Brightness
     drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "DIM", 0x4000);
     drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "BRIGHT", 0x0400);
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 2: Speed
-    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "SLOWER", 0x4008);
-    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "FASTER", 0x0408);
+    // Row 4: Settings | Close
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "SETTINGS", 0x4208);
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "CLOSE", 0x7800);
+  } else if (menuPage == 1) {
+    // === SETTINGS PAGE ===
+
+    // Row 1: WiFi toggle | Auto cycle
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, wifiEnabled ? "WIFI ON" : "WIFI OFF", wifiEnabled ? 0x0400 : 0x4000);
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, autoCycle ? "AUTO ON" : "AUTO OFF", autoCycle ? 0x0400 : 0x4000);
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 3: Hi-Res toggle (LCD only) and placeholder
-    #if defined(HIRES_ENABLED)
-    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "HI-RES", hiResMode ? 0x0400 : 0x4000);  // Green if on, red if off
-    #else
-    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "---", 0x2104);
-    #endif
-    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "---", 0x2104);
+    // Row 2: (empty for now)
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 4: Back (full width)
-    drawButton(col1X, rowY, BTN_WIDTH * 2 + BTN_GAP, BTN_HEIGHT, "< BACK", 0x001F);
+    // Row 3: (empty for now)
+    rowY += BTN_HEIGHT + BTN_GAP;
+
+    // Row 4: Back | Close
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "BACK", 0x4208);
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "CLOSE", 0x7800);
   }
 
   menuVisible = true;
 }
 
-// Hide menu and return to LED display
+// Hide menu and return to bot display
 void hideMenu() {
   if (gfx == nullptr) return;
-
   DBGLN("Closing menu");
-
-  // Clear entire screen - LED display will redraw on next frame
   gfx->fillScreen(0x0000);
-
   menuVisible = false;
-  menuPage = 0;  // Reset to main page for next open
+  menuPage = 0;
 }
 
 // Action functions
 void touchNextEffect() {
-  int maxEffects = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
-  effectIndex = (effectIndex + 1) % maxEffects;
+  effectIndex = (effectIndex + 1) % NUM_AMBIENT_EFFECTS;
   lastChange = millis();
-  FastLED.clear();
 }
 
 void touchPrevEffect() {
-  int maxEffects = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
-  effectIndex = (effectIndex == 0) ? maxEffects - 1 : effectIndex - 1;
+  effectIndex = (effectIndex == 0) ? NUM_AMBIENT_EFFECTS - 1 : effectIndex - 1;
   lastChange = millis();
-  FastLED.clear();
-}
-
-void touchNextMode() {
-  uint8_t nextMode = (currentMode + 1) % NUM_MODES;
-  if (nextMode == MODE_EMOJI && emojiQueueCount == 0) {
-    addRandomEmojis(RANDOM_EMOJI_COUNT);
-  }
-  currentMode = nextMode;
-  effectIndex = 0;
-  lastChange = millis();
-  resetEffectShuffle();
-  FastLED.clear();
 }
 
 void touchBrightnessUp() {
-  // Control LCD backlight
   if (lcdBrightness < 255) {
     lcdBrightness += 25;
     if (lcdBrightness > 255) lcdBrightness = 255;
     analogWrite(LCD_BL, lcdBrightness);
-    DBG("LCD Brightness UP: ");
-    DBGLN(lcdBrightness);
   }
 }
 
 void touchBrightnessDown() {
-  // Control LCD backlight
   if (lcdBrightness > 25) {
     lcdBrightness -= 25;
     if (lcdBrightness < 25) lcdBrightness = 25;
     analogWrite(LCD_BL, lcdBrightness);
-    DBG("LCD Brightness DOWN: ");
-    DBGLN(lcdBrightness);
   }
 }
 
@@ -383,82 +339,47 @@ void touchToggleAutoCycle() {
   autoCycle = !autoCycle;
 }
 
-void touchSpeedUp() {
-  // Lower delay = faster animation
-  if (speed > 5) {
-    speed -= 5;
-    if (speed < 5) speed = 5;
-    DBG("Speed UP (delay): ");
-    DBGLN(speed);
-  }
-}
-
-void touchSpeedDown() {
-  // Higher delay = slower animation
-  if (speed < 100) {
-    speed += 5;
-    if (speed > 100) speed = 100;
-    DBG("Speed DOWN (delay): ");
-    DBGLN(speed);
-  }
-}
-
 // Process touch on full-screen menu
-// Returns true if menu should close
 bool processMenuTouch(uint16_t x, uint16_t y) {
-  // Ignore touches in header area
   if (y < BTN_START_Y) return false;
 
-  // Calculate which row (0-3)
   int row = (y - BTN_START_Y) / (BTN_HEIGHT + BTN_GAP);
   if (row > 3) row = 3;
-
-  // Calculate which column (0 = left, 1 = right)
   int col = (x < LCD_WIDTH / 2) ? 0 : 1;
 
-  DBG("Page ");
-  DBG(menuPage);
-  DBG(" row=");
-  DBG(row);
-  DBG(" col=");
-  DBGLN(col);
-
   if (menuPage == 0) {
-    // === MAIN PAGE ===
     switch (row) {
-      case 0:  // Effects
-        if (col == 0) touchPrevEffect();
-        else touchNextEffect();
+      case 0:  // Background on/off | Cycle effect
+        if (col == 0) {
+          setBotBackgroundStyle(getBotBackgroundStyle() == 4 ? 0 : 4);
+        } else {
+          touchNextEffect();
+        }
         break;
-      case 1:  // Palette / Mode
+      case 1:  // Palette / Hi-Res toggle
         if (col == 0) touchNextPalette();
-        else touchNextMode();
+        #if defined(HIRES_ENABLED)
+        else toggleHiResMode();
+        #endif
         break;
-      case 2:  // Auto / Settings
-        if (col == 0) touchToggleAutoCycle();
-        else menuPage = 1;  // Go to settings
-        break;
-      case 3:  // Close (full width)
-        return true;
-    }
-  } else {
-    // === SETTINGS PAGE ===
-    switch (row) {
-      case 0:  // Brightness
+      case 2:  // Brightness
         if (col == 0) touchBrightnessDown();
         else touchBrightnessUp();
         break;
-      case 1:  // Speed
-        if (col == 0) touchSpeedDown();
-        else touchSpeedUp();
+      case 3:  // Settings | Close
+        if (col == 0) { menuPage = 1; }
+        else return true;
         break;
-      case 2:  // Hi-Res toggle (left) / placeholder (right)
-        #if defined(HIRES_ENABLED)
-        if (col == 0) toggleHiResMode();
-        #endif
+    }
+  } else if (menuPage == 1) {
+    switch (row) {
+      case 0:  // WiFi | Auto
+        if (col == 0) toggleWifiAP();
+        else touchToggleAutoCycle();
         break;
-      case 3:  // Back (full width)
-        menuPage = 0;
+      case 3:  // Back | Close
+        if (col == 0) { menuPage = 0; }
+        else return true;
         break;
     }
   }
@@ -489,13 +410,11 @@ void handleTouch() {
 
     // Menu not visible - check for long press to open
     if (!menuVisible) {
-      // Start tracking touch if not already
       if (touchStartTime == 0) {
         touchStartTime = now;
         longPressTriggered = false;
       }
 
-      // Check if long press threshold reached
       if (!longPressTriggered && (now - touchStartTime >= LONG_PRESS_MS)) {
         DBGLN("Long press - opening menu");
         longPressTriggered = true;
@@ -507,29 +426,28 @@ void handleTouch() {
     }
 
     // Menu is visible - handle button presses
-    // Enforce cooldown between button presses
     if (now - lastActionTime < TOUCH_COOLDOWN_MS) {
       return;
     }
     lastActionTime = now;
 
-    DBG("Touch X=");
-    DBG(x);
-    DBG(" Y=");
-    DBGLN(y);
-
-    // Process menu touch
     bool shouldClose = processMenuTouch(x, y);
 
     if (shouldClose) {
       hideMenu();
       waitingForLift = true;
     } else {
-      drawMenu();  // Redraw to update status
+      drawMenu();
       waitingForLift = true;
     }
   } else {
-    // Reset long press tracking
+    // Finger lifted - short tap triggers bot reaction
+    if (touchStartTime > 0 && !longPressTriggered && !menuVisible &&
+        (now - touchStartTime < LONG_PRESS_MS)) {
+      botMode.onTap();
+      DBGLN("Bot tap reaction");
+    }
+
     touchStartTime = 0;
     longPressTriggered = false;
   }

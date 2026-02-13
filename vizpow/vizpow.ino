@@ -33,8 +33,8 @@
 #include "effects_motion.h"
 #include "effects_ambient.h"
 #include "effects_emoji.h"
-#include "web_server.h"
 #include "display_lcd.h"
+#include "web_server.h"
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
 #endif
@@ -157,7 +157,7 @@ void setup() {
     // Wait for USB host to enumerate, then check for SOF frames
     delay(USB_DETECT_DELAY_MS);
     wifiEnabled = usb_serial_jtag_ll_txfifo_writable();
-    Serial.println(wifiEnabled ? "USB detected - WiFi ON" : "Battery mode - WiFi OFF");
+    DBGLN(wifiEnabled ? "USB detected - WiFi ON" : "Battery mode - WiFi OFF");
   #else
     wifiEnabled = true;  // LCD target: always enable WiFi
   #endif
@@ -169,15 +169,15 @@ void setup() {
     #if defined(WIFI_TX_POWER)
       WiFi.setTxPower(WIFI_TX_POWER);
     #endif
-    Serial.print("AP Started: ");
-    Serial.println(apStarted ? "YES" : "NO");
-    Serial.print("SSID: ");
-    Serial.println(WIFI_SSID);
-    Serial.print("IP: ");
-    Serial.println(WiFi.softAPIP());
+    DBG("AP Started: ");
+    DBGLN(apStarted ? "YES" : "NO");
+    DBG("AP SSID: ");
+    DBGLN(WIFI_SSID);
+    DBG("AP IP: ");
+    DBGLN(WiFi.softAPIP());
 
     setupWebServer();
-    Serial.println("Web server started");
+    DBGLN("Web server started");
   } else {
     WiFi.mode(WIFI_OFF);
   }
@@ -213,9 +213,9 @@ void setup() {
     );
     imu.enableAccelerometer();
     imu.enableGyroscope();
-    Serial.println("IMU initialized");
+    DBGLN("IMU initialized");
   } else {
-    Serial.println("IMU initialization failed");
+    DBGLN("IMU initialization failed");
   }
 
   // Initialize touch controller (shares I2C bus with IMU)
@@ -298,7 +298,7 @@ void checkModeShake() {
       // Cycle to next mode: MOTION -> AMBIENT -> EMOJI -> MOTION
       uint8_t nextMode = (currentMode + 1) % 3;
 
-      // If entering emoji mode, ensure there's a sequence
+      // Handle mode-specific entry logic
       if (nextMode == MODE_EMOJI && emojiQueueCount == 0) {
         addRandomEmojis(RANDOM_EMOJI_COUNT);
       }
@@ -329,7 +329,9 @@ void checkModeShake() {
 }
 
 void loop() {
-  if (wifiEnabled) server.handleClient();
+  if (wifiEnabled) {
+    server.handleClient();
+  }
   readIMU();
   #if defined(POWER_SAVE_ENABLED)
     updateIMUForMode();

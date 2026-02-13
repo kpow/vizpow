@@ -35,119 +35,7 @@ const char webpage[] PROGMEM = R"rawliteral(
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>VizPow</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, sans-serif;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      color: #fff;
-      min-height: 100vh;
-      padding: 20px;
-    }
-    h1 { text-align: center; margin-bottom: 20px; font-size: 24px; }
-    h2 { font-size: 14px; color: #888; margin-bottom: 10px; text-transform: uppercase; }
-    .card {
-      background: rgba(255,255,255,0.1);
-      border-radius: 16px;
-      padding: 20px;
-      margin-bottom: 16px;
-      backdrop-filter: blur(10px);
-    }
-    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-    button {
-      background: rgba(255,255,255,0.15);
-      border: none;
-      color: #fff;
-      padding: 14px 10px;
-      border-radius: 12px;
-      font-size: 13px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    button:active { transform: scale(0.95); }
-    button.active { background: #6366f1; }
-    .tab-row { display: flex; gap: 10px; margin-bottom: 15px; }
-    .tab {
-      flex: 1;
-      background: rgba(255,255,255,0.1);
-      border: none;
-      color: #888;
-      padding: 12px;
-      border-radius: 10px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    .tab.active { background: #6366f1; color: #fff; }
-    .slider-container { margin: 15px 0; }
-    .slider-label { display: flex; justify-content: space-between; margin-bottom: 8px; }
-    input[type="range"] {
-      width: 100%;
-      height: 8px;
-      border-radius: 4px;
-      background: rgba(255,255,255,0.2);
-      -webkit-appearance: none;
-    }
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: #6366f1;
-      cursor: pointer;
-    }
-    .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; }
-    .toggle {
-      width: 52px;
-      height: 32px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 16px;
-      position: relative;
-      cursor: pointer;
-      transition: background 0.3s;
-    }
-    .toggle.on { background: #6366f1; }
-    .toggle::after {
-      content: '';
-      position: absolute;
-      width: 26px;
-      height: 26px;
-      background: #fff;
-      border-radius: 50%;
-      top: 3px;
-      left: 3px;
-      transition: transform 0.3s;
-    }
-    .toggle.on::after { transform: translateX(20px); }
-    .status { text-align: center; color: #888; font-size: 12px; margin-top: 10px; }
-    .hidden { display: none; }
-    #emojiGrid {
-      max-height: 300px;
-      overflow-y: auto;
-      margin-bottom: 15px;
-    }
-    #emojiQueue {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 15px;
-      min-height: 40px;
-    }
-    .queueItem {
-      background: rgba(99, 102, 241, 0.5);
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 12px;
-    }
-    .queueEmpty {
-      color: #666;
-      font-style: italic;
-      padding: 10px;
-    }
-    .btn-row { display: flex; gap: 10px; margin-top: 10px; }
-    .btn-row button { flex: 1; }
-    .btn-danger { background: rgba(239, 68, 68, 0.3); }
-  </style>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;min-height:100vh;padding:20px}h1{text-align:center;margin-bottom:20px;font-size:24px}h2{font-size:14px;color:#888;margin-bottom:10px;text-transform:uppercase}.card{background:rgba(255,255,255,.1);border-radius:16px;padding:20px;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}button{background:rgba(255,255,255,.15);border:none;color:#fff;padding:14px 10px;border-radius:12px;font-size:13px;cursor:pointer}button.active{background:#6366f1}.tab-row{display:flex;gap:10px;margin-bottom:15px}.tab{flex:1;background:rgba(255,255,255,.1);border:none;color:#888;padding:12px;border-radius:10px;font-size:14px;cursor:pointer}.tab.active{background:#6366f1;color:#fff}.slider-container{margin:15px 0}.slider-label{display:flex;justify-content:space-between;margin-bottom:8px}input[type=range]{width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,.2);-webkit-appearance:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:#6366f1;cursor:pointer}.toggle-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0}.toggle{width:52px;height:32px;background:rgba(255,255,255,.2);border-radius:16px;position:relative;cursor:pointer}.toggle.on{background:#6366f1}.toggle::after{content:'';position:absolute;width:26px;height:26px;background:#fff;border-radius:50%;top:3px;left:3px;transition:transform .3s}.toggle.on::after{transform:translateX(20px)}.status{text-align:center;color:#888;font-size:12px;margin-top:10px}.hidden{display:none}#emojiGrid{max-height:300px;overflow-y:auto;margin-bottom:15px}#emojiQueue{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:15px;min-height:40px}.queueItem{background:rgba(99,102,241,.5);padding:8px 12px;border-radius:8px;font-size:12px}.queueEmpty{color:#666;font-style:italic;padding:10px}.btn-row{display:flex;gap:10px;margin-top:10px}.btn-row button{flex:1}.btn-danger{background:rgba(239,68,68,.3)}</style>
 </head>
 <body>
   <h1>VizPow Control</h1>
@@ -210,24 +98,20 @@ const char webpage[] PROGMEM = R"rawliteral(
   <div class="status">Connected to VizPow</div>
 
   <script>
-    const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Spin Trails", "Gravity Pixels", "Motion Noise", "Tilt Ripple", "Gyro Swirl", "Shake Explode", "Tilt Fire", "Motion Rainbow"];
+    const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Tilt Ripple", "Gyro Swirl", "Shake Explode"];
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
-
     let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };
     let emojiQueue = [];
     let emojiAutoCycle = true;
 
-    // Icon names matching emoji_sprites.h (41 icons)
     const emojiNames = [
-      "Heart", "Star", "Smiley", "Check",
-      "X", "Question", "Exclaim", "Sun",
-      "Moon", "Cloud", "Rain", "Lightning",
-      "Fire", "Snow", "Tree", "Coin",
-      "Key", "Gem", "Potion", "Sword",
-      "Shield", "ArrowUp", "ArrowDown", "ArrowLeft",
-      "ArrowRight", "Skull", "Ghost", "Alien",
-      "Pacman", "PacGhost", "ShyGuy", "Music", "WiFi", "Rainbow", "Mushroom", "Skelly", "chicken", "invader", "dragon", "twinkleheart", "popsicle"];
+      "Heart", "Star", "Check", "X", "Fire",
+      "Potion", "Sword", "Shield", "ArrowUp", "ArrowDown",
+      "ArrowLeft", "ArrowRight", "Skull", "Ghost", "Alien",
+      "Pacman", "PacGhost", "ShyGuy", "Music",
+      "WiFi", "Rainbow", "Mushroom", "Skelly",
+      "Chicken", "Invader", "Dragon", "TwinkleHeart", "Popsicle"];
 
     function render() {
       const effects = state.currentMode === 0 ? motionEffects : ambientEffects;
@@ -235,11 +119,12 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('tabAmbient').className = 'tab ' + (state.currentMode === 1 ? 'active' : '');
       document.getElementById('tabEmoji').className = 'tab ' + (state.currentMode === 2 ? 'active' : '');
 
-      document.getElementById('effectsPanel').className = state.currentMode === 2 ? 'hidden' : '';
-      document.getElementById('emojiPanel').className = state.currentMode === 2 ? '' : 'hidden';
-      document.getElementById('paletteCard').className = state.currentMode === 2 ? 'card hidden' : 'card';
+      const isEmoji = state.currentMode === 2;
+      document.getElementById('effectsPanel').className = isEmoji ? 'hidden' : '';
+      document.getElementById('emojiPanel').className = isEmoji ? '' : 'hidden';
+      document.getElementById('paletteCard').className = isEmoji ? 'card hidden' : 'card';
 
-      if (state.currentMode !== 2) {
+      if (!isEmoji) {
         document.getElementById('effects').innerHTML = effects.map((e, i) =>
           `<button class="${state.effect === i ? 'active' : ''}" onclick="setEffect(${i})">${e}</button>`
         ).join('');
@@ -386,7 +271,8 @@ void handleState() {
 
 void handleMode() {
   if (server.hasArg("v")) {
-    currentMode = constrain(server.arg("v").toInt(), 0, 2);
+    uint8_t newMode = constrain(server.arg("v").toInt(), 0, 2);  // 3 modes: motion, ambient, emoji
+    currentMode = newMode;
     effectIndex = 0;
     resetEffectShuffle();
     FastLED.clear();
@@ -466,7 +352,6 @@ void handleEmojiClear() {
   server.send(200, "text/plain", "OK");
 }
 
-// Setup all web server routes
 void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/state", handleState);

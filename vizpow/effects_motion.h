@@ -91,73 +91,6 @@ void tiltWave() {
   }
 }
 
-void spinTrails() {
-  static float angle = 0;
-  angle += gyroZ / 150.0 * GYRO_SENSITIVITY;  // Much faster spin (was /500)
-
-  fadeToBlackBy(leds, NUM_LEDS, 20);  // Longer trails
-
-  for (float r = 0; r < 4; r += 0.5) {
-    int x = 3.5 + cos(angle + r) * r;
-    int y = 3.5 + sin(angle + r) * r;
-    if (x >= 0 && x < MATRIX_WIDTH && y >= 0 && y < MATRIX_HEIGHT) {
-      leds[XY(x, y)] = ColorFromPalette(currentPalette, r * 50 + millis() / 20);
-    }
-  }
-}
-
-void gravityPixels() {
-  static float px[8], py[8], vx[8], vy[8];
-  static bool init = false;
-
-  if (!init) {
-    for (int i = 0; i < 8; i++) {
-      px[i] = random8(MATRIX_WIDTH);
-      py[i] = random8(MATRIX_HEIGHT);
-      vx[i] = 0;
-      vy[i] = 0;
-    }
-    init = true;
-  }
-
-  FastLED.clear();
-
-  for (int i = 0; i < 8; i++) {
-    // More responsive gravity (was 0.2)
-    // Swapped X/Y axes to match device orientation
-    vx[i] += accelY * 0.5 * ACCEL_SENSITIVITY;
-    vy[i] += accelX * 0.5 * ACCEL_SENSITIVITY;
-    vx[i] *= 0.92;  // Less damping for bouncier feel
-    vy[i] *= 0.92;
-    
-    px[i] += vx[i];
-    py[i] += vy[i];
-    
-    if (px[i] < 0) { px[i] = 0; vx[i] *= -0.5; }
-    if (px[i] > 7) { px[i] = 7; vx[i] *= -0.5; }
-    if (py[i] < 0) { py[i] = 0; vy[i] *= -0.5; }
-    if (py[i] > 7) { py[i] = 7; vy[i] *= -0.5; }
-    
-    leds[XY((int)px[i], (int)py[i])] = ColorFromPalette(currentPalette, i * 30 + millis() / 20);
-  }
-}
-
-void motionNoise() {
-  static uint16_t t = 0;
-  t += 3;
-
-  // More dramatic offset from tilt (was 50)
-  int offsetX = accelX * 150 * ACCEL_SENSITIVITY;
-  int offsetY = accelY * 150 * ACCEL_SENSITIVITY;
-  
-  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
-    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
-      uint8_t n = inoise8((x * 50) + offsetX, (y * 50) + offsetY, t);
-      leds[XY(x, y)] = ColorFromPalette(currentPalette, n);
-    }
-  }
-}
-
 void tiltRipple() {
   static uint8_t t = 0;
   t++;
@@ -226,52 +159,6 @@ void shakeExplode() {
   }
 }
 
-void tiltFire() {
-  static uint8_t heat[64];
-
-  // Hotspot moves more dramatically with tilt (was 2)
-  int hotSpot = constrain(3.5 + accelX * 5.0 * ACCEL_SENSITIVITY, 0, 7);
-  
-  for (int i = 0; i < NUM_LEDS; i++) {
-    heat[i] = qsub8(heat[i], random8(0, 20));
-  }
-  
-  for (int x = 0; x < MATRIX_WIDTH; x++) {
-    int intensity = 255 - abs(x - hotSpot) * 50;
-    if (random8() < 180 && intensity > 0) {
-      heat[XY(x, MATRIX_HEIGHT - 1)] = qadd8(heat[XY(x, MATRIX_HEIGHT - 1)], random8(intensity / 2, intensity));
-    }
-  }
-  
-  for (int y = 0; y < MATRIX_HEIGHT - 1; y++) {
-    for (int x = 0; x < MATRIX_WIDTH; x++) {
-      heat[XY(x, y)] = (heat[XY(x, y)] + heat[XY(x, y + 1)] + heat[XY(x, y + 1)]) / 3;
-    }
-  }
-  
-  for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = ColorFromPalette(currentPalette, heat[i]);
-  }
-}
-
-void motionRainbow() {
-  static int16_t hueOffset = 0;
-
-  // Faster rotation from gyro (was /100)
-  hueOffset += gyroZ / 30 * GYRO_SENSITIVITY;
-  // More speed boost from tilt (was *2)
-  float spd = 1 + sqrt(accelX * accelX + accelY * accelY) * 5 * ACCEL_SENSITIVITY;
-  
-  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
-    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
-      uint8_t hue = hueOffset + (x * 8) + (y * 8);
-      leds[XY(x, y)] = ColorFromPalette(currentPalette, hue);
-    }
-  }
-  
-  hueOffset += spd;
-}
-
 // Run motion effect by index
 void runMotionEffect(uint8_t index) {
   switch (index) {
@@ -279,14 +166,9 @@ void runMotionEffect(uint8_t index) {
     case 1: motionPlasma(); break;
     case 2: shakeSparkle(); break;
     case 3: tiltWave(); break;
-    case 4: spinTrails(); break;
-    case 5: gravityPixels(); break;
-    case 6: motionNoise(); break;
-    case 7: tiltRipple(); break;
-    case 8: gyroSwirl(); break;
-    case 9: shakeExplode(); break;
-    case 10: tiltFire(); break;
-    case 11: motionRainbow(); break;
+    case 4: tiltRipple(); break;
+    case 5: gyroSwirl(); break;
+    case 6: shakeExplode(); break;
   }
 }
 
