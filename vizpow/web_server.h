@@ -157,6 +157,7 @@ const char webpage[] PROGMEM = R"rawliteral(
       <button class="tab active" id="tabMotion" onclick="setMode(0)">Motion</button>
       <button class="tab" id="tabAmbient" onclick="setMode(1)">Ambient</button>
       <button class="tab" id="tabEmoji" onclick="setMode(2)">Emoji</button>
+      <button class="tab" id="tabBot" onclick="setMode(3)">Bot</button>
     </div>
 
     <div id="effectsPanel">
@@ -183,6 +184,11 @@ const char webpage[] PROGMEM = R"rawliteral(
         <span>Auto Cycle</span>
         <div class="toggle on" id="emojiAutoCycle"></div>
       </div>
+    </div>
+
+    <div id="botPanel" class="hidden">
+      <h2>Expressions</h2>
+      <div class="grid" id="botExpressions"></div>
     </div>
   </div>
 
@@ -213,6 +219,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Spin Trails", "Gravity Pixels", "Motion Noise", "Tilt Ripple", "Gyro Swirl", "Shake Explode", "Tilt Fire", "Motion Rainbow"];
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
+    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead"];
 
     let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };
     let emojiQueue = [];
@@ -234,12 +241,20 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('tabMotion').className = 'tab ' + (state.currentMode === 0 ? 'active' : '');
       document.getElementById('tabAmbient').className = 'tab ' + (state.currentMode === 1 ? 'active' : '');
       document.getElementById('tabEmoji').className = 'tab ' + (state.currentMode === 2 ? 'active' : '');
+      document.getElementById('tabBot').className = 'tab ' + (state.currentMode === 3 ? 'active' : '');
 
-      document.getElementById('effectsPanel').className = state.currentMode === 2 ? 'hidden' : '';
-      document.getElementById('emojiPanel').className = state.currentMode === 2 ? '' : 'hidden';
-      document.getElementById('paletteCard').className = state.currentMode === 2 ? 'card hidden' : 'card';
+      const isBot = state.currentMode === 3;
+      const isEmoji = state.currentMode === 2;
+      document.getElementById('effectsPanel').className = (isEmoji || isBot) ? 'hidden' : '';
+      document.getElementById('emojiPanel').className = isEmoji ? '' : 'hidden';
+      document.getElementById('botPanel').className = isBot ? '' : 'hidden';
+      document.getElementById('paletteCard').className = (isEmoji || isBot) ? 'card hidden' : 'card';
 
-      if (state.currentMode !== 2) {
+      if (isBot) {
+        document.getElementById('botExpressions').innerHTML = botExprNames.map((name, i) =>
+          `<button onclick="setBotExpr(${i})">${name}</button>`
+        ).join('');
+      } else if (!isEmoji) {
         document.getElementById('effects').innerHTML = effects.map((e, i) =>
           `<button class="${state.effect === i ? 'active' : ''}" onclick="setEffect(${i})">${e}</button>`
         ).join('');
@@ -302,6 +317,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     }
     function setEffect(i) { state.effect = i; render(); api('/effect?v=' + i); }
     function setPalette(i) { state.palette = i; render(); api('/palette?v=' + i); }
+    function setBotExpr(i) { api('/bot/expression?v=' + i); }
 
     document.getElementById('brightness').oninput = function() {
       state.brightness = this.value;
@@ -384,9 +400,21 @@ void handleState() {
   server.send(200, "application/json", json);
 }
 
+// Bot mode — functions defined in bot_mode.h (included before this file)
+#if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+// bot_faces.h, bot_eyes.h, bot_mode.h already included via vizpow.ino
+#endif
+
 void handleMode() {
   if (server.hasArg("v")) {
-    currentMode = constrain(server.arg("v").toInt(), 0, 2);
+    uint8_t newMode = constrain(server.arg("v").toInt(), 0, NUM_MODES - 1);
+    #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+      if (currentMode == MODE_BOT && newMode != MODE_BOT) exitBotMode();
+      if (newMode == MODE_BOT && currentMode != MODE_BOT) enterBotMode();
+    #else
+      if (newMode == MODE_BOT) newMode = MODE_MOTION;  // No bot on non-LCD
+    #endif
+    currentMode = newMode;
     effectIndex = 0;
     resetEffectShuffle();
     FastLED.clear();
@@ -466,6 +494,24 @@ void handleEmojiClear() {
   server.send(200, "text/plain", "OK");
 }
 
+// Bot mode handlers
+#if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+void handleBotExpression() {
+  if (server.hasArg("v")) {
+    uint8_t expr = constrain(server.arg("v").toInt(), 0, BOT_NUM_EXPRESSIONS - 1);
+    setBotExpression(expr);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotState() {
+  String json = "{\"expression\":" + String(getBotExpression()) +
+                ",\"state\":" + String((uint8_t)getBotState()) +
+                ",\"faceColor\":" + String(botFaceColor) + "}";
+  server.send(200, "application/json", json);
+}
+#endif
+
 // Setup all web server routes
 void setupWebServer() {
   server.on("/", handleRoot);
@@ -481,6 +527,12 @@ void setupWebServer() {
   server.on("/emoji/add", handleEmojiAdd);
   server.on("/emoji/settings", handleEmojiSettings);
   server.on("/emoji/clear", handleEmojiClear);
+
+  // Bot mode endpoints
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+  server.on("/bot/expression", handleBotExpression);
+  server.on("/bot/state", handleBotState);
+  #endif
 
   server.begin();
 }
