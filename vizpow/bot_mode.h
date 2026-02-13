@@ -386,22 +386,13 @@ extern CRGBPalette16 currentPalette;
 extern CRGBPalette16 palettes[];
 extern uint8_t paletteIndex;
 
-// Render ambient hi-res effect as bot background (functions from effects_ambient.h)
+// Use the function pointer table from effects_ambient.h
+extern const AmbientFunc ambientHiResFuncs[];
+
+// Render ambient hi-res effect as bot background
 void renderBotAmbientBackground() {
-  switch (botAmbientEffectIndex) {
-    case 0:  ambientPlasmaHiRes(); break;
-    case 1:  ambientRainbowHiRes(); break;
-    case 2:  ambientFireHiRes(); break;
-    case 3:  ambientOceanHiRes(); break;
-    case 4:  ambientSparkleHiRes(); break;
-    case 5:  ambientMatrixHiRes(); break;
-    case 6:  ambientLavaHiRes(); break;
-    case 7:  ambientAuroraHiRes(); break;
-    case 8:  ambientConfettiHiRes(); break;
-    case 9:  ambientCometHiRes(); break;
-    case 10: ambientGalaxyHiRes(); break;
-    case 11: ambientHeartHiRes(); break;
-    case 12: ambientDonutHiRes(); break;
+  if (botAmbientEffectIndex < NUM_AMBIENT_EFFECTS) {
+    ambientHiResFuncs[botAmbientEffectIndex]();
   }
 
   // Auto-cycle ambient effect and palette

@@ -603,44 +603,34 @@ void ambientDonut() {
   }
 }
 
+// Function pointer tables for ambient effects
+typedef void (*AmbientFunc)();
+
+const AmbientFunc ambientLedFuncs[NUM_AMBIENT_EFFECTS] = {
+  ambientPlasma, ambientRainbow, ambientFire, ambientOcean, ambientSparkle,
+  ambientMatrix, ambientLava, ambientAurora, ambientConfetti, ambientComet,
+  ambientGalaxy, ambientHeart, ambientDonut
+};
+
+#if defined(HIRES_ENABLED)
+const AmbientFunc ambientHiResFuncs[NUM_AMBIENT_EFFECTS] = {
+  ambientPlasmaHiRes, ambientRainbowHiRes, ambientFireHiRes, ambientOceanHiRes,
+  ambientSparkleHiRes, ambientMatrixHiRes, ambientLavaHiRes, ambientAuroraHiRes,
+  ambientConfettiHiRes, ambientCometHiRes, ambientGalaxyHiRes, ambientHeartHiRes,
+  ambientDonutHiRes
+};
+#endif
+
 // Run ambient effect by index
-// 13 effects: Plasma, Rainbow, Fire, Ocean, Sparkle, Matrix, Lava, Aurora, Confetti, Comet, Galaxy, Heart, Donut
 void runAmbientEffect(uint8_t index) {
+  if (index >= NUM_AMBIENT_EFFECTS) return;
   #if defined(HIRES_ENABLED)
   if (hiResMode && !menuVisible && gfx != nullptr) {
-    switch (index) {
-      case 0:  ambientPlasmaHiRes(); return;
-      case 1:  ambientRainbowHiRes(); return;
-      case 2:  ambientFireHiRes(); return;
-      case 3:  ambientOceanHiRes(); return;
-      case 4:  ambientSparkleHiRes(); return;
-      case 5:  ambientMatrixHiRes(); return;
-      case 6:  ambientLavaHiRes(); return;
-      case 7:  ambientAuroraHiRes(); return;
-      case 8:  ambientConfettiHiRes(); return;
-      case 9:  ambientCometHiRes(); return;
-      case 10: ambientGalaxyHiRes(); return;
-      case 11: ambientHeartHiRes(); return;
-      case 12: ambientDonutHiRes(); return;
-    }
+    ambientHiResFuncs[index]();
+    return;
   }
   #endif
-
-  switch (index) {
-    case 0: ambientPlasma(); break;
-    case 1: ambientRainbow(); break;
-    case 2: ambientFire(); break;
-    case 3: ambientOcean(); break;
-    case 4: ambientSparkle(); break;
-    case 5: ambientMatrix(); break;
-    case 6: ambientLava(); break;
-    case 7: ambientAurora(); break;
-    case 8: ambientConfetti(); break;
-    case 9: ambientComet(); break;
-    case 10: ambientGalaxy(); break;
-    case 11: ambientHeart(); break;
-    case 12: ambientDonut(); break;
-  }
+  ambientLedFuncs[index]();
 }
 
 #endif

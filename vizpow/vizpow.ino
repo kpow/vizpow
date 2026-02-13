@@ -171,7 +171,7 @@ void setup() {
     // Wait for USB host to enumerate, then check for SOF frames
     delay(USB_DETECT_DELAY_MS);
     wifiEnabled = usb_serial_jtag_ll_txfifo_writable();
-    Serial.println(wifiEnabled ? "USB detected - WiFi ON" : "Battery mode - WiFi OFF");
+    DBGLN(wifiEnabled ? "USB detected - WiFi ON" : "Battery mode - WiFi OFF");
   #else
     wifiEnabled = true;  // LCD target: always enable WiFi
   #endif
@@ -192,48 +192,48 @@ void setup() {
     #if defined(WIFI_TX_POWER)
       WiFi.setTxPower(WIFI_TX_POWER);
     #endif
-    Serial.print("AP Started: ");
-    Serial.println(apStarted ? "YES" : "NO");
-    Serial.print("AP SSID: ");
-    Serial.println(WIFI_SSID);
-    Serial.print("AP IP: ");
-    Serial.println(WiFi.softAPIP());
+    DBG("AP Started: ");
+    DBGLN(apStarted ? "YES" : "NO");
+    DBG("AP SSID: ");
+    DBGLN(WIFI_SSID);
+    DBG("AP IP: ");
+    DBGLN(WiFi.softAPIP());
 
     // Connect to home network for NTP
     if (strlen(wifiStaSSID) > 0) {
       WiFi.begin(wifiStaSSID, wifiStaPassword);
-      Serial.print("Connecting to ");
-      Serial.print(wifiStaSSID);
+      DBG("Connecting to ");
+      DBG(wifiStaSSID);
       int tries = 0;
       while (WiFi.status() != WL_CONNECTED && tries < 30) {
         delay(300);
-        Serial.print(".");
+        DBG(".");
         tries++;
       }
       if (WiFi.status() == WL_CONNECTED) {
         staConnected = true;
-        Serial.print("\nConnected! IP: ");
-        Serial.println(WiFi.localIP());
+        DBG("\nConnected! IP: ");
+        DBGLN(WiFi.localIP());
         configTime(NTP_GMT_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER);
-        Serial.println("NTP time sync started");
+        DBGLN("NTP time sync started");
 
         // Wait briefly for NTP to actually sync
         struct tm timeinfo;
         if (getLocalTime(&timeinfo, 3000)) {
           ntpSynced = true;
-          Serial.println("NTP synced!");
+          DBGLN("NTP synced!");
         } else {
-          Serial.println("NTP pending (will retry in loop)");
+          DBGLN("NTP pending (will retry in loop)");
         }
       } else {
-        Serial.println("\nHome network connection failed - will retry in background");
+        DBGLN("\nHome network connection failed - will retry in background");
       }
     } else {
-      Serial.println("No WiFi STA SSID configured");
+      DBGLN("No WiFi STA SSID configured");
     }
 
     setupWebServer();
-    Serial.println("Web server started");
+    DBGLN("Web server started");
   } else {
     WiFi.mode(WIFI_OFF);
   }
@@ -269,9 +269,9 @@ void setup() {
     );
     imu.enableAccelerometer();
     imu.enableGyroscope();
-    Serial.println("IMU initialized");
+    DBGLN("IMU initialized");
   } else {
-    Serial.println("IMU initialization failed");
+    DBGLN("IMU initialization failed");
   }
 
   // Initialize touch controller (shares I2C bus with IMU)
@@ -415,13 +415,13 @@ void loop() {
     if (!staConnected && WiFi.status() == WL_CONNECTED) {
       staConnected = true;
       configTime(NTP_GMT_OFFSET, NTP_DAYLIGHT_OFFSET, NTP_SERVER);
-      Serial.println("WiFi STA reconnected + NTP started");
+      DBGLN("WiFi STA reconnected + NTP started");
     }
     if (staConnected && !ntpSynced) {
       struct tm timeinfo;
       if (getLocalTime(&timeinfo, 0)) {
         ntpSynced = true;
-        Serial.println("NTP synced!");
+        DBGLN("NTP synced!");
       }
     }
   }

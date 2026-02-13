@@ -117,6 +117,16 @@
 #define SHAKE_COOLDOWN_MS 2000   // Cooldown after mode change (ms)
 #define RANDOM_EMOJI_COUNT 8     // Number of random emojis to add when entering emoji mode
 
+// Debug serial output (comment out to save ~700 bytes of flash)
+// #define DEBUG_SERIAL
+#ifdef DEBUG_SERIAL
+  #define DBG(x) Serial.print(x)
+  #define DBGLN(x) Serial.println(x)
+#else
+  #define DBG(x)
+  #define DBGLN(x)
+#endif
+
 // XY mapping - trying NO serpentine (straight rows)
 inline uint16_t XY(uint8_t x, uint8_t y) {
   return y * MATRIX_WIDTH + x;
