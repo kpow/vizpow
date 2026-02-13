@@ -289,13 +289,26 @@ void drawXEye(int16_t cx, int16_t cy, int16_t size, uint16_t color) {
   drawThickLine(cx - half, cy + half, cx + half, cy - half, thickness, color);
 }
 
-// Draw caret eye (^ shape)
-void drawCaretEye(int16_t cx, int16_t cy, int16_t width, int16_t height, uint16_t color) {
+// Draw happy-squint eye: full-size ellipse with a curved-up arc through the middle
+void drawCaretEye(int16_t cx, int16_t cy, int16_t eyeW, int16_t eyeH, uint16_t faceColor, uint16_t bgColor) {
+  // Draw full white ellipse
+  gfx->fillEllipse(cx, cy, eyeW, eyeH, faceColor);
+  // Draw upward-curving arc through the middle (like a happy closed eye)
   int16_t thickness = 5;
-  // Left side of caret
-  drawThickLine(cx - width, cy + height / 3, cx, cy - height / 3, thickness, color);
-  // Right side of caret
-  drawThickLine(cx, cy - height / 3, cx + width, cy + height / 3, thickness, color);
+  for (int16_t x = -eyeW + 4; x <= eyeW - 4; x++) {
+    float t = (float)x / (eyeW - 4);
+    int16_t y = -(int16_t)(eyeH * 0.35f * (1.0f - t * t));  // Upward parabola
+    gfx->fillCircle(cx + x, cy + y, thickness / 2, bgColor);
+  }
+}
+
+// Draw closed eye: full-size ellipse with a flat horizontal line through the middle
+void drawClosedEye(int16_t cx, int16_t cy, int16_t eyeW, int16_t eyeH, uint16_t faceColor, uint16_t bgColor) {
+  // Draw full white ellipse
+  gfx->fillEllipse(cx, cy, eyeW, eyeH, faceColor);
+  // Draw horizontal line through center
+  int16_t lineHalfW = eyeW - 4;
+  drawThickLine(cx - lineHalfW, cy, cx + lineHalfW, cy, 5, bgColor);
 }
 
 // ============================================================================
@@ -438,11 +451,11 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
 
     case EYE_CARET: {
       if (drawStroke) {
-        drawCaretEye(leftEyeCX, eyeCY, face.eyeWhiteW * 2 / 3 + BOT_STROKE_PX, face.eyeWhiteH + BOT_STROKE_PX, BOT_COLOR_BG);
-        drawCaretEye(rightEyeCX, eyeCY, face.eyeWhiteW * 2 / 3 + BOT_STROKE_PX, face.eyeWhiteH + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, face.eyeWhiteH + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, face.eyeWhiteH + BOT_STROKE_PX, BOT_COLOR_BG);
       }
-      drawCaretEye(leftEyeCX, eyeCY, face.eyeWhiteW * 2 / 3, face.eyeWhiteH, botFaceColor);
-      drawCaretEye(rightEyeCX, eyeCY, face.eyeWhiteW * 2 / 3, face.eyeWhiteH, botFaceColor);
+      drawCaretEye(leftEyeCX, eyeCY, face.eyeWhiteW, face.eyeWhiteH, botFaceColor, bgColor);
+      drawCaretEye(rightEyeCX, eyeCY, face.eyeWhiteW, face.eyeWhiteH, botFaceColor, bgColor);
       break;
     }
 
@@ -491,6 +504,16 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
       }
       drawStar(leftEyeCX, eyeCY, starOuter, starInner, botFaceColor);
       drawStar(rightEyeCX, eyeCY, starOuter, starInner, botFaceColor);
+      break;
+    }
+
+    case EYE_CLOSED: {
+      if (drawStroke) {
+        gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, face.eyeWhiteH + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, face.eyeWhiteH + BOT_STROKE_PX, BOT_COLOR_BG);
+      }
+      drawClosedEye(leftEyeCX, eyeCY, face.eyeWhiteW, face.eyeWhiteH, botFaceColor, bgColor);
+      drawClosedEye(rightEyeCX, eyeCY, face.eyeWhiteW, face.eyeWhiteH, botFaceColor, bgColor);
       break;
     }
   }

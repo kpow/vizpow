@@ -17,11 +17,12 @@
 // Special eye modes (override normal ellipse rendering)
 enum BotEyeMode : uint8_t {
   EYE_NORMAL = 0,    // Standard ellipse whites + circle pupils
-  EYE_CARET,         // ^ ^ happy squint (upward arcs, no pupils)
+  EYE_CARET,         // Happy squint — full-size eyes with upward arc line
   EYE_HEART,         // Heart-shaped eyes
   EYE_X,             // X X dead/angry eyes
   EYE_SPIRAL,        // Spiral dizzy eyes (animated)
-  EYE_STAR           // Star/sparkle eyes
+  EYE_STAR,          // Star/sparkle eyes
+  EYE_CLOSED         // Full-size eyes with horizontal line (sleeping)
 };
 
 // Mouth shape types

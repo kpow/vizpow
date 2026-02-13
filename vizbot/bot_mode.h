@@ -339,7 +339,8 @@ void updateBotMode() {
       botMode.face.eyeMode == EYE_NORMAL) {
     botMode.face.blinkAmount = botMode.blink.update();
   } else if (botMode.state == BOT_SLEEPING) {
-    botMode.face.blinkAmount = 1.0f;  // Eyes fully closed
+    botMode.face.blinkAmount = 0.0f;  // Don't squish — EYE_CLOSED handles it
+    botMode.face.eyeMode = EYE_CLOSED;
   }
 
   // Look-around (only when active or idle, and not reacting)
