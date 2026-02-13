@@ -7,33 +7,15 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include "config.h"
+#include "system_status.h"
+
+// Global instance — defined here, extern'd via system_status.h
+SystemStatus sysStatus = {false, false, false, false, false, false, false, IPAddress(0,0,0,0), 0, 0};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
 
 #include <Arduino_GFX_Library.h>
-
-// ============================================================================
-// System Status — Tracks what subsystems are alive
-// ============================================================================
-// Checked throughout firmware to avoid using dead hardware.
-// Populated during boot sequence, read-only after that.
-
-struct SystemStatus {
-  bool lcdReady;
-  bool ledsReady;
-  bool i2cReady;
-  bool imuReady;
-  bool touchReady;
-  bool wifiReady;
-  bool webServerReady;
-  IPAddress apIP;
-  uint32_t bootTimeMs;
-  uint8_t failCount;  // How many subsystems failed
-};
-
-// Global instance — extern'd by anyone who needs to check
-SystemStatus sysStatus = {false, false, false, false, false, false, false, IPAddress(0,0,0,0), 0, 0};
 
 // ============================================================================
 // Boot Display Constants
@@ -376,25 +358,7 @@ void runBootSequence() {
 
 #else
 
-// ============================================================================
-// Stubs for non-LCD targets
-// ============================================================================
-
-struct SystemStatus {
-  bool lcdReady;
-  bool ledsReady;
-  bool i2cReady;
-  bool imuReady;
-  bool touchReady;
-  bool wifiReady;
-  bool webServerReady;
-  IPAddress apIP;
-  uint32_t bootTimeMs;
-  uint8_t failCount;
-};
-
-SystemStatus sysStatus = {false, false, false, false, false, false, false, IPAddress(0,0,0,0), 0, 0};
-
+// Stub for non-LCD targets
 inline void runBootSequence() {}
 
 #endif // DISPLAY_LCD_ONLY || DISPLAY_DUAL
