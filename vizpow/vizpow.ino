@@ -407,12 +407,12 @@ void loop() {
     // Background WiFi STA reconnect + NTP retry
     if (!staConnected && strlen(wifiStaSSID) > 0) {
       wl_status_t ws = WiFi.status();
-      if (ws != WL_CONNECTED && ws != WL_IDLE_STATUS) {
+      if (ws == WL_CONNECT_FAILED || ws == WL_NO_SSID_AVAIL || ws == WL_DISCONNECTED) {
         unsigned long now = millis();
         if (now - lastNTPRetry > 30000) {  // Retry every 30s
           lastNTPRetry = now;
-          WiFi.disconnect(false);
-          delay(100);
+          WiFi.disconnect(true);
+          delay(500);
           WiFi.begin(wifiStaSSID, wifiStaPassword);
         }
       }
