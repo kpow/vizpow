@@ -537,7 +537,8 @@ void handleWifiConfig() {
     WiFi.disconnect(false);
     staConnected = false;
     ntpSynced = false;
-    delay(100);
+    lastNTPRetry = millis();
+    delay(200);
     WiFi.begin(wifiStaSSID, wifiStaPassword);
 
     server.send(200, "application/json", "{\"ok\":true,\"ssid\":\"" + ssid + "\"}");
