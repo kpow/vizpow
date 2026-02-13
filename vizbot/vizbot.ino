@@ -144,13 +144,22 @@ void startWifiAP() {
   if (!wifiEnabled) {
     WiFi.mode(WIFI_AP);
     delay(100);
-    WiFi.setSleep(false);
   }
   bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
   DBGLN("--- WiFi AP restart ---");
   DBG("softAP returned: ");
   DBGLN(apStarted ? "YES" : "NO");
-  delay(300);
+
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+
+  // Wait for AP to actually start
+  uint8_t retries = 0;
+  while (WiFi.softAPIP() == IPAddress(0, 0, 0, 0) && retries < 20) {
+    delay(100);
+    retries++;
+  }
+
   if (!wifiEnabled && !sysStatus.webServerReady) {
     setupWebServer();
     sysStatus.webServerReady = true;
