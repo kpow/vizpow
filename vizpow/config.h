@@ -90,6 +90,8 @@
 #define MODE_MOTION 0
 #define MODE_AMBIENT 1
 #define MODE_EMOJI 2
+#define MODE_BOT 3         // Bot Mode: animated companion face (LCD only)
+#define NUM_MODES 4        // Total number of display modes
 
 // Effect counts
 #define NUM_MOTION_EFFECTS 12

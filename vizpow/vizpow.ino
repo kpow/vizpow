@@ -33,8 +33,11 @@
 #include "effects_motion.h"
 #include "effects_ambient.h"
 #include "effects_emoji.h"
-#include "web_server.h"
 #include "display_lcd.h"
+#if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+#include "bot_mode.h"
+#endif
+#include "web_server.h"
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
 #endif
@@ -94,6 +97,8 @@ void shuffleArray(uint8_t* arr, uint8_t size) {
 }
 
 void resetEffectShuffle() {
+  // Bot mode has no effect shuffling
+  if (currentMode == MODE_BOT) { effectShuffleSize = 1; effectShufflePos = 0; return; }
   effectShuffleSize = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
   for (uint8_t i = 0; i < effectShuffleSize; i++) {
     effectShuffleBag[i] = i;
@@ -295,13 +300,29 @@ void checkModeShake() {
 
     // If enough shakes, change mode
     if (validShakes >= SHAKE_COUNT) {
-      // Cycle to next mode: MOTION -> AMBIENT -> EMOJI -> MOTION
-      uint8_t nextMode = (currentMode + 1) % 3;
+      // Cycle to next mode: MOTION -> AMBIENT -> EMOJI -> BOT -> MOTION
+      #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+        uint8_t nextMode = (currentMode + 1) % NUM_MODES;
+      #else
+        // Non-LCD targets skip Bot Mode
+        uint8_t nextMode = (currentMode + 1) % 3;
+      #endif
 
-      // If entering emoji mode, ensure there's a sequence
+      // Handle mode-specific entry logic
       if (nextMode == MODE_EMOJI && emojiQueueCount == 0) {
         addRandomEmojis(RANDOM_EMOJI_COUNT);
       }
+
+      #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+        // Exit bot mode if leaving it
+        if (currentMode == MODE_BOT) {
+          exitBotMode();
+        }
+        // Enter bot mode if entering it
+        if (nextMode == MODE_BOT) {
+          enterBotMode();
+        }
+      #endif
 
       currentMode = nextMode;
       effectIndex = 0;
@@ -336,13 +357,27 @@ void loop() {
   #endif
   checkModeShake();  // Check for shake gesture to change mode
 
+  // Bot mode: single shake reaction (separate from mode-change shake)
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+  if (currentMode == MODE_BOT && botMode.initialized) {
+    float mag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
+    if (mag > SHAKE_THRESHOLD && !botMode.shakeReacting) {
+      botMode.onShake();
+    }
+    // Also register any motion as interaction for idle timer
+    if (mag > 1.3f) {
+      botMode.registerInteraction();
+    }
+  }
+  #endif
+
   // Handle touch gestures
   #if defined(TOUCH_ENABLED)
     handleTouch();
   #endif
 
   // Only do effect/palette cycling for Motion and Ambient modes
-  if (currentMode != MODE_EMOJI) {
+  if (currentMode != MODE_EMOJI && currentMode != MODE_BOT) {
     int maxEffects = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
 
     // Auto cycle effects (ambient effects get double time)
@@ -372,9 +407,17 @@ void loop() {
     case MODE_EMOJI:
       runEmojiEffect();
       break;
+    #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+    case MODE_BOT:
+      runBotMode();
+      break;
+    #endif
   }
 
-  showDisplay();
+  // Bot mode handles its own LCD rendering, skip normal display pipeline
+  if (currentMode != MODE_BOT) {
+    showDisplay();
+  }
 
   // Frame timing: power-save uses adaptive delays with FPS caps,
   // full-power just uses the speed setting directly
@@ -402,6 +445,11 @@ void loop() {
     }
     delay(frameDelay);
   #else
-    delay(speed);
+    // Bot mode uses its own frame timing for smooth ~30fps
+    if (currentMode == MODE_BOT) {
+      delay(BOT_FRAME_DELAY_MS);
+    } else {
+      delay(speed);
+    }
   #endif
 }
