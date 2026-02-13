@@ -243,12 +243,34 @@ bool bootStageTouch() {
 bool bootStageWiFi() {
   WiFi.mode(WIFI_AP);
   delay(100);
-  WiFi.setSleep(false);
 
   bool ok = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
   if (ok) {
-    delay(300);  // Let AP stabilize
+    // Must be called AFTER softAP — disables radio power saving so beacons keep going
+    WiFi.setSleep(false);
+
+    // Set TX power explicitly — some ESP32-S3 boards default too low to broadcast
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+
+    // Wait for AP to actually start beaconing (IP becomes valid)
+    uint8_t retries = 0;
+    while (WiFi.softAPIP() == IPAddress(0, 0, 0, 0) && retries < 20) {
+      delay(100);
+      retries++;
+    }
     sysStatus.apIP = WiFi.softAPIP();
+
+    // If IP is still 0.0.0.0 after 2 seconds, AP didn't really start
+    if (sysStatus.apIP == IPAddress(0, 0, 0, 0)) {
+      ok = false;
+    }
+
+    DBG("WiFi AP IP: ");
+    DBGLN(sysStatus.apIP);
+    DBG("WiFi AP MAC: ");
+    DBGLN(WiFi.softAPmacAddress());
+    DBG("TX Power: 8.5dBm, retries: ");
+    DBGLN(retries);
   }
 
   sysStatus.wifiReady = ok;
