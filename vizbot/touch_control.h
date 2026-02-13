@@ -79,6 +79,10 @@ static uint8_t lcdBrightness = 200;
 // Speed control (external from main sketch)
 extern uint8_t speed;
 
+// Bot background style control (defined in bot_mode.h)
+extern void setBotBackgroundStyle(uint8_t style);
+extern uint8_t getBotBackgroundStyle();
+
 // Ambient effect names (for background overlay control)
 const char* ambientEffectNames[] = {
   "Plasma", "Rainbow", "Fire", "Ocean", "Sparkle",
@@ -205,7 +209,11 @@ void drawMenuHeader() {
   // Current background effect
   gfx->setCursor(10, 24);
   gfx->setTextColor(0xFFFF);
-  gfx->print(ambientEffectNames[effectIndex % NUM_AMBIENT_EFFECTS]);
+  if (getBotBackgroundStyle() == 4) {
+    gfx->print(ambientEffectNames[effectIndex % NUM_AMBIENT_EFFECTS]);
+  } else {
+    gfx->print("Black");
+  }
 
   // Palette name
   gfx->setCursor(10, 42);
@@ -236,9 +244,11 @@ void drawMenu() {
 
   if (menuPage == 0) {
     // === MAIN PAGE ===
-    // Row 1: Background effect prev/next
-    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "< BG", 0x001F);
-    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "BG >", 0x001F);
+    bool bgOn = (getBotBackgroundStyle() == 4);
+
+    // Row 1: Background on/off | Cycle effect
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, bgOn ? "BG: ON" : "BG: OFF", bgOn ? 0x0400 : 0x4000);
+    drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, "EFF >", 0x001F);
     rowY += BTN_HEIGHT + BTN_GAP;
 
     // Row 2: Palette | Hi-Res toggle
@@ -317,9 +327,13 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
   int col = (x < LCD_WIDTH / 2) ? 0 : 1;
 
   switch (row) {
-    case 0:  // Background effect prev/next
-      if (col == 0) touchPrevEffect();
-      else touchNextEffect();
+    case 0:  // Background on/off | Cycle effect
+      if (col == 0) {
+        // Toggle ambient background on/off
+        setBotBackgroundStyle(getBotBackgroundStyle() == 4 ? 0 : 4);
+      } else {
+        touchNextEffect();
+      }
       break;
     case 1:  // Palette / Hi-Res toggle
       if (col == 0) touchNextPalette();
