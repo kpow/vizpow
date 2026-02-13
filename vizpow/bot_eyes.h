@@ -197,8 +197,8 @@ struct BotIMUTracker {
   void update(int16_t &outX, int16_t &outY) {
     // Map accelerometer tilt to pupil offset
     // accelX tilts left/right, accelY tilts forward/back
-    float rawX = constrain(accelX * TILT_SCALE, -MAX_OFFSET, MAX_OFFSET);
-    float rawY = constrain(accelY * TILT_SCALE, -MAX_OFFSET, MAX_OFFSET);
+    float rawX = constrain(accelY * TILT_SCALE, -MAX_OFFSET, MAX_OFFSET);
+    float rawY = constrain(accelX * TILT_SCALE, -MAX_OFFSET, MAX_OFFSET);
 
     // Smooth with exponential filter
     smoothX += (rawX - smoothX) * SMOOTH_FACTOR;
