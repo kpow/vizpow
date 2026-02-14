@@ -38,6 +38,7 @@
 #endif
 #include "task_manager.h"
 #include "boot_sequence.h"
+#include "settings.h"
 
 // Global objects
 CRGB leds[NUM_LEDS];
@@ -230,6 +231,9 @@ void setup() {
   // Enter bot mode
   enterBotMode();
 
+  // Restore user settings from NVS (must come after enterBotMode)
+  loadSettings();
+
   // Start WiFi server task on Core 0 (render stays on Core 1)
   if (wifiEnabled) {
     startWifiTask();
@@ -278,6 +282,12 @@ void loop() {
 
   // Run bot mode (handles its own LCD rendering)
   runBotMode();
+
+  // Flush any changed settings to NVS (debounced, only writes when dirty)
+  flushSettingsIfDirty();
+
+  // Feed the watchdog — proves the render loop is alive
+  feedWatchdog();
 
   delay(BOT_FRAME_DELAY_MS);
 }

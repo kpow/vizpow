@@ -518,6 +518,15 @@ void renderBotMode() {
   botMode.timeOverlay.render();
   botMode.weatherOverlay.render();
 
+  // ---- Health heartbeat — tiny pulsing dot in bottom-right corner ----
+  // Proves the render loop is alive. Pulses between dim and bright green.
+  {
+    float pulse = (sinf((float)millis() / 500.0f) + 1.0f) * 0.5f;  // 0..1, ~1Hz
+    uint8_t g = 8 + (uint8_t)(pulse * 24);  // subtle green 8..32
+    uint16_t hbColor = ((g >> 2) << 5);  // RGB565 green channel only
+    gfx->fillCircle(LCD_WIDTH - 6, LCD_HEIGHT - 6, 2, hbColor);
+  }
+
   // ---- Flush canvas to screen in one atomic transfer — zero flicker ----
   botCanvas->flush();
 
