@@ -8,11 +8,12 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ESPmDNS.h>
+#include <esp_system.h>
 #include "config.h"
 #include "system_status.h"
 
 // Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, IPAddress(0,0,0,0), 0, 0};
+SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, IPAddress(0,0,0,0), 0, 0, 0};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
@@ -60,6 +61,12 @@ void bootDrawHeader() {
   gfx->setCursor(LCD_WIDTH - 42, 10);
   gfx->setTextColor(BOOT_COLOR_DETAIL);
   gfx->print("boot");
+
+  // Show boot reason below header
+  gfx->setCursor(BOOT_LEFT_MARGIN + 78, 10);
+  gfx->setTextColor(sysStatus.bootReason == ESP_RST_PANIC || sysStatus.bootReason == ESP_RST_TASK_WDT
+                     ? BOOT_COLOR_WARN : BOOT_COLOR_DETAIL);
+  gfx->print(getBootReasonStr());
 }
 
 // Draw a stage label: "[1/7] LCD"
@@ -313,6 +320,26 @@ bool bootStageDNS() {
 }
 
 // ============================================================================
+// Boot Reason — decode ESP32 reset cause
+// ============================================================================
+
+const char* getBootReasonStr() {
+  esp_reset_reason_t reason = esp_reset_reason();
+  switch (reason) {
+    case ESP_RST_POWERON:  return "Power-on";
+    case ESP_RST_SW:       return "Software";
+    case ESP_RST_PANIC:    return "Panic";
+    case ESP_RST_INT_WDT:  return "IntWDT";
+    case ESP_RST_TASK_WDT: return "TaskWDT";
+    case ESP_RST_WDT:      return "WDT";
+    case ESP_RST_DEEPSLEEP:return "DeepSleep";
+    case ESP_RST_BROWNOUT: return "Brownout";
+    case ESP_RST_SDIO:     return "SDIO";
+    default:               return "Unknown";
+  }
+}
+
+// ============================================================================
 // Run Full Boot Sequence
 // ============================================================================
 // Call this from setup() AFTER initLCD(). Draws each stage to the LCD
@@ -322,6 +349,11 @@ void runBootSequence() {
   uint32_t bootStart = millis();
   bootStageIndex = 0;
   sysStatus.failCount = 0;
+
+  // Log boot reason
+  sysStatus.bootReason = (uint8_t)esp_reset_reason();
+  DBG("Boot reason: ");
+  DBGLN(getBootReasonStr());
 
   // Clear screen and draw header
   gfx->fillScreen(BOOT_COLOR_BG);

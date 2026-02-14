@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <DNSServer.h>
+#include <esp_task_wdt.h>
 #include "config.h"
 
 // ============================================================================
@@ -163,6 +164,7 @@ extern void toggleBotTimeOverlay();
 extern bool isBotTimeOverlayEnabled();
 extern uint8_t brightness;
 extern bool autoCycle;
+extern void markSettingsDirty();
 
 void drainCommandQueue() {
   if (cmdQueue == nullptr) return;
@@ -173,15 +175,18 @@ void drainCommandQueue() {
       case CMD_SET_BRIGHTNESS:
         brightness = constrain(cmd.u8val, 1, 50);
         FastLED.setBrightness(brightness);
+        markSettingsDirty();
         break;
       case CMD_SET_EXPRESSION:
         setBotExpression(cmd.u8val);
         break;
       case CMD_SET_FACE_COLOR:
         setBotFaceColor(cmd.u16val);
+        markSettingsDirty();
         break;
       case CMD_SET_BG_STYLE:
         setBotBackgroundStyle(cmd.u8val);
+        markSettingsDirty();
         break;
       case CMD_SAY_TEXT:
         showBotSaying(cmd.say.text, cmd.say.duration);
@@ -190,13 +195,16 @@ void drainCommandQueue() {
         // Set to desired state — toggle if it doesn't match
         if ((cmd.u8val == 1) != isBotTimeOverlayEnabled()) {
           toggleBotTimeOverlay();
+          markSettingsDirty();
         }
         break;
       case CMD_TOGGLE_TIME_OVERLAY:
         toggleBotTimeOverlay();
+        markSettingsDirty();
         break;
       case CMD_SET_AUTOCYCLE:
         autoCycle = (cmd.u8val == 1);
+        markSettingsDirty();
         break;
     }
   }
@@ -216,11 +224,15 @@ extern bool wifiEnabled;
 static TaskHandle_t wifiTaskHandle = nullptr;
 
 void wifiServerTask(void* param) {
+  // Register this task with the Task Watchdog Timer
+  esp_task_wdt_add(nullptr);
+
   for (;;) {
     if (wifiEnabled) {
       dnsServer.processNextRequest();  // Captive portal DNS
       server.handleClient();            // HTTP
     }
+    esp_task_wdt_reset();  // Feed the watchdog
     vTaskDelay(pdMS_TO_TICKS(2));  // ~500 req/s max, yields to WiFi stack
   }
 }
@@ -240,13 +252,43 @@ void startWifiTask() {
 }
 
 // ============================================================================
+// Watchdog Timer — restart ESP32 if a task hangs
+// ============================================================================
+// TWDT timeout: 10 seconds. If any registered task fails to feed the
+// watchdog within this window, the ESP32 resets with reason TASK_WDT.
+// The boot reason log will show "TaskWDT" so you know what happened.
+
+#define WDT_TIMEOUT_SEC 10
+
+void initWatchdog() {
+  // Initialize the TWDT with a 10-second timeout, no panic (we log instead)
+  esp_task_wdt_deinit();  // Remove any default config
+  esp_task_wdt_config_t wdtConfig = {
+    .timeout_ms = WDT_TIMEOUT_SEC * 1000,
+    .idle_core_mask = 0,       // Don't monitor idle tasks
+    .trigger_panic = true      // Reset on timeout (boot reason = TASK_WDT)
+  };
+  esp_task_wdt_init(&wdtConfig);
+
+  // Register the main loop task (Arduino loop runs on Core 1)
+  esp_task_wdt_add(nullptr);
+  DBGLN("Watchdog initialized (10s timeout)");
+}
+
+// Feed the watchdog from the main loop — call once per frame
+void feedWatchdog() {
+  esp_task_wdt_reset();
+}
+
+// ============================================================================
 // Init all task infrastructure
 // ============================================================================
 
 void initTaskManager() {
   initI2CMutex();
   initCommandQueue();
-  DBGLN("Task manager initialized (I2C mutex + command queue)");
+  initWatchdog();
+  DBGLN("Task manager initialized (I2C mutex + command queue + watchdog)");
 }
 
 #endif // TASK_MANAGER_H
