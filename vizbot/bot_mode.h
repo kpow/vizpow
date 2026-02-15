@@ -522,8 +522,8 @@ void renderBotMode() {
   // Proves the render loop is alive. Pulses between dim and bright green.
   {
     float pulse = (sinf((float)millis() / 500.0f) + 1.0f) * 0.5f;  // 0..1, ~1Hz
-    uint8_t g = 8 + (uint8_t)(pulse * 24);  // subtle green 8..32
-    uint16_t hbColor = ((g >> 2) << 5);  // RGB565 green channel only
+    uint8_t g = 20 + (uint8_t)(pulse * 43);  // green 20..63 (6-bit RGB565 range)
+    uint16_t hbColor = (g << 5);  // RGB565 green channel only
     gfx->fillCircle(LCD_WIDTH - 6, LCD_HEIGHT - 6, 2, hbColor);
   }
 
