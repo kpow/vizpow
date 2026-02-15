@@ -234,14 +234,16 @@ void setup() {
   // Restore user settings from NVS (must come after enterBotMode)
   loadSettings();
 
-  // Start WiFi server task on Core 0 (render stays on Core 1)
-  if (wifiEnabled) {
-    startWifiTask();
-  }
+  // WiFi server handled in loop() — Core 0 FreeRTOS task was crashing
+  // (LoadProhibited at 0xFFFFFFFF). handleClient()+DNS work fine on Core 1.
 }
 
 void loop() {
-  // Web server runs in its own FreeRTOS task on Core 0 — no handleClient() here
+  // Handle WiFi server + captive portal DNS in the main loop
+  if (wifiEnabled) {
+    dnsServer.processNextRequest();
+    server.handleClient();
+  }
 
   // Only read IMU if it initialized successfully
   if (sysStatus.imuReady) {
