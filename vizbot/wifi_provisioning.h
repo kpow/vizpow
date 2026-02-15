@@ -175,14 +175,19 @@ void beginWifiConnect(const char* ssid, const char* pass) {
   // Save credentials immediately (unverified) — if we crash, at least they're stored
   saveWifiCredentials(ssid, pass, false);
 
+  // Clean slate — POC proved this is required for ESP32 WiFi stack
+  WiFi.disconnect(true);
+  delay(100);
+
   // Switch to AP_STA — keeps the AP alive so the browser can poll status
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
-  // Re-establish the AP (mode change can drop it)
+  // Re-establish the AP (mode change drops it)
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
-  WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+
+  // NOTE: Do NOT set low TX power here. 8.5dBm is fine for AP (phone nearby)
+  // but STA needs full power to reach the router. Let ESP32 use default (~20dBm).
 
   // Start STA connection
   WiFi.begin(ssid, pass);
@@ -292,16 +297,18 @@ bool bootAttemptSTA() {
   DBG("Saved WiFi found: ");
   DBGLN(ssid);
 
+  // Clean slate before mode switch (POC pattern)
+  WiFi.disconnect(true);
+  delay(100);
+
   // Switch to AP_STA to keep AP alive during attempt
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
   // Re-establish AP after mode change
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
-  WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
 
-  // Attempt STA connection
+  // Attempt STA connection (full TX power for router reach)
   WiFi.begin(ssid, pass);
 
   unsigned long start = millis();
@@ -330,10 +337,13 @@ bool bootAttemptSTA() {
   WiFi.mode(WIFI_AP);
   delay(100);
 
-  // Re-establish AP
+  // Re-establish AP (low TX power is fine — phone is nearby)
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
   WiFi.setSleep(false);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
+
+  // Update AP IP (might have changed after mode switch)
+  sysStatus.apIP = WiFi.softAPIP();
 
   return false;
 }
