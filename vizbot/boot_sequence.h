@@ -50,6 +50,9 @@ extern Arduino_GFX *gfx;
 static uint8_t bootStageIndex = 0;
 static const uint8_t BOOT_TOTAL_STAGES = 8;
 
+// Forward declaration — defined further down after boot helpers
+const char* getBootReasonStr();
+
 // Draw the boot header
 void bootDrawHeader() {
   gfx->setTextSize(BOOT_TEXT_SIZE);
