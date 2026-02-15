@@ -163,7 +163,6 @@ extern void toggleBotTimeOverlay();
 extern bool isBotTimeOverlayEnabled();
 extern uint8_t brightness;
 extern bool autoCycle;
-extern void markSettingsDirty();
 
 void drainCommandQueue() {
   if (cmdQueue == nullptr) return;
@@ -174,18 +173,15 @@ void drainCommandQueue() {
       case CMD_SET_BRIGHTNESS:
         brightness = constrain(cmd.u8val, 1, 50);
         FastLED.setBrightness(brightness);
-        markSettingsDirty();
         break;
       case CMD_SET_EXPRESSION:
         setBotExpression(cmd.u8val);
         break;
       case CMD_SET_FACE_COLOR:
         setBotFaceColor(cmd.u16val);
-        markSettingsDirty();
         break;
       case CMD_SET_BG_STYLE:
         setBotBackgroundStyle(cmd.u8val);
-        markSettingsDirty();
         break;
       case CMD_SAY_TEXT:
         showBotSaying(cmd.say.text, cmd.say.duration);
@@ -194,16 +190,13 @@ void drainCommandQueue() {
         // Set to desired state — toggle if it doesn't match
         if ((cmd.u8val == 1) != isBotTimeOverlayEnabled()) {
           toggleBotTimeOverlay();
-          markSettingsDirty();
         }
         break;
       case CMD_TOGGLE_TIME_OVERLAY:
         toggleBotTimeOverlay();
-        markSettingsDirty();
         break;
       case CMD_SET_AUTOCYCLE:
         autoCycle = (cmd.u8val == 1);
-        markSettingsDirty();
         break;
     }
   }
@@ -237,7 +230,7 @@ void startWifiTask() {
   xTaskCreatePinnedToCore(
     wifiServerTask,   // Task function
     "wifi_srv",        // Name
-    16384,             // Stack size (bytes) — 16KB: HTML page + HTTP headers + TCP buffers
+    4096,              // Stack size (bytes)
     nullptr,           // Parameter
     1,                 // Priority (low — WiFi stack is higher)
     &wifiTaskHandle,   // Handle
@@ -245,12 +238,6 @@ void startWifiTask() {
   );
   DBGLN("WiFi server task started on Core 0");
 }
-
-// Watchdog removed — esp_task_wdt_* calls were crashing Core 0 internal tasks.
-// The ESP32 hardware WDT still provides a safety net for true hangs.
-
-// No-op so callers don't need to change
-void feedWatchdog() {}
 
 // ============================================================================
 // Init all task infrastructure

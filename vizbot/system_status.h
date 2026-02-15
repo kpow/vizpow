@@ -19,11 +19,9 @@ struct SystemStatus {
   bool webServerReady;
   bool dnsReady;
   bool mdnsReady;
-  bool settingsLoaded;
   IPAddress apIP;
   uint32_t bootTimeMs;
   uint8_t failCount;
-  uint8_t bootReason;      // esp_reset_reason() value
 };
 
 extern SystemStatus sysStatus;

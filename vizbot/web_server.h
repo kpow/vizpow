@@ -155,7 +155,6 @@ void handleState() {
                   ",\"mdns\":" + (sysStatus.mdnsReady ? "true" : "false") +
                   ",\"bootMs\":" + String(sysStatus.bootTimeMs) +
                   ",\"fails\":" + String(sysStatus.failCount) +
-                  ",\"bootReason\":" + String(sysStatus.bootReason) +
                 "}}";
   server.send(200, "application/json", json);
 }
