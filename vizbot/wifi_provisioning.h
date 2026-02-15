@@ -42,9 +42,9 @@ struct WifiScanEntry {
   bool open;  // no password required
 };
 
-// Provisioning state — all accessed from main loop only (no mutex needed)
+// Provisioning state — state written by Core 0 handler, read by Core 1 main loop
 struct WifiProvData {
-  WifiProvState state;
+  volatile WifiProvState state;
 
   // Credentials being attempted
   char ssid[33];
