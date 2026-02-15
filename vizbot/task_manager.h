@@ -213,13 +213,18 @@ extern WebServer server;
 extern DNSServer dnsServer;
 extern bool wifiEnabled;
 
+// Defined in wifi_provisioning.h — handles connect request + STA polling.
+// Runs on Core 0 (same core as handler), no cross-core visibility issues.
+extern void pollWifiConnectTask();
+
 static TaskHandle_t wifiTaskHandle = nullptr;
 
 void wifiServerTask(void* param) {
   for (;;) {
     if (wifiEnabled) {
-      dnsServer.processNextRequest();  // Captive portal DNS
-      server.handleClient();            // HTTP
+      pollWifiConnectTask();             // connect request + STA poll
+      dnsServer.processNextRequest();    // Captive portal DNS
+      server.handleClient();             // HTTP
     }
     vTaskDelay(pdMS_TO_TICKS(2));  // ~500 req/s max, yields to WiFi stack
   }

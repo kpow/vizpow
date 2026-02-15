@@ -42,9 +42,9 @@ struct WifiScanEntry {
   bool open;  // no password required
 };
 
-// Provisioning state — state written by Core 0 handler, read by Core 1 main loop
+// Provisioning state — connect/poll all on Core 0 (WiFi task), scan on Core 1
 struct WifiProvData {
-  volatile WifiProvState state;
+  WifiProvState state;
 
   // Credentials being attempted
   char ssid[33];
@@ -402,16 +402,18 @@ void resetWifiProvisioning() {
 // Main loop poll — call once per frame
 // ============================================================================
 
-void pollWifiProvisioning() {
-  pollWifiScan();
-
-  // Handler set PROV_CONNECT_REQUESTED — now do the actual connection from main loop
+// Called from WiFi task on Core 0 — same core as handler, no cross-core issue
+void pollWifiConnectTask() {
   if (wifiProv.state == PROV_CONNECT_REQUESTED) {
     beginWifiConnect();
   }
-
   pollWifiConnect();
   pollWifiApLinger();
+}
+
+// Called from main loop on Core 1 — only scan (no connect state needed)
+void pollWifiProvisioning() {
+  pollWifiScan();
 }
 
 // ============================================================================
