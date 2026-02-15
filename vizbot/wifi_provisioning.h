@@ -26,6 +26,7 @@ enum WifiProvState : uint8_t {
   PROV_IDLE = 0,        // Not doing anything
   PROV_SCANNING,        // Async WiFi scan in progress
   PROV_SCAN_DONE,       // Scan results ready
+  PROV_CONNECT_REQUESTED, // Handler set credentials, main loop will connect
   PROV_CONNECTING,      // Attempting STA connection
   PROV_CONNECTED,       // STA connected, AP still alive (linger period)
   PROV_FAILED,          // STA connection failed
@@ -157,46 +158,60 @@ void pollWifiScan() {
 // ============================================================================
 // Connect — switch to AP_STA and attempt STA connection
 // ============================================================================
-// IMPORTANT: This is called from a web handler. The HTTP response has
-// ALREADY been sent before this runs. The web page polls /wifi/status.
+// Request Connect — called from web handler, just saves creds + sets flag.
+// The actual WiFi calls happen in the main loop via pollWifiProvisioning().
+// This avoids calling WiFi.mode/begin from inside a handler on Core 0.
+// ============================================================================
 
-extern bool wifiEnabled;
-extern void startDNS();
-extern void stopDNS();
-extern bool startMDNS();
-
-void beginWifiConnect(const char* ssid, const char* pass) {
+void requestWifiConnect(const char* ssid, const char* pass) {
   strncpy(wifiProv.ssid, ssid, 32);
   wifiProv.ssid[32] = '\0';
   strncpy(wifiProv.pass, pass, 63);
   wifiProv.pass[63] = '\0';
   wifiProv.failReason[0] = '\0';
 
-  // Save credentials immediately (unverified) — if we crash, at least they're stored
+  // Save credentials immediately (unverified)
   saveWifiCredentials(ssid, pass, false);
+
+  // Set flag — main loop will pick this up and do the actual connection
+  wifiProv.state = PROV_CONNECT_REQUESTED;
+
+  DBG("WiFi connect requested for: ");
+  DBGLN(ssid);
+}
+
+// ============================================================================
+// Begin Connect — called from MAIN LOOP (not from handler).
+// Follows the exact same pattern as the working POC.
+// ============================================================================
+
+extern bool wifiEnabled;
+extern void startDNS();
+extern void stopDNS();
+extern bool startMDNS();
+
+void beginWifiConnect() {
+  DBGLN("--- beginWifiConnect (main loop) ---");
 
   // Clean slate — POC proved this is required for ESP32 WiFi stack
   WiFi.disconnect(true);
   delay(100);
 
-  // Switch to AP_STA — keeps the AP alive so the browser can poll status
+  // Switch to AP_STA (same sequence as POC)
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
   // Re-establish the AP (mode change drops it)
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
 
-  // NOTE: Do NOT set low TX power here. 8.5dBm is fine for AP (phone nearby)
-  // but STA needs full power to reach the router. Let ESP32 use default (~20dBm).
-
-  // Start STA connection
-  WiFi.begin(ssid, pass);
+  // Start STA connection (full TX power — don't set 8.5dBm here)
+  WiFi.begin(wifiProv.ssid, wifiProv.pass);
 
   wifiProv.state = PROV_CONNECTING;
   wifiProv.connectStartMs = millis();
 
   DBG("WiFi STA connecting to: ");
-  DBGLN(ssid);
+  DBGLN(wifiProv.ssid);
 }
 
 // Poll STA connection progress — call from main loop
@@ -389,6 +404,12 @@ void resetWifiProvisioning() {
 
 void pollWifiProvisioning() {
   pollWifiScan();
+
+  // Handler set PROV_CONNECT_REQUESTED — now do the actual connection from main loop
+  if (wifiProv.state == PROV_CONNECT_REQUESTED) {
+    beginWifiConnect();
+  }
+
   pollWifiConnect();
   pollWifiApLinger();
 }
@@ -401,18 +422,20 @@ String getWifiStatusJson() {
   String json = "{\"state\":\"";
 
   switch (wifiProv.state) {
-    case PROV_IDLE:       json += "idle"; break;
-    case PROV_SCANNING:   json += "scanning"; break;
-    case PROV_SCAN_DONE:  json += "scan_done"; break;
-    case PROV_CONNECTING: json += "connecting"; break;
-    case PROV_CONNECTED:  json += "connected"; break;
-    case PROV_FAILED:     json += "failed"; break;
-    case PROV_STA_ACTIVE: json += "sta_active"; break;
+    case PROV_IDLE:              json += "idle"; break;
+    case PROV_SCANNING:          json += "scanning"; break;
+    case PROV_SCAN_DONE:         json += "scan_done"; break;
+    case PROV_CONNECT_REQUESTED: json += "connecting"; break;  // show as connecting
+    case PROV_CONNECTING:        json += "connecting"; break;
+    case PROV_CONNECTED:         json += "connected"; break;
+    case PROV_FAILED:            json += "failed"; break;
+    case PROV_STA_ACTIVE:        json += "sta_active"; break;
   }
   json += "\"";
 
-  if (wifiProv.state == PROV_CONNECTING || wifiProv.state == PROV_CONNECTED ||
-      wifiProv.state == PROV_STA_ACTIVE || wifiProv.state == PROV_FAILED) {
+  if (wifiProv.state == PROV_CONNECT_REQUESTED || wifiProv.state == PROV_CONNECTING ||
+      wifiProv.state == PROV_CONNECTED || wifiProv.state == PROV_STA_ACTIVE ||
+      wifiProv.state == PROV_FAILED) {
     json += ",\"ssid\":\"";
     json += wifiProv.ssid;
     json += "\"";

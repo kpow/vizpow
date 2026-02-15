@@ -361,7 +361,7 @@ void handleBotBackground() {
 // ============================================================================
 // Forward declarations from wifi_provisioning.h
 extern void startWifiScan();
-extern void beginWifiConnect(const char* ssid, const char* pass);
+extern void requestWifiConnect(const char* ssid, const char* pass);
 extern void resetWifiProvisioning();
 extern String getWifiStatusJson();
 
@@ -378,14 +378,11 @@ void handleWifiConnect() {
   String ssid = server.arg("ssid");
   String pass = server.hasArg("pass") ? server.arg("pass") : "";
 
-  // Send response FIRST — connection will disrupt the network
+  // Just save creds and set flag — main loop will do the actual WiFi calls.
+  // This avoids calling WiFi.mode/begin from inside a Core 0 handler.
+  requestWifiConnect(ssid.c_str(), pass.c_str());
+
   server.send(200, "text/plain", "OK");
-
-  // Small delay to ensure HTTP response is flushed
-  delay(100);
-
-  // Now begin the connection (this changes WiFi mode)
-  beginWifiConnect(ssid.c_str(), pass.c_str());
 }
 
 void handleWifiStatus() {
