@@ -518,13 +518,6 @@ void renderBotMode() {
   botMode.timeOverlay.render();
   botMode.weatherOverlay.render();
 
-  // ---- Health heartbeat — pulsing dot in bottom-right corner ----
-  {
-    uint8_t beat = (millis() / 500) % 2;  // blink on/off every 500ms
-    uint16_t hbColor = beat ? 0x07E0 : 0x0320;  // bright green / dim green
-    gfx->fillCircle(LCD_WIDTH - 8, LCD_HEIGHT - 8, 3, hbColor);
-  }
-
   // ---- Flush canvas to screen in one atomic transfer — zero flicker ----
   botCanvas->flush();
 
