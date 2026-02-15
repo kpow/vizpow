@@ -242,7 +242,7 @@ void startWifiTask() {
   xTaskCreatePinnedToCore(
     wifiServerTask,   // Task function
     "wifi_srv",        // Name
-    8192,              // Stack size (bytes) — WebServer needs headroom for HTTP parsing + HTML send
+    16384,             // Stack size (bytes) — 16KB: HTML page + HTTP headers + TCP buffers
     nullptr,           // Parameter
     1,                 // Priority (low — WiFi stack is higher)
     &wifiTaskHandle,   // Handle
