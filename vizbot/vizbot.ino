@@ -37,6 +37,7 @@
 #include "touch_control.h"
 #endif
 #include "task_manager.h"
+#include "wifi_provisioning.h"
 #include "boot_sequence.h"
 
 // Global objects
@@ -275,6 +276,9 @@ void loop() {
 
   // Apply queued commands from WiFi/touch before rendering
   drainCommandQueue();
+
+  // Poll WiFi provisioning state machine (scan results, STA connect, AP linger)
+  pollWifiProvisioning();
 
   // Run bot mode (handles its own LCD rendering)
   runBotMode();

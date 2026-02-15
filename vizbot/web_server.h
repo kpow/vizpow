@@ -68,6 +68,26 @@ const char webpage[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
+  <div class="card">
+    <h2>WiFi Setup</h2>
+    <div id="wifiStatus"></div>
+    <div id="wifiScan" style="margin-top:10px">
+      <button onclick="wifiDoScan()" id="scanBtn">Scan Networks</button>
+    </div>
+    <div id="wifiNetworks" style="margin-top:10px"></div>
+    <div id="wifiConnect" style="display:none;margin-top:10px">
+      <div style="margin-bottom:8px;color:#aaa" id="wifiSelectedSSID"></div>
+      <div style="display:flex;gap:8px">
+        <input type="password" id="wifiPass" placeholder="Password"
+          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="63">
+        <button onclick="wifiDoConnect()" id="connectBtn" style="padding:10px 16px">Connect</button>
+      </div>
+    </div>
+    <div id="wifiForget" style="margin-top:12px;display:none">
+      <button onclick="wifiDoReset()" style="background:rgba(248,113,113,0.3)">Forget Network</button>
+    </div>
+  </div>
+
   <div class="status">Connected to VizBot &middot; vizbot.local</div>
 
   <script>
@@ -75,6 +95,8 @@ const char webpage[] PROGMEM = R"rawliteral(
     const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
     const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
     let curBgStyle = 4;
+    let wifiSelectedSSID = '';
+    let wifiPollTimer = null;
 
     function render() {
       document.getElementById('botExpressions').innerHTML = botExprNames.map((name, i) =>
@@ -89,7 +111,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     }
 
     async function api(endpoint) {
-      try { await fetch(endpoint); } catch(e) {}
+      try { return await fetch(endpoint); } catch(e) { return null; }
     }
 
     function setBotExpr(i) { api('/bot/expression?v=' + i); }
@@ -123,8 +145,119 @@ const char webpage[] PROGMEM = R"rawliteral(
       } catch(e) {}
     }
 
+    // WiFi provisioning UI
+    function rssiIcon(rssi) {
+      if (rssi > -50) return '||||';
+      if (rssi > -65) return '||| ';
+      if (rssi > -75) return '||  ';
+      return '|   ';
+    }
+
+    async function wifiDoScan() {
+      document.getElementById('scanBtn').textContent = 'Scanning...';
+      document.getElementById('scanBtn').disabled = true;
+      await api('/wifi/scan');
+      // Poll for scan results
+      wifiPollScan();
+    }
+
+    async function wifiPollScan() {
+      const r = await api('/wifi/status');
+      if (!r) { setTimeout(wifiPollScan, 1000); return; }
+      const d = await r.json();
+      if (d.state === 'scanning') {
+        setTimeout(wifiPollScan, 500);
+        return;
+      }
+      document.getElementById('scanBtn').textContent = 'Scan Networks';
+      document.getElementById('scanBtn').disabled = false;
+      if (d.state === 'scan_done' && d.networks) {
+        let html = '';
+        d.networks.forEach(n => {
+          html += '<button style="display:block;width:100%;text-align:left;margin-bottom:6px;padding:10px 12px" onclick="wifiSelectNet(\'' +
+            n.ssid.replace(/'/g, "\\'") + '\',' + (n.open?'true':'false') + ')">' +
+            '<span style="font-family:monospace;margin-right:8px;font-size:11px">' + rssiIcon(n.rssi) + '</span>' +
+            n.ssid + (n.open ? ' <span style="color:#4ade80;font-size:11px">OPEN</span>' : '') +
+            '</button>';
+        });
+        document.getElementById('wifiNetworks').innerHTML = html;
+      }
+    }
+
+    function wifiSelectNet(ssid, isOpen) {
+      wifiSelectedSSID = ssid;
+      document.getElementById('wifiSelectedSSID').textContent = 'Network: ' + ssid;
+      document.getElementById('wifiConnect').style.display = 'block';
+      if (isOpen) {
+        document.getElementById('wifiPass').value = '';
+        document.getElementById('wifiPass').placeholder = 'No password needed';
+      } else {
+        document.getElementById('wifiPass').placeholder = 'Password';
+      }
+    }
+
+    async function wifiDoConnect() {
+      const pass = document.getElementById('wifiPass').value;
+      document.getElementById('connectBtn').textContent = 'Connecting...';
+      document.getElementById('connectBtn').disabled = true;
+      await api('/wifi/connect?ssid=' + encodeURIComponent(wifiSelectedSSID) + '&pass=' + encodeURIComponent(pass));
+      // Start polling for connection status
+      wifiStartStatusPoll();
+    }
+
+    function wifiStartStatusPoll() {
+      if (wifiPollTimer) clearInterval(wifiPollTimer);
+      wifiPollTimer = setInterval(wifiCheckStatus, 2000);
+    }
+
+    async function wifiCheckStatus() {
+      const r = await api('/wifi/status');
+      if (!r) return;
+      const d = await r.json();
+      const el = document.getElementById('wifiStatus');
+      if (d.state === 'connecting') {
+        el.innerHTML = '<div style="color:#facc15;padding:10px">Connecting to ' + (d.ssid||'') + '...</div>';
+      } else if (d.state === 'connected' || d.state === 'sta_active') {
+        clearInterval(wifiPollTimer);
+        el.innerHTML = '<div style="color:#4ade80;padding:10px">Connected to ' + (d.ssid||'') +
+          '<br>IP: <strong>' + (d.ip||'') + '</strong>' +
+          '<br><span style="color:#aaa;font-size:12px">Switch to your home WiFi and visit ' + (d.ip||'') + '</span></div>';
+        document.getElementById('connectBtn').textContent = 'Connect';
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('wifiConnect').style.display = 'none';
+        document.getElementById('wifiNetworks').innerHTML = '';
+        document.getElementById('wifiForget').style.display = 'block';
+      } else if (d.state === 'failed') {
+        clearInterval(wifiPollTimer);
+        el.innerHTML = '<div style="color:#f87171;padding:10px">Failed: ' + (d.reason||'Unknown error') + '</div>';
+        document.getElementById('connectBtn').textContent = 'Connect';
+        document.getElementById('connectBtn').disabled = false;
+      }
+    }
+
+    async function wifiDoReset() {
+      await api('/wifi/reset');
+      document.getElementById('wifiStatus').innerHTML = '<div style="color:#aaa;padding:10px">Credentials cleared. Back to AP mode.</div>';
+      document.getElementById('wifiForget').style.display = 'none';
+    }
+
+    // On load, check WiFi status
+    async function wifiInitCheck() {
+      const r = await api('/wifi/status');
+      if (!r) return;
+      const d = await r.json();
+      if (d.state === 'connected' || d.state === 'sta_active') {
+        document.getElementById('wifiStatus').innerHTML = '<div style="color:#4ade80;padding:10px">Connected to ' +
+          (d.ssid||'') + ' &middot; IP: ' + (d.ip||'') + '</div>';
+        document.getElementById('wifiForget').style.display = 'block';
+      } else if (d.state === 'connecting') {
+        wifiStartStatusPoll();
+      }
+    }
+
     getState();
     render();
+    wifiInitCheck();
   </script>
 </body>
 </html>
@@ -155,6 +288,8 @@ void handleState() {
                   ",\"mdns\":" + (sysStatus.mdnsReady ? "true" : "false") +
                   ",\"bootMs\":" + String(sysStatus.bootTimeMs) +
                   ",\"fails\":" + String(sysStatus.failCount) +
+                  ",\"sta\":" + (sysStatus.staConnected ? "true" : "false") +
+                  (sysStatus.staConnected ? ",\"staIP\":\"" + sysStatus.staIP.toString() + "\"" : "") +
                 "}}";
   server.send(200, "application/json", json);
 }
@@ -222,6 +357,47 @@ void handleBotBackground() {
 }
 
 // ============================================================================
+// WiFi Provisioning Handlers
+// ============================================================================
+// Forward declarations from wifi_provisioning.h
+extern void startWifiScan();
+extern void beginWifiConnect(const char* ssid, const char* pass);
+extern void resetWifiProvisioning();
+extern String getWifiStatusJson();
+
+void handleWifiScan() {
+  startWifiScan();
+  server.send(200, "text/plain", "OK");
+}
+
+void handleWifiConnect() {
+  if (!server.hasArg("ssid")) {
+    server.send(400, "text/plain", "Missing ssid");
+    return;
+  }
+  String ssid = server.arg("ssid");
+  String pass = server.hasArg("pass") ? server.arg("pass") : "";
+
+  // Send response FIRST — connection will disrupt the network
+  server.send(200, "text/plain", "OK");
+
+  // Small delay to ensure HTTP response is flushed
+  delay(100);
+
+  // Now begin the connection (this changes WiFi mode)
+  beginWifiConnect(ssid.c_str(), pass.c_str());
+}
+
+void handleWifiStatus() {
+  server.send(200, "application/json", getWifiStatusJson());
+}
+
+void handleWifiReset() {
+  resetWifiProvisioning();
+  server.send(200, "text/plain", "OK");
+}
+
+// ============================================================================
 // Captive Portal — redirect OS connectivity checks to control page
 // ============================================================================
 // When a phone/laptop connects to vizBot WiFi, the OS sends a connectivity
@@ -230,7 +406,9 @@ void handleBotBackground() {
 // detects "captive portal" and auto-opens the control page.
 
 void handleCaptiveRedirect() {
-  server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/");
+  // In STA-only mode, no captive portal — just serve root
+  String ip = sysStatus.staConnected ? sysStatus.staIP.toString() : WiFi.softAPIP().toString();
+  server.sendHeader("Location", String("http://") + ip + "/");
   server.send(302, "text/plain", "");
 }
 
@@ -244,6 +422,12 @@ void setupWebServer() {
   server.on("/bot/say", handleBotSay);
   server.on("/bot/time", handleBotTime);
   server.on("/bot/background", handleBotBackground);
+
+  // WiFi provisioning endpoints
+  server.on("/wifi/scan", handleWifiScan);
+  server.on("/wifi/connect", handleWifiConnect);
+  server.on("/wifi/status", handleWifiStatus);
+  server.on("/wifi/reset", handleWifiReset);
 
   // Captive portal detection endpoints — all redirect to root
   server.on("/generate_204", handleCaptiveRedirect);          // Android

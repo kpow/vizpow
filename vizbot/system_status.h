@@ -19,7 +19,9 @@ struct SystemStatus {
   bool webServerReady;
   bool dnsReady;
   bool mdnsReady;
+  bool staConnected;     // STA connected to external network
   IPAddress apIP;
+  IPAddress staIP;       // IP on external network (when STA connected)
   uint32_t bootTimeMs;
   uint8_t failCount;
 };

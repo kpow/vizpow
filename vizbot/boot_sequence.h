@@ -12,7 +12,7 @@
 #include "system_status.h"
 
 // Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, IPAddress(0,0,0,0), 0, 0};
+SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
@@ -47,7 +47,7 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 extern Arduino_GFX *gfx;
 
 static uint8_t bootStageIndex = 0;
-static const uint8_t BOOT_TOTAL_STAGES = 8;
+static const uint8_t BOOT_TOTAL_STAGES = 9;
 
 // Draw the boot header
 void bootDrawHeader() {
@@ -124,11 +124,16 @@ void bootDrawSummary() {
   gfx->print(sysStatus.bootTimeMs);
   gfx->print("ms");
 
-  // Show IP if WiFi is up
-  if (sysStatus.wifiReady) {
+  // Show IP — prefer STA IP if connected, otherwise AP IP
+  if (sysStatus.staConnected) {
+    gfx->setCursor(BOOT_LEFT_MARGIN, y + 34);
+    gfx->setTextColor(BOOT_COLOR_OK);
+    gfx->print("STA: ");
+    gfx->print(sysStatus.staIP);
+  } else if (sysStatus.wifiReady) {
     gfx->setCursor(BOOT_LEFT_MARGIN, y + 34);
     gfx->setTextColor(BOOT_COLOR_DETAIL);
-    gfx->print("IP: ");
+    gfx->print("AP: ");
     gfx->print(sysStatus.apIP);
   }
 }
@@ -152,6 +157,7 @@ extern void setupWebServer();
 extern void startDNS();
 extern bool startMDNS();
 extern bool initTouch();
+extern bool bootAttemptSTA();
 
 // Stage 1: LCD — already initialized before boot screen starts
 bool bootStageLCD() {
@@ -386,6 +392,22 @@ void runBootSequence() {
     bootDrawResult(true, sysStatus.mdnsReady ? "DNS + vizbot.local" : "DNS only");
   } else {
     bootDrawResult(false, "No WiFi");
+  }
+  delay(80);
+
+  // --- Stage 9: WiFi STA (saved credentials) ---
+  bootDrawStage("WiFi STA");
+  if (sysStatus.wifiReady) {
+    ok = bootAttemptSTA();
+    if (ok) {
+      char ipStr[20];
+      snprintf(ipStr, sizeof(ipStr), "%s", sysStatus.staIP.toString().c_str());
+      bootDrawResult(true, ipStr);
+    } else {
+      bootDrawResult(false, "No saved creds");
+    }
+  } else {
+    bootDrawResult(false, "No AP");
   }
   delay(80);
 
