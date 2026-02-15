@@ -261,14 +261,22 @@ void startWifiTask() {
 #define WDT_TIMEOUT_SEC 10
 
 void initWatchdog() {
-  // Initialize the TWDT with a 10-second timeout, no panic (we log instead)
-  esp_task_wdt_deinit();  // Remove any default config
+  // Reconfigure the existing TWDT instead of deinit+init.
+  // esp_task_wdt_deinit() destroys the TWDT structure while internal ESP-IDF
+  // tasks (WiFi driver on Core 0) still hold references to it — causing a
+  // LoadProhibited crash at 0xFFFFFFFF when they next try to feed the WDT.
   esp_task_wdt_config_t wdtConfig = {
     .timeout_ms = WDT_TIMEOUT_SEC * 1000,
     .idle_core_mask = 0,       // Don't monitor idle tasks
     .trigger_panic = true      // Reset on timeout (boot reason = TASK_WDT)
   };
-  esp_task_wdt_init(&wdtConfig);
+
+  // reconfigure() preserves existing task subscriptions (safe for WiFi driver)
+  esp_err_t err = esp_task_wdt_reconfigure(&wdtConfig);
+  if (err == ESP_ERR_INVALID_STATE) {
+    // TWDT not yet initialized — do a fresh init
+    esp_task_wdt_init(&wdtConfig);
+  }
 
   // Register the main loop task (Arduino loop runs on Core 1)
   esp_task_wdt_add(nullptr);
