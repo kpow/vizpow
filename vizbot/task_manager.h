@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 #include <DNSServer.h>
-#include <esp_task_wdt.h>
 #include "config.h"
 
 // ============================================================================
@@ -224,15 +223,11 @@ extern bool wifiEnabled;
 static TaskHandle_t wifiTaskHandle = nullptr;
 
 void wifiServerTask(void* param) {
-  // Register this task with the Task Watchdog Timer
-  esp_task_wdt_add(nullptr);
-
   for (;;) {
     if (wifiEnabled) {
       dnsServer.processNextRequest();  // Captive portal DNS
       server.handleClient();            // HTTP
     }
-    esp_task_wdt_reset();  // Feed the watchdog
     vTaskDelay(pdMS_TO_TICKS(2));  // ~500 req/s max, yields to WiFi stack
   }
 }
@@ -251,42 +246,11 @@ void startWifiTask() {
   DBGLN("WiFi server task started on Core 0");
 }
 
-// ============================================================================
-// Watchdog Timer — restart ESP32 if a task hangs
-// ============================================================================
-// TWDT timeout: 10 seconds. If any registered task fails to feed the
-// watchdog within this window, the ESP32 resets with reason TASK_WDT.
-// The boot reason log will show "TaskWDT" so you know what happened.
+// Watchdog removed — esp_task_wdt_* calls were crashing Core 0 internal tasks.
+// The ESP32 hardware WDT still provides a safety net for true hangs.
 
-#define WDT_TIMEOUT_SEC 10
-
-void initWatchdog() {
-  // Reconfigure the existing TWDT instead of deinit+init.
-  // esp_task_wdt_deinit() destroys the TWDT structure while internal ESP-IDF
-  // tasks (WiFi driver on Core 0) still hold references to it — causing a
-  // LoadProhibited crash at 0xFFFFFFFF when they next try to feed the WDT.
-  esp_task_wdt_config_t wdtConfig = {
-    .timeout_ms = WDT_TIMEOUT_SEC * 1000,
-    .idle_core_mask = 0,       // Don't monitor idle tasks
-    .trigger_panic = true      // Reset on timeout (boot reason = TASK_WDT)
-  };
-
-  // reconfigure() preserves existing task subscriptions (safe for WiFi driver)
-  esp_err_t err = esp_task_wdt_reconfigure(&wdtConfig);
-  if (err == ESP_ERR_INVALID_STATE) {
-    // TWDT not yet initialized — do a fresh init
-    esp_task_wdt_init(&wdtConfig);
-  }
-
-  // Register the main loop task (Arduino loop runs on Core 1)
-  esp_task_wdt_add(nullptr);
-  DBGLN("Watchdog initialized (10s timeout)");
-}
-
-// Feed the watchdog from the main loop — call once per frame
-void feedWatchdog() {
-  esp_task_wdt_reset();
-}
+// No-op so callers don't need to change
+void feedWatchdog() {}
 
 // ============================================================================
 // Init all task infrastructure
@@ -295,8 +259,7 @@ void feedWatchdog() {
 void initTaskManager() {
   initI2CMutex();
   initCommandQueue();
-  initWatchdog();
-  DBGLN("Task manager initialized (I2C mutex + command queue + watchdog)");
+  DBGLN("Task manager initialized (I2C mutex + command queue)");
 }
 
 #endif // TASK_MANAGER_H
