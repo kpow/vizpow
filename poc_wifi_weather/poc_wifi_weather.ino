@@ -87,8 +87,11 @@ void setup() {
   // Disable WiFi power saving — keeps radio fully active
   esp_wifi_set_ps(WIFI_PS_NONE);
 
-  // 11b only — slowest but absolute best range for weak signal
-  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
+  // Full protocol support (router rejected 11b-only)
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+
+  // Force 20MHz bandwidth — better SNR than 40MHz at weak signal
+  esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
 
   // Max TX power
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
