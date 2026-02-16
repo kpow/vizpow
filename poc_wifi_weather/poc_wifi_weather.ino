@@ -88,6 +88,16 @@ void setup() {
   Serial.print("TX power set to: ");
   Serial.println(WiFi.getTxPower());
 
+  // Scan to see what the radio can actually hear
+  Serial.println("Scanning networks...");
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; i++) {
+    Serial.printf("  %s  ch:%d  rssi:%d  enc:%d\n",
+      WiFi.SSID(i).c_str(), WiFi.channel(i),
+      WiFi.RSSI(i), WiFi.encryptionType(i));
+  }
+  if (n == 0) Serial.println("  No networks found!");
+
   WiFi.begin("powerhouse", "R00s3v3lt");
 
   int tries = 0;
