@@ -156,33 +156,8 @@ void pollWifiScan() {
 }
 
 // ============================================================================
-// Connect — switch to AP_STA and attempt STA connection
-// ============================================================================
-// Request Connect — called from web handler, just saves creds + sets flag.
-// The actual WiFi calls happen in the main loop via pollWifiProvisioning().
-// This avoids calling WiFi.mode/begin from inside a handler on Core 0.
-// ============================================================================
-
-void requestWifiConnect(const char* ssid, const char* pass) {
-  strncpy(wifiProv.ssid, ssid, 32);
-  wifiProv.ssid[32] = '\0';
-  strncpy(wifiProv.pass, pass, 63);
-  wifiProv.pass[63] = '\0';
-  wifiProv.failReason[0] = '\0';
-
-  // Save credentials immediately (unverified)
-  saveWifiCredentials(ssid, pass, false);
-
-  // Set flag — main loop will pick this up and do the actual connection
-  wifiProv.state = PROV_CONNECT_REQUESTED;
-
-  DBG("WiFi connect requested for: ");
-  DBGLN(ssid);
-}
-
-// ============================================================================
-// Begin Connect — called from MAIN LOOP (not from handler).
-// Follows the exact same pattern as the working POC.
+// Connect — called from WiFi task (Core 0) when PROV_CONNECT_REQUESTED.
+// Uses BLOCKING wait — identical to the working POC.
 // ============================================================================
 
 extern bool wifiEnabled;
@@ -190,87 +165,90 @@ extern void startDNS();
 extern void stopDNS();
 extern bool startMDNS();
 
-void beginWifiConnect() {
-  DBGLN("--- beginWifiConnect (main loop) ---");
+void requestWifiConnect(const char* ssid, const char* pass) {
+  strncpy(wifiProv.ssid, ssid, 32);
+  wifiProv.ssid[32] = '\0';
+  strncpy(wifiProv.pass, pass, 63);
+  wifiProv.pass[63] = '\0';
+  wifiProv.failReason[0] = '\0';
+  saveWifiCredentials(ssid, pass, false);
+  wifiProv.state = PROV_CONNECT_REQUESTED;
+  Serial.print("WiFi connect requested for: ");
+  Serial.println(ssid);
+}
 
-  // Clean slate — POC proved this is required for ESP32 WiFi stack
+// Blocking connect — matches POC exactly. Called from WiFi task (Core 0).
+void doWifiConnectBlocking() {
+  Serial.println("=== doWifiConnectBlocking START ===");
+  Serial.print("SSID: ");
+  Serial.println(wifiProv.ssid);
+  Serial.print("PASS len: ");
+  Serial.println(strlen(wifiProv.pass));
+
+  wifiProv.state = PROV_CONNECTING;
+
+  // --- Exact POC sequence ---
   WiFi.disconnect(true);
   delay(100);
 
-  // Switch to AP_STA (same sequence as POC)
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
-  // Re-establish the AP (mode change drops it)
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+  Serial.print("AP IP: ");
+  Serial.println(WiFi.softAPIP());
 
-  // Start STA connection (full TX power — don't set 8.5dBm here)
   WiFi.begin(wifiProv.ssid, wifiProv.pass);
+  Serial.println("WiFi.begin() called, blocking wait...");
 
-  wifiProv.state = PROV_CONNECTING;
-  wifiProv.connectStartMs = millis();
-
-  DBG("WiFi STA connecting to: ");
-  DBGLN(wifiProv.ssid);
-}
-
-// Poll STA connection progress — call from main loop
-void pollWifiConnect() {
-  if (wifiProv.state != PROV_CONNECTING) return;
+  // Blocking poll — EXACTLY like the POC
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 30) {
+    delay(500);
+    Serial.print(".");
+    tries++;
+  }
+  Serial.println();
 
   wl_status_t status = WiFi.status();
+  Serial.print("Final status: ");
+  Serial.println(status);
 
   if (status == WL_CONNECTED) {
-    // Success!
     sysStatus.staConnected = true;
     sysStatus.staIP = WiFi.localIP();
     wifiProv.connectedAtMs = millis();
     wifiProv.state = PROV_CONNECTED;
-
-    // Mark credentials as verified
     saveWifiCredentials(wifiProv.ssid, wifiProv.pass, true);
-
-    // Restart mDNS on STA interface
     MDNS.end();
     startMDNS();
-
-    DBG("WiFi STA connected! IP: ");
-    DBGLN(sysStatus.staIP);
-    return;
-  }
-
-  // Check timeout
-  if (millis() - wifiProv.connectStartMs > WIFI_STA_CONNECT_TIMEOUT_MS) {
-    // Failed — go back to AP-only
-    DBGLN("WiFi STA connection timed out");
-
+    Serial.print("STA CONNECTED! IP: ");
+    Serial.println(sysStatus.staIP);
+  } else {
+    // Failed — back to AP-only
     if (status == WL_NO_SSID_AVAIL) {
       strncpy(wifiProv.failReason, "Network not found", sizeof(wifiProv.failReason));
     } else if (status == WL_CONNECT_FAILED) {
       strncpy(wifiProv.failReason, "Wrong password", sizeof(wifiProv.failReason));
     } else {
-      strncpy(wifiProv.failReason, "Connection timed out", sizeof(wifiProv.failReason));
+      snprintf(wifiProv.failReason, sizeof(wifiProv.failReason), "Timed out (status=%d)", status);
     }
 
     WiFi.disconnect(true);
     delay(100);
     WiFi.mode(WIFI_AP);
     delay(100);
-
-    // Re-establish AP
     WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
     WiFi.setSleep(false);
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
-
-    // Clear unverified credentials so we don't try them again at boot
     clearWifiCredentials();
-
     wifiProv.state = PROV_FAILED;
     sysStatus.staConnected = false;
 
-    DBG("WiFi STA failed: ");
-    DBGLN(wifiProv.failReason);
+    Serial.print("STA FAILED: ");
+    Serial.println(wifiProv.failReason);
   }
+  Serial.println("=== doWifiConnectBlocking END ===");
 }
 
 // Poll AP linger — after STA connects, keep AP alive for a while then shut it down
@@ -402,12 +380,11 @@ void resetWifiProvisioning() {
 // Main loop poll — call once per frame
 // ============================================================================
 
-// Called from WiFi task on Core 0 — same core as handler, no cross-core issue
+// Called from WiFi task on Core 0 — same core as handler
 void pollWifiConnectTask() {
   if (wifiProv.state == PROV_CONNECT_REQUESTED) {
-    beginWifiConnect();
+    doWifiConnectBlocking();  // blocks ~15s, exactly like the POC
   }
-  pollWifiConnect();
   pollWifiApLinger();
 }
 
