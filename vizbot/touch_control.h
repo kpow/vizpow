@@ -368,6 +368,7 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
       case 0:  // Background on/off | Cycle effect
         if (col == 0) {
           setBotBackgroundStyle(getBotBackgroundStyle() == 4 ? 0 : 4);
+          markSettingsDirty();
         } else {
           touchNextEffect();
         }
