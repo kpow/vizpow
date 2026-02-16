@@ -65,10 +65,23 @@ void saveSettings() {
 
   Serial.printf("Settings saved: bright=%d  lcdBr=%d  fx=%d  pal=%d  auto=%d  bg=%d\n",
     brightness, lcdBrightness, effectIndex, paletteIndex, autoCycle, botBackgroundStyle);
+
+  // Verify write by reading back
+  Preferences verify;
+  if (verify.begin("vizbot", true)) {
+    uint8_t bg = verify.getUChar("bgStyle", 255);
+    Serial.printf("  NVS verify: bgStyle=%d\n", bg);
+    verify.end();
+  } else {
+    Serial.println("  NVS verify: failed to open for read-back!");
+  }
 }
 
 // ── Dirty flag ──────────────────────────────────────────────────────────────
 void markSettingsDirty() {
+  if (!settingsDirty) {
+    Serial.println("Settings marked dirty — will save in 2s");
+  }
   settingsDirty   = true;
   settingsDirtyAt = millis();
 }
