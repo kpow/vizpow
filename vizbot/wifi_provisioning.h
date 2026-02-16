@@ -287,7 +287,7 @@ void pollWifiApLinger() {
 bool bootAttemptSTA() {
   // HARDCODED — bypass all provisioning, identical to weather POC
   const char* ssid = "powerhouse";
-  const char* pass = "R00s3velt";
+  const char* pass = "R00s3v3lt";
 
   Serial.println("=== bootAttemptSTA HARDCODED ===");
   Serial.print("SSID: ");
