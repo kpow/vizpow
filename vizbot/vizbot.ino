@@ -33,6 +33,7 @@
 #include "display_lcd.h"
 #include "bot_mode.h"
 #include "web_server.h"
+#include "settings.h"
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
 #endif
@@ -51,6 +52,7 @@ bool wifiEnabled = false;
 uint8_t effectIndex = 0;
 uint8_t paletteIndex = 0;
 uint8_t brightness = DEFAULT_BRIGHTNESS;
+uint8_t lcdBrightness = 200;
 uint8_t speed = 20;
 bool autoCycle = true;
 uint8_t currentMode = MODE_BOT;
@@ -253,12 +255,22 @@ void setup() {
   // This handles: LEDs, I2C, IMU, Touch, WiFi AP, Web Server
   runBootSequence();
 
-  // Set initial palette
-  currentPalette = palettes[0];
+  // Load persistent settings from NVS (brightness, palette, etc.)
+  loadSettings();
+
+  // Apply loaded settings to hardware
+  FastLED.setBrightness(brightness);
+  analogWrite(LCD_BL, lcdBrightness);
+
+  // Set palette from saved index
+  currentPalette = palettes[paletteIndex % NUM_PALETTES];
 
   // Initialize shuffle bags (ambient effects cycle as bot background)
   resetEffectShuffle();
   resetPaletteShuffle();
+
+  // Apply saved background style
+  setBotBackgroundStyle(botBackgroundStyle);
 
   // Enter bot mode
   enterBotMode();
@@ -311,6 +323,9 @@ void loop() {
 
   // Poll WiFi provisioning state machine (scan results, STA connect, AP linger)
   pollWifiProvisioning();
+
+  // Flush dirty settings to NVS (debounced — waits 2s after last change)
+  flushSettingsIfDirty();
 
   // Run bot mode (handles its own LCD rendering)
   runBotMode();

@@ -173,6 +173,7 @@ void drainCommandQueue() {
       case CMD_SET_BRIGHTNESS:
         brightness = constrain(cmd.u8val, 1, 50);
         FastLED.setBrightness(brightness);
+        markSettingsDirty();
         break;
       case CMD_SET_EXPRESSION:
         setBotExpression(cmd.u8val);
@@ -182,6 +183,7 @@ void drainCommandQueue() {
         break;
       case CMD_SET_BG_STYLE:
         setBotBackgroundStyle(cmd.u8val);
+        markSettingsDirty();
         break;
       case CMD_SAY_TEXT:
         showBotSaying(cmd.say.text, cmd.say.duration);
@@ -197,6 +199,7 @@ void drainCommandQueue() {
         break;
       case CMD_SET_AUTOCYCLE:
         autoCycle = (cmd.u8val == 1);
+        markSettingsDirty();
         break;
     }
   }

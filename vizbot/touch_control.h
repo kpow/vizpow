@@ -73,8 +73,8 @@ static uint8_t menuPage = 0;
 // Long press timing
 #define LONG_PRESS_MS 600
 
-// LCD backlight brightness (0-255)
-static uint8_t lcdBrightness = 200;
+// LCD backlight brightness (0-255) — defined in vizbot.ino
+extern uint8_t lcdBrightness;
 
 // Speed control (external from main sketch)
 extern uint8_t speed;
@@ -317,11 +317,13 @@ void hideMenu() {
 void touchNextEffect() {
   effectIndex = (effectIndex + 1) % NUM_AMBIENT_EFFECTS;
   lastChange = millis();
+  markSettingsDirty();
 }
 
 void touchPrevEffect() {
   effectIndex = (effectIndex == 0) ? NUM_AMBIENT_EFFECTS - 1 : effectIndex - 1;
   lastChange = millis();
+  markSettingsDirty();
 }
 
 void touchBrightnessUp() {
@@ -329,6 +331,7 @@ void touchBrightnessUp() {
     lcdBrightness += 25;
     if (lcdBrightness > 255) lcdBrightness = 255;
     analogWrite(LCD_BL, lcdBrightness);
+    markSettingsDirty();
   }
 }
 
@@ -337,16 +340,19 @@ void touchBrightnessDown() {
     lcdBrightness -= 25;
     if (lcdBrightness < 25) lcdBrightness = 25;
     analogWrite(LCD_BL, lcdBrightness);
+    markSettingsDirty();
   }
 }
 
 void touchNextPalette() {
   paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
   currentPalette = palettes[paletteIndex];
+  markSettingsDirty();
 }
 
 void touchToggleAutoCycle() {
   autoCycle = !autoCycle;
+  markSettingsDirty();
 }
 
 // Process touch on full-screen menu
