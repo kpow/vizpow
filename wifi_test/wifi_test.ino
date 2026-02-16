@@ -19,8 +19,8 @@
 #include <nvs_flash.h>
 
 // Target network
-const char* TARGET_SSID = "iPhone";
-const char* TARGET_PASS = "z1b3jukfjyfay";
+const char* TARGET_SSID = "powerhouse";
+const char* TARGET_PASS = "R00s3v3lt";
 
 // Auth type names for logging
 const char* authModeName(wifi_auth_mode_t auth) {
