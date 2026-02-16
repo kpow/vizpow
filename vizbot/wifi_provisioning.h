@@ -187,16 +187,20 @@ void doWifiConnectBlocking() {
 
   wifiProv.state = PROV_CONNECTING;
 
-  // --- Exact POC sequence ---
+  // --- POC sequence with WLED-proven settings ---
   WiFi.disconnect(true);
-  delay(100);
+  delay(200);
 
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
-  // CRITICAL: Boot sets TX power to 8.5dBm for nearby phones.
-  // That persists through mode changes. STA needs full power to reach the router.
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  // WLED-proven settings — critical for reliable connections
+  WiFi.persistent(false);                          // Don't auto-save to NVS
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);       // Scan ALL channels
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);   // Pick strongest signal
+  WiFi.setSleep(false);                             // Disable modem sleep
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);             // Full TX power for router range
+  WiFi.setAutoReconnect(false);                     // We handle retries ourselves
 
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
   Serial.print("AP IP: ");
@@ -205,16 +209,18 @@ void doWifiConnectBlocking() {
   Serial.println(WiFi.getTxPower());
 
   WiFi.begin(wifiProv.ssid, wifiProv.pass);
-  Serial.println("WiFi.begin() called, blocking wait...");
+  Serial.println("WiFi.begin() called, blocking wait (WLED settings)...");
 
-  // Blocking poll — EXACTLY like the POC
+  // Blocking poll with status logging
   int tries = 0;
-  while (WiFi.status() != WL_CONNECTED && tries < 30) {
+  while (WiFi.status() != WL_CONNECTED && tries < 40) {
     delay(500);
-    Serial.print(".");
+    wl_status_t st = WiFi.status();
+    Serial.printf("  try %2d/40  status:%d\n", tries + 1, st);
+    if (st == WL_CONNECT_FAILED) break;
+    if (st == WL_NO_SSID_AVAIL && tries > 5) break;
     tries++;
   }
-  Serial.println();
 
   wl_status_t status = WiFi.status();
   Serial.print("Final status: ");
@@ -285,34 +291,51 @@ void pollWifiApLinger() {
 // AFTER starting the AP, so the AP is always available as fallback.
 
 bool bootAttemptSTA() {
-  // HARDCODED — bypass all provisioning, identical to weather POC
-  const char* ssid = "iPhone";
-  const char* pass = "z1b3jukfjyfay";
+  // Load saved credentials from NVS
+  char ssid[33] = {0};
+  char pass[64] = {0};
 
-  Serial.println("=== bootAttemptSTA HARDCODED ===");
+  if (!loadWifiCredentials(ssid, pass)) {
+    Serial.println("=== bootAttemptSTA: No saved credentials, skipping ===");
+    return false;
+  }
+
+  Serial.println("=== bootAttemptSTA ===");
   Serial.print("SSID: ");
   Serial.println(ssid);
 
-  // EXACT weather POC sequence — STA only, no AP
+  // STA-only mode for boot connection
+  WiFi.disconnect(true);
+  delay(200);
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
   delay(100);
 
+  // WLED-proven settings — these make the difference
+  WiFi.persistent(false);                          // Don't auto-save to NVS (we manage it)
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);       // Scan ALL channels, not just first match
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);   // Pick strongest signal
+  WiFi.setSleep(false);                             // Disable modem sleep
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);             // Full TX power for router range
+  WiFi.setAutoReconnect(false);                     // We handle retries ourselves
+
   WiFi.begin(ssid, pass);
-  Serial.println("WiFi.begin() called...");
+  Serial.println("WiFi.begin() called (WLED settings applied)");
 
   int tries = 0;
-  while (WiFi.status() != WL_CONNECTED && tries < 30) {
+  while (WiFi.status() != WL_CONNECTED && tries < 40) {
     delay(500);
-    Serial.print(".");
+    wl_status_t st = WiFi.status();
+    Serial.printf("  try %2d/40  status:%d\n", tries + 1, st);
+    if (st == WL_CONNECT_FAILED) break;
+    if (st == WL_NO_SSID_AVAIL && tries > 5) break;
     tries++;
   }
-  Serial.println();
 
-  Serial.print("Status: ");
-  Serial.println(WiFi.status());
+  wl_status_t finalStatus = WiFi.status();
+  Serial.print("Final status: ");
+  Serial.println(finalStatus);
 
-  if (WiFi.status() == WL_CONNECTED) {
+  if (finalStatus == WL_CONNECTED) {
     sysStatus.staConnected = true;
     sysStatus.staIP = WiFi.localIP();
     Serial.print("CONNECTED! IP: ");
