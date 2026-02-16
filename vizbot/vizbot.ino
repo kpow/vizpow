@@ -208,7 +208,39 @@ void toggleWifiAP() {
 
 void setup() {
   Serial.begin(115200);
-  delay(500);  // Give ESP32-S3 time to stabilize before init
+  delay(500);
+
+  // =====================================================
+  // HARDCODED WIFI — directly in setup(), no helpers
+  // If you don't see this in serial, the code isn't flashing
+  // =====================================================
+  Serial.println();
+  Serial.println("!!!!! VIZBOT WIFI TEST !!!!!");
+  Serial.println("Connecting to powerhouse...");
+
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+  WiFi.begin("powerhouse", "R00s3v3lt");
+
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 30) {
+    delay(500);
+    Serial.print(".");
+    tries++;
+  }
+  Serial.println();
+  Serial.print("WiFi status: ");
+  Serial.println(WiFi.status());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("WiFi FAILED");
+  }
+  Serial.println("!!!!! END WIFI TEST !!!!!");
+  // =====================================================
+
   DBGLN("\n=== vizBot starting ===");
 
   // Initialize task infrastructure (I2C mutex + command queue)
