@@ -73,8 +73,8 @@ static uint8_t menuPage = 0;
 // Long press timing
 #define LONG_PRESS_MS 600
 
-// LCD backlight brightness (0-255)
-static uint8_t lcdBrightness = 200;
+// LCD backlight brightness (0-255) — defined in vizbot.ino
+extern uint8_t lcdBrightness;
 
 // Speed control (external from main sketch)
 extern uint8_t speed;
@@ -165,17 +165,27 @@ bool initTouch() {
   return false;
 }
 
-// Read touch coordinates
+// I2C mutex (defined in task_manager.h)
+extern bool i2cAcquire(uint32_t timeoutMs);
+extern void i2cRelease();
+
+// Read touch coordinates (with I2C mutex protection)
 bool readTouch(uint16_t &x, uint16_t &y) {
   if (!touchInitialized) return false;
+  if (!i2cAcquire(30)) return false;  // Skip if bus busy
 
   uint8_t fingerNum = touchReadRegister(TOUCH_REG_FINGER_NUM);
-  if (fingerNum == 0) return false;
+  if (fingerNum == 0) {
+    i2cRelease();
+    return false;
+  }
 
   uint8_t xh = touchReadRegister(TOUCH_REG_XPOS_H);
   uint8_t xl = touchReadRegister(TOUCH_REG_XPOS_L);
   uint8_t yh = touchReadRegister(TOUCH_REG_YPOS_H);
   uint8_t yl = touchReadRegister(TOUCH_REG_YPOS_L);
+
+  i2cRelease();
 
   x = ((xh & 0x0F) << 8) | xl;
   y = ((yh & 0x0F) << 8) | yl;
@@ -307,11 +317,13 @@ void hideMenu() {
 void touchNextEffect() {
   effectIndex = (effectIndex + 1) % NUM_AMBIENT_EFFECTS;
   lastChange = millis();
+  markSettingsDirty();
 }
 
 void touchPrevEffect() {
   effectIndex = (effectIndex == 0) ? NUM_AMBIENT_EFFECTS - 1 : effectIndex - 1;
   lastChange = millis();
+  markSettingsDirty();
 }
 
 void touchBrightnessUp() {
@@ -319,6 +331,7 @@ void touchBrightnessUp() {
     lcdBrightness += 25;
     if (lcdBrightness > 255) lcdBrightness = 255;
     analogWrite(LCD_BL, lcdBrightness);
+    markSettingsDirty();
   }
 }
 
@@ -327,16 +340,19 @@ void touchBrightnessDown() {
     lcdBrightness -= 25;
     if (lcdBrightness < 25) lcdBrightness = 25;
     analogWrite(LCD_BL, lcdBrightness);
+    markSettingsDirty();
   }
 }
 
 void touchNextPalette() {
   paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
   currentPalette = palettes[paletteIndex];
+  markSettingsDirty();
 }
 
 void touchToggleAutoCycle() {
   autoCycle = !autoCycle;
+  markSettingsDirty();
 }
 
 // Process touch on full-screen menu
@@ -352,6 +368,7 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
       case 0:  // Background on/off | Cycle effect
         if (col == 0) {
           setBotBackgroundStyle(getBotBackgroundStyle() == 4 ? 0 : 4);
+          markSettingsDirty();
         } else {
           touchNextEffect();
         }

@@ -85,6 +85,7 @@
 // WiFi AP configuration
 #define WIFI_SSID "vizBot"
 #define WIFI_PASSWORD "12345678"
+#define MDNS_HOSTNAME "vizbot"   // vizbot.local
 
 // Display mode
 #define MODE_BOT 0
@@ -95,6 +96,11 @@
 
 // Shake detection threshold (for bot reactions)
 #define SHAKE_THRESHOLD 2.0      // Acceleration magnitude to count as a shake (g)
+
+// WiFi provisioning
+#define WIFI_STA_CONNECT_TIMEOUT_MS 10000  // Max wait for STA connection
+#define WIFI_AP_LINGER_MS 30000            // Keep AP alive after STA connects (user needs time to switch)
+#define WIFI_NVS_NAMESPACE "vizwifi"       // NVS namespace for WiFi credentials
 
 // Debug serial output (comment out to save ~700 bytes of flash)
 #define DEBUG_SERIAL

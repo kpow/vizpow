@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <Adafruit_NeoPixel.h>
 
 #define LED_PIN 14
@@ -83,18 +84,50 @@ void setup() {
   WiFi.disconnect();
   delay(100);
 
-  WiFi.begin("powerhouse", "R00s3velt");
+  // Log device info
+  Serial.print("MAC: ");
+  Serial.println(WiFi.macAddress());
+  Serial.print("Chip: ");
+  Serial.println(ESP.getChipModel());
+  Serial.printf("Free heap: %d\n", ESP.getFreeHeap());
+
+  // Scan networks first
+  Serial.println("Scanning networks...");
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; i++) {
+    Serial.printf("  %-20s ch:%-2d rssi:%-4d auth:%d\n",
+      WiFi.SSID(i).c_str(), WiFi.channel(i),
+      WiFi.RSSI(i), WiFi.encryptionType(i));
+  }
+  if (n == 0) Serial.println("  No networks found!");
+  WiFi.scanDelete();
+
+  Serial.println("Calling WiFi.begin...");
+  WiFi.begin("powerhouse", "R00s3v3lt");
 
   int tries = 0;
   while (WiFi.status() != WL_CONNECTED && tries < 30) {
     delay(500);
+    int status = WiFi.status();
+    const char* statusStr;
+    switch (status) {
+      case WL_IDLE_STATUS:    statusStr = "IDLE"; break;
+      case WL_NO_SSID_AVAIL:  statusStr = "NO_SSID"; break;
+      case WL_CONNECTED:       statusStr = "CONNECTED"; break;
+      case WL_CONNECT_FAILED:  statusStr = "CONNECT_FAILED"; break;
+      case WL_CONNECTION_LOST: statusStr = "CONNECTION_LOST"; break;
+      case WL_DISCONNECTED:    statusStr = "DISCONNECTED"; break;
+      default:                 statusStr = "UNKNOWN"; break;
+    }
+    Serial.printf("  try %2d/30  status:%d(%s)  rssi:%d\n",
+      tries + 1, status, statusStr, WiFi.RSSI());
     tries++;
   }
 
   if (WiFi.status() != WL_CONNECTED) {
     // Red = WiFi failed
     solidColor(matrix.Color(255, 0, 0));
-    Serial.println("WiFi failed");
+    Serial.printf("WiFi failed — final status: %d\n", WiFi.status());
     return;
   }
 

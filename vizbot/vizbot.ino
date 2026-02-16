@@ -23,6 +23,8 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <DNSServer.h>
+#include <ESPmDNS.h>
 #include "SensorQMI8658.hpp"
 
 #include "config.h"
@@ -31,20 +33,26 @@
 #include "display_lcd.h"
 #include "bot_mode.h"
 #include "web_server.h"
+#include "settings.h"
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
 #endif
+#include "task_manager.h"
+#include "wifi_provisioning.h"
+#include "boot_sequence.h"
 
 // Global objects
 CRGB leds[NUM_LEDS];
 SensorQMI8658 imu;
 WebServer server(80);
+DNSServer dnsServer;
 bool wifiEnabled = false;
 
 // State variables
 uint8_t effectIndex = 0;
 uint8_t paletteIndex = 0;
 uint8_t brightness = DEFAULT_BRIGHTNESS;
+uint8_t lcdBrightness = 200;
 uint8_t speed = 20;
 bool autoCycle = true;
 uint8_t currentMode = MODE_BOT;
@@ -132,43 +140,62 @@ void introAnimation() {
 }
 
 void readIMU() {
+  if (!i2cAcquire()) return;  // Skip this cycle if bus is busy
   if (imu.getDataReady()) {
     imu.getAccelerometer(accelX, accelY, accelZ);
     imu.getGyroscope(gyroX, gyroY, gyroZ);
   }
+  i2cRelease();
 }
 
-// Start or restart the WiFi AP hotspot
+// Start or restart the WiFi AP hotspot (used by touch menu toggle)
 void startWifiAP() {
   if (!wifiEnabled) {
-    // First-time init: set mode once, start web server
     WiFi.mode(WIFI_AP);
     delay(100);
-    WiFi.setSleep(false);
   }
-  // (Re)start the soft AP — no WIFI_OFF cycle, avoids netif re-registration
   bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
-  DBGLN("--- WiFi AP Setup ---");
+  DBGLN("--- WiFi AP restart ---");
   DBG("softAP returned: ");
   DBGLN(apStarted ? "YES" : "NO");
-  DBG("AP SSID: ");
-  DBGLN(WIFI_SSID);
-  DBG("AP IP: ");
-  DBGLN(WiFi.softAPIP());
-  DBG("AP MAC: ");
-  DBGLN(WiFi.softAPmacAddress());
-  delay(500);
-  if (!wifiEnabled) {
+
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+
+  // Wait for AP to actually start
+  uint8_t retries = 0;
+  while (WiFi.softAPIP() == IPAddress(0, 0, 0, 0) && retries < 20) {
+    delay(100);
+    retries++;
+  }
+
+  if (!wifiEnabled && !sysStatus.webServerReady) {
     setupWebServer();
-    DBGLN("Web server started");
+    sysStatus.webServerReady = true;
   }
   wifiEnabled = true;
+  sysStatus.wifiReady = true;
+  sysStatus.apIP = WiFi.softAPIP();
+
+  // Start captive portal DNS + mDNS if not already running
+  if (!sysStatus.dnsReady) {
+    startDNS();
+    sysStatus.dnsReady = true;
+  }
+  if (!sysStatus.mdnsReady) {
+    sysStatus.mdnsReady = startMDNS();
+  }
 }
 
 // Stop the WiFi AP hotspot
 void stopWifiAP() {
-  WiFi.softAPdisconnect(true);  // Disconnect clients & stop AP, but keep netif alive
+  stopDNS();
+  sysStatus.dnsReady = false;
+  sysStatus.mdnsReady = false;
+  MDNS.end();
+  WiFi.softAPdisconnect(true);
   wifiEnabled = false;
+  sysStatus.wifiReady = false;
   DBGLN("WiFi AP stopped");
 }
 
@@ -183,68 +210,87 @@ void toggleWifiAP() {
 
 void setup() {
   Serial.begin(115200);
-  delay(500);  // Give ESP32-S3 time to stabilize before init
+  delay(500);
+
+  // =====================================================
+  // HARDCODED WIFI — directly in setup(), no helpers
+  // If you don't see this in serial, the code isn't flashing
+  // =====================================================
+  Serial.println();
+  Serial.println("!!!!! VIZBOT WIFI TEST !!!!!");
+  Serial.println("Connecting to iPhone...");
+
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+  WiFi.begin("iPhone", "z1b3jukfjyfay");
+
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 30) {
+    delay(500);
+    Serial.print(".");
+    tries++;
+  }
+  Serial.println();
+  Serial.print("WiFi status: ");
+  Serial.println(WiFi.status());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("WiFi FAILED");
+  }
+  Serial.println("!!!!! END WIFI TEST !!!!!");
+  // =====================================================
+
   DBGLN("\n=== vizBot starting ===");
 
-  // Initialize LEDs (needed for the leds[] buffer used by ambient effects)
-  FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
-  FastLED.setBrightness(brightness);
+  // Initialize task infrastructure (I2C mutex + command queue)
+  initTaskManager();
 
-  // Initialize LCD
+  // Initialize LCD first — we need it to show the boot screen
   initLCD();
 
-  // Run intro animation
-  introAnimation();
+  // Run the visual boot sequence (initializes all subsystems with onscreen feedback)
+  // This handles: LEDs, I2C, IMU, Touch, WiFi AP, Web Server
+  runBootSequence();
 
-  // Start WiFi AP hotspot (after hardware init so radio has time)
-  startWifiAP();
+  // Load persistent settings from NVS (brightness, palette, etc.)
+  loadSettings();
 
-  // Initialize IMU (for shake/motion detection)
-  Wire.begin(I2C_SDA, I2C_SCL);
+  // Apply loaded settings to hardware
+  FastLED.setBrightness(brightness);
+  analogWrite(LCD_BL, lcdBrightness);
 
-  if (imu.begin(Wire, QMI8658_L_SLAVE_ADDRESS, I2C_SDA, I2C_SCL)) {
-    imu.configAccelerometer(
-      SensorQMI8658::ACC_RANGE_4G,
-      SensorQMI8658::ACC_ODR_250Hz,
-      SensorQMI8658::LPF_MODE_0
-    );
-    imu.configGyroscope(
-      SensorQMI8658::GYR_RANGE_512DPS,
-      SensorQMI8658::GYR_ODR_896_8Hz,
-      SensorQMI8658::LPF_MODE_0
-    );
-    imu.enableAccelerometer();
-    imu.enableGyroscope();
-    DBGLN("IMU initialized");
-  } else {
-    DBGLN("IMU initialization failed");
-  }
-
-  // Initialize touch controller (shares I2C bus with IMU)
-  #if defined(TOUCH_ENABLED)
-    initTouch();
-  #endif
-
-  // Set initial palette
-  currentPalette = palettes[0];
+  // Set palette from saved index
+  currentPalette = palettes[paletteIndex % NUM_PALETTES];
 
   // Initialize shuffle bags (ambient effects cycle as bot background)
   resetEffectShuffle();
   resetPaletteShuffle();
 
+  // Apply saved background style
+  setBotBackgroundStyle(botBackgroundStyle);
+
   // Enter bot mode
   enterBotMode();
+
+  // Start WiFi server task on Core 0 (render stays on Core 1)
+  if (wifiEnabled) {
+    startWifiTask();
+  }
 }
 
 void loop() {
-  if (wifiEnabled) {
-    server.handleClient();
+  // Web server runs in its own FreeRTOS task on Core 0 — no handleClient() here
+
+  // Only read IMU if it initialized successfully
+  if (sysStatus.imuReady) {
+    readIMU();
   }
 
-  readIMU();
-
-  // Shake reaction for bot
-  if (botMode.initialized) {
+  // Shake reaction for bot (requires working IMU)
+  if (sysStatus.imuReady && botMode.initialized) {
     float mag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
     if (mag > SHAKE_THRESHOLD && !botMode.shakeReacting) {
       botMode.onShake();
@@ -254,9 +300,11 @@ void loop() {
     }
   }
 
-  // Handle touch gestures
+  // Handle touch gestures (only if touch initialized)
   #if defined(TOUCH_ENABLED)
+  if (sysStatus.touchReady) {
     handleTouch();
+  }
   #endif
 
   // Auto-cycle ambient effects and palettes (for bot background overlay)
@@ -269,6 +317,15 @@ void loop() {
     paletteIndex = nextShuffledPalette();
     currentPalette = palettes[paletteIndex];
   }
+
+  // Apply queued commands from WiFi/touch before rendering
+  drainCommandQueue();
+
+  // Poll WiFi provisioning state machine (scan results, STA connect, AP linger)
+  pollWifiProvisioning();
+
+  // Flush dirty settings to NVS (debounced — waits 2s after last change)
+  flushSettingsIfDirty();
 
   // Run bot mode (handles its own LCD rendering)
   runBotMode();
