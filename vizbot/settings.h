@@ -9,10 +9,10 @@
 
 #include <Preferences.h>
 
-static Preferences settingsPrefs;
-static bool        settingsDirty    = false;
-static unsigned long settingsDirtyAt = 0;
-static const unsigned long SETTINGS_DEBOUNCE_MS = 2000;  // wait 2s after last change
+// Dirty-flag state — not static, lives in the single .ino compilation unit
+bool           settingsDirty    = false;
+unsigned long  settingsDirtyAt  = 0;
+const unsigned long SETTINGS_DEBOUNCE_MS = 2000;  // wait 2s after last change
 
 // Forward declarations — these are the globals we persist
 extern uint8_t brightness;
@@ -20,49 +20,56 @@ extern uint8_t effectIndex;
 extern uint8_t paletteIndex;
 extern bool    autoCycle;
 extern uint8_t botBackgroundStyle;
-
-// LCD backlight brightness (defined in touch_control.h)
 extern uint8_t lcdBrightness;
 
 // ── Load ────────────────────────────────────────────────────────────────────
 void loadSettings() {
-  settingsPrefs.begin("vizbot", true);  // read-only
+  Preferences prefs;
+  if (!prefs.begin("vizbot", true)) {  // read-only
+    Serial.println("!! NVS: failed to open 'vizbot' for reading — using defaults");
+    return;
+  }
 
-  brightness         = settingsPrefs.getUChar("bright",  brightness);
-  lcdBrightness      = settingsPrefs.getUChar("lcdBr",   lcdBrightness);
-  effectIndex        = settingsPrefs.getUChar("effect",   effectIndex);
-  paletteIndex       = settingsPrefs.getUChar("palette",  paletteIndex);
-  autoCycle          = settingsPrefs.getBool ("autoCyc",  autoCycle);
-  botBackgroundStyle = settingsPrefs.getUChar("bgStyle",  botBackgroundStyle);
+  brightness         = prefs.getUChar("bright",  brightness);
+  lcdBrightness      = prefs.getUChar("lcdBr",   lcdBrightness);
+  effectIndex        = prefs.getUChar("effect",   effectIndex);
+  paletteIndex       = prefs.getUChar("palette",  paletteIndex);
+  autoCycle          = prefs.getBool ("autoCyc",  autoCycle);
+  botBackgroundStyle = prefs.getUChar("bgStyle",  botBackgroundStyle);
 
-  settingsPrefs.end();
+  prefs.end();
 
   Serial.println("Settings loaded from NVS");
-  Serial.printf("  brightness=%d  lcdBr=%d  effect=%d  palette=%d  auto=%d  bg=%d\n",
+  Serial.printf("  bright=%d  lcdBr=%d  fx=%d  pal=%d  auto=%d  bg=%d\n",
     brightness, lcdBrightness, effectIndex, paletteIndex, autoCycle, botBackgroundStyle);
 }
 
 // ── Save ────────────────────────────────────────────────────────────────────
 void saveSettings() {
-  settingsPrefs.begin("vizbot", false);  // read-write
+  Preferences prefs;
+  if (!prefs.begin("vizbot", false)) {  // read-write
+    Serial.println("!! NVS: failed to open 'vizbot' for writing");
+    return;
+  }
 
-  settingsPrefs.putUChar("bright",  brightness);
-  settingsPrefs.putUChar("lcdBr",   lcdBrightness);
-  settingsPrefs.putUChar("effect",  effectIndex);
-  settingsPrefs.putUChar("palette", paletteIndex);
-  settingsPrefs.putBool ("autoCyc", autoCycle);
-  settingsPrefs.putUChar("bgStyle", botBackgroundStyle);
+  prefs.putUChar("bright",  brightness);
+  prefs.putUChar("lcdBr",   lcdBrightness);
+  prefs.putUChar("effect",  effectIndex);
+  prefs.putUChar("palette", paletteIndex);
+  prefs.putBool ("autoCyc", autoCycle);
+  prefs.putUChar("bgStyle", botBackgroundStyle);
 
-  settingsPrefs.end();
+  prefs.end();
   settingsDirty = false;
 
-  Serial.println("Settings saved to NVS");
+  Serial.printf("Settings saved: bright=%d  lcdBr=%d  fx=%d  pal=%d  auto=%d  bg=%d\n",
+    brightness, lcdBrightness, effectIndex, paletteIndex, autoCycle, botBackgroundStyle);
 }
 
 // ── Dirty flag ──────────────────────────────────────────────────────────────
 void markSettingsDirty() {
-  settingsDirty    = true;
-  settingsDirtyAt  = millis();
+  settingsDirty   = true;
+  settingsDirtyAt = millis();
 }
 
 // Call from loop() — writes to flash only after debounce period
