@@ -84,8 +84,11 @@ void setup() {
   WiFi.disconnect();
   delay(100);
 
-  // Force 802.11b+g+n with long range — 11b has best range at -86 dBm
-  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+  // Disable WiFi power saving — keeps radio fully active
+  esp_wifi_set_ps(WIFI_PS_NONE);
+
+  // 11b only — slowest but absolute best range for weak signal
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
 
   // Max TX power
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
