@@ -285,63 +285,51 @@ void pollWifiApLinger() {
 // AFTER starting the AP, so the AP is always available as fallback.
 
 bool bootAttemptSTA() {
-  char ssid[33] = {};
-  char pass[64] = {};
+  // HARDCODED — bypass all provisioning, identical to weather POC
+  const char* ssid = "powerhouse";
+  const char* pass = "R00s3v3lt";
 
-  if (!loadWifiCredentials(ssid, pass)) {
-    DBGLN("No saved WiFi credentials");
-    return false;
-  }
+  Serial.println("=== bootAttemptSTA HARDCODED ===");
+  Serial.print("SSID: ");
+  Serial.println(ssid);
 
-  DBG("Saved WiFi found: ");
-  DBGLN(ssid);
-
-  // Clean slate before mode switch (POC pattern)
-  WiFi.disconnect(true);
+  // EXACT weather POC sequence — STA only, no AP
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
   delay(100);
 
-  // Switch to AP_STA to keep AP alive during attempt
-  WiFi.mode(WIFI_AP_STA);
-  delay(100);
-
-  // Re-establish AP after mode change
-  WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
-
-  // Attempt STA connection (full TX power for router reach)
   WiFi.begin(ssid, pass);
+  Serial.println("WiFi.begin() called...");
 
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_STA_CONNECT_TIMEOUT_MS) {
-    delay(250);
-    DBG(".");
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 30) {
+    delay(500);
+    Serial.print(".");
+    tries++;
   }
-  DBGLN();
+  Serial.println();
+
+  Serial.print("Status: ");
+  Serial.println(WiFi.status());
 
   if (WiFi.status() == WL_CONNECTED) {
     sysStatus.staConnected = true;
     sysStatus.staIP = WiFi.localIP();
-    strncpy(wifiProv.ssid, ssid, 32);
-    wifiProv.state = PROV_CONNECTED;
-    wifiProv.connectedAtMs = millis();
-
-    DBG("STA connected at boot! IP: ");
-    DBGLN(sysStatus.staIP);
+    Serial.print("CONNECTED! IP: ");
+    Serial.println(sysStatus.staIP);
+    Serial.print("RSSI: ");
+    Serial.println(WiFi.RSSI());
     return true;
   }
 
-  // Failed — go back to AP-only
-  DBGLN("STA boot connect failed — staying in AP mode");
+  Serial.println("FAILED — falling back to AP");
   WiFi.disconnect(true);
   delay(100);
   WiFi.mode(WIFI_AP);
   delay(100);
-
-  // Re-establish AP (low TX power is fine — phone is nearby)
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
   WiFi.setSleep(false);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
-
-  // Update AP IP (might have changed after mode switch)
   sysStatus.apIP = WiFi.softAPIP();
 
   return false;

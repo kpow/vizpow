@@ -367,7 +367,19 @@ void runBootSequence() {
   #endif
   delay(80);
 
-  // --- Stage 6: WiFi AP ---
+  // --- Stage 6: WiFi STA (hardcoded — runs FIRST, STA-only like POC) ---
+  bootDrawStage("WiFi STA");
+  ok = bootAttemptSTA();
+  if (ok) {
+    char ipStr[20];
+    snprintf(ipStr, sizeof(ipStr), "%s", sysStatus.staIP.toString().c_str());
+    bootDrawResult(true, ipStr);
+  } else {
+    bootDrawResult(false, "Connect failed");
+  }
+  delay(80);
+
+  // --- Stage 7: WiFi AP (starts after STA attempt, regardless of result) ---
   bootDrawStage("WiFi AP");
   ok = bootStageWiFi();
   if (ok) {
@@ -379,35 +391,19 @@ void runBootSequence() {
   }
   delay(80);
 
-  // --- Stage 7: Web Server ---
+  // --- Stage 8: Web Server ---
   bootDrawStage("Web Srv");
   ok = bootStageWebServer();
   bootDrawResult(ok, ok ? "Port 80" : "No WiFi");
   delay(80);
 
-  // --- Stage 8: DNS + mDNS (Captive Portal) ---
+  // --- Stage 9: DNS + mDNS (Captive Portal) ---
   bootDrawStage("Portal");
   ok = bootStageDNS();
   if (ok) {
     bootDrawResult(true, sysStatus.mdnsReady ? "DNS + vizbot.local" : "DNS only");
   } else {
     bootDrawResult(false, "No WiFi");
-  }
-  delay(80);
-
-  // --- Stage 9: WiFi STA (saved credentials) ---
-  bootDrawStage("WiFi STA");
-  if (sysStatus.wifiReady) {
-    ok = bootAttemptSTA();
-    if (ok) {
-      char ipStr[20];
-      snprintf(ipStr, sizeof(ipStr), "%s", sysStatus.staIP.toString().c_str());
-      bootDrawResult(true, ipStr);
-    } else {
-      bootDrawResult(false, "No saved creds");
-    }
-  } else {
-    bootDrawResult(false, "No AP");
   }
   delay(80);
 
