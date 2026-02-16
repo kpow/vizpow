@@ -216,12 +216,12 @@ void setup() {
   // =====================================================
   Serial.println();
   Serial.println("!!!!! VIZBOT WIFI TEST !!!!!");
-  Serial.println("Connecting to powerhouse...");
+  Serial.println("Connecting to iPhone...");
 
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
-  WiFi.begin("powerhouse", "R00s3v3lt");
+  WiFi.begin("iPhone", "z1b3jukfjyfay");
 
   int tries = 0;
   while (WiFi.status() != WL_CONNECTED && tries < 30) {
