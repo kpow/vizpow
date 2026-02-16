@@ -25,8 +25,9 @@ extern uint8_t lcdBrightness;
 // ── Load ────────────────────────────────────────────────────────────────────
 void loadSettings() {
   Preferences prefs;
-  if (!prefs.begin("vizbot", true)) {  // read-only
-    Serial.println("!! NVS: failed to open 'vizbot' for reading — using defaults");
+  // Open read-write so the namespace is created on first boot
+  if (!prefs.begin("vizbot", false)) {
+    Serial.println("!! NVS: failed to open 'vizbot' — using defaults");
     return;
   }
 
