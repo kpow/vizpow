@@ -83,18 +83,30 @@ void setup() {
   WiFi.disconnect();
   delay(100);
 
+  // Max TX power — ESP32-S3 can default too low
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  Serial.print("TX power set to: ");
+  Serial.println(WiFi.getTxPower());
+
   WiFi.begin("powerhouse", "R00s3v3lt");
 
   int tries = 0;
   while (WiFi.status() != WL_CONNECTED && tries < 30) {
     delay(500);
+    Serial.print(".");
     tries++;
   }
+  Serial.println();
+
+  Serial.print("WiFi status: ");
+  Serial.println(WiFi.status());
 
   if (WiFi.status() != WL_CONNECTED) {
     // Red = WiFi failed
     solidColor(matrix.Color(255, 0, 0));
     Serial.println("WiFi failed");
+    Serial.print("Reason: ");
+    Serial.println(WiFi.status());
     return;
   }
 
