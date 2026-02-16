@@ -194,9 +194,15 @@ void doWifiConnectBlocking() {
   WiFi.mode(WIFI_AP_STA);
   delay(100);
 
+  // CRITICAL: Boot sets TX power to 8.5dBm for nearby phones.
+  // That persists through mode changes. STA needs full power to reach the router.
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());
+  Serial.print("TX power: ");
+  Serial.println(WiFi.getTxPower());
 
   WiFi.begin(wifiProv.ssid, wifiProv.pass);
   Serial.println("WiFi.begin() called, blocking wait...");
