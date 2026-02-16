@@ -1,5 +1,4 @@
 #include <WiFi.h>
-#include <esp_wifi.h>
 #include <Adafruit_NeoPixel.h>
 
 #define LED_PIN 14
@@ -84,57 +83,18 @@ void setup() {
   WiFi.disconnect();
   delay(100);
 
-  // Disable WiFi power saving — keeps radio fully active
-  esp_wifi_set_ps(WIFI_PS_NONE);
+  WiFi.begin("powerhouse", "R00s3v3lt");
 
-  // Full protocol support (router rejected 11b-only)
-  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-
-  // Force 20MHz bandwidth — better SNR than 40MHz at weak signal
-  esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
-
-  // Max TX power
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
-  Serial.print("TX power set to: ");
-  Serial.println(WiFi.getTxPower());
-
-  // Scan to see what the radio can actually hear
-  Serial.println("Scanning networks...");
-  int n = WiFi.scanNetworks();
-  for (int i = 0; i < n; i++) {
-    Serial.printf("  %s  ch:%d  rssi:%d  enc:%d\n",
-      WiFi.SSID(i).c_str(), WiFi.channel(i),
-      WiFi.RSSI(i), WiFi.encryptionType(i));
-  }
-  if (n == 0) Serial.println("  No networks found!");
-
-  // Retry connection up to 3 times — weak signal may need multiple attempts
-  bool connected = false;
-  for (int attempt = 1; attempt <= 3 && !connected; attempt++) {
-    Serial.printf("Connect attempt %d/3...\n", attempt);
-    WiFi.begin("powerhouse", "R00s3v3lt");
-
-    int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 40) {
-      delay(500);
-      Serial.print(".");
-      tries++;
-    }
-    Serial.println();
-    Serial.printf("Status: %d  RSSI: %d\n", WiFi.status(), WiFi.RSSI());
-
-    if (WiFi.status() == WL_CONNECTED) {
-      connected = true;
-    } else {
-      WiFi.disconnect();
-      delay(1000);
-    }
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 30) {
+    delay(500);
+    tries++;
   }
 
-  if (!connected) {
+  if (WiFi.status() != WL_CONNECTED) {
     // Red = WiFi failed
     solidColor(matrix.Color(255, 0, 0));
-    Serial.println("WiFi failed after 3 attempts");
+    Serial.println("WiFi failed");
     return;
   }
 
