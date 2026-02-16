@@ -28,6 +28,9 @@ Arduino_GFX *gfx = nullptr;
 bool hiResMode = false;
 bool hiResRenderedThisFrame = false;  // Set by hi-res effects to skip 8x8 rendering
 
+// Forward declaration (defined in settings.h, included later)
+void markSettingsDirty();
+
 // Toggle hi-res mode
 inline void toggleHiResMode() {
   hiResMode = !hiResMode;
@@ -36,6 +39,7 @@ inline void toggleHiResMode() {
   }
   DBG("Hi-Res Mode: ");
   DBGLN(hiResMode ? "ON" : "OFF");
+  markSettingsDirty();
 }
 
 // Check if hi-res mode is enabled

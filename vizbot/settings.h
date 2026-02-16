@@ -21,6 +21,7 @@ extern uint8_t paletteIndex;
 extern bool    autoCycle;
 extern uint8_t botBackgroundStyle;
 extern uint8_t lcdBrightness;
+extern bool    hiResMode;
 
 // ── Load ────────────────────────────────────────────────────────────────────
 void loadSettings() {
@@ -37,12 +38,13 @@ void loadSettings() {
   paletteIndex       = prefs.getUChar("palette",  paletteIndex);
   autoCycle          = prefs.getBool ("autoCyc",  autoCycle);
   botBackgroundStyle = prefs.getUChar("bgStyle",  botBackgroundStyle);
+  hiResMode          = prefs.getBool ("hiRes",    hiResMode);
 
   prefs.end();
 
   Serial.println("Settings loaded from NVS");
-  Serial.printf("  bright=%d  lcdBr=%d  fx=%d  pal=%d  auto=%d  bg=%d\n",
-    brightness, lcdBrightness, effectIndex, paletteIndex, autoCycle, botBackgroundStyle);
+  Serial.printf("  bright=%d  lcdBr=%d  fx=%d  pal=%d  auto=%d  bg=%d  hires=%d\n",
+    brightness, lcdBrightness, effectIndex, paletteIndex, autoCycle, botBackgroundStyle, hiResMode);
 }
 
 // ── Save ────────────────────────────────────────────────────────────────────
@@ -59,12 +61,13 @@ void saveSettings() {
   prefs.putUChar("palette", paletteIndex);
   prefs.putBool ("autoCyc", autoCycle);
   prefs.putUChar("bgStyle", botBackgroundStyle);
+  prefs.putBool ("hiRes",   hiResMode);
 
   prefs.end();
   settingsDirty = false;
 
-  Serial.printf("Settings saved: bright=%d  lcdBr=%d  fx=%d  pal=%d  auto=%d  bg=%d\n",
-    brightness, lcdBrightness, effectIndex, paletteIndex, autoCycle, botBackgroundStyle);
+  Serial.printf("Settings saved: bright=%d  lcdBr=%d  fx=%d  pal=%d  auto=%d  bg=%d  hires=%d\n",
+    brightness, lcdBrightness, effectIndex, paletteIndex, autoCycle, botBackgroundStyle, hiResMode);
 
   // Verify write by reading back
   Preferences verify;
