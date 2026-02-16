@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <Adafruit_NeoPixel.h>
 
 #define LED_PIN 14
@@ -83,7 +84,10 @@ void setup() {
   WiFi.disconnect();
   delay(100);
 
-  // Max TX power — ESP32-S3 can default too low
+  // Force 802.11b+g+n with long range — 11b has best range at -86 dBm
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+
+  // Max TX power
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
   Serial.print("TX power set to: ");
   Serial.println(WiFi.getTxPower());
@@ -98,25 +102,33 @@ void setup() {
   }
   if (n == 0) Serial.println("  No networks found!");
 
-  WiFi.begin("powerhouse", "R00s3v3lt");
+  // Retry connection up to 3 times — weak signal may need multiple attempts
+  bool connected = false;
+  for (int attempt = 1; attempt <= 3 && !connected; attempt++) {
+    Serial.printf("Connect attempt %d/3...\n", attempt);
+    WiFi.begin("powerhouse", "R00s3v3lt");
 
-  int tries = 0;
-  while (WiFi.status() != WL_CONNECTED && tries < 30) {
-    delay(500);
-    Serial.print(".");
-    tries++;
+    int tries = 0;
+    while (WiFi.status() != WL_CONNECTED && tries < 40) {
+      delay(500);
+      Serial.print(".");
+      tries++;
+    }
+    Serial.println();
+    Serial.printf("Status: %d  RSSI: %d\n", WiFi.status(), WiFi.RSSI());
+
+    if (WiFi.status() == WL_CONNECTED) {
+      connected = true;
+    } else {
+      WiFi.disconnect();
+      delay(1000);
+    }
   }
-  Serial.println();
 
-  Serial.print("WiFi status: ");
-  Serial.println(WiFi.status());
-
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!connected) {
     // Red = WiFi failed
     solidColor(matrix.Color(255, 0, 0));
-    Serial.println("WiFi failed");
-    Serial.print("Reason: ");
-    Serial.println(WiFi.status());
+    Serial.println("WiFi failed after 3 attempts");
     return;
   }
 
