@@ -17,6 +17,9 @@
 
 extern Arduino_GFX *gfx;
 
+// Forward declaration for WLED integration
+extern void wledQueueText(const char* text, uint16_t durationMs);
+
 // Colors
 #define OVERLAY_BG      0xFFFF  // White bubble background
 #define OVERLAY_TEXT    0x0000  // Black text
@@ -66,6 +69,9 @@ struct BotSpeechBubble {
     bubbleH = 36;  // 16px text + 20px padding
     bubbleX = (LCD_WIDTH - bubbleW) / 2;  // Centered
     bubbleY = 220;  // Below the face
+
+    // Forward speech text to WLED display (if configured)
+    wledQueueText(text, durationMs);
   }
 
   // Show from PROGMEM string

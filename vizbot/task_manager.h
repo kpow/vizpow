@@ -235,12 +235,16 @@ extern bool wifiEnabled;
 // Runs on Core 0 (same core as handler), no cross-core visibility issues.
 extern void pollWifiConnectTask();
 
+// Defined in wled_display.h — sends queued text to WLED + handles restore timer.
+extern void pollWledDisplay();
+
 static TaskHandle_t wifiTaskHandle = nullptr;
 
 void wifiServerTask(void* param) {
   for (;;) {
     if (wifiEnabled) {
       pollWifiConnectTask();             // connect request + STA poll
+      pollWledDisplay();                 // WLED text send + restore
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP
     }
@@ -253,7 +257,7 @@ void startWifiTask() {
   xTaskCreatePinnedToCore(
     wifiServerTask,   // Task function
     "wifi_srv",        // Name
-    4096,              // Stack size (bytes)
+    6144,              // Stack size (increased for WiFiClient in WLED sends)
     nullptr,           // Parameter
     1,                 // Priority (low — WiFi stack is higher)
     &wifiTaskHandle,   // Handle
