@@ -234,8 +234,8 @@ void doWifiConnectBlocking() {
     saveWifiCredentials(wifiProv.ssid, wifiProv.pass, true);
     MDNS.end();
     startMDNS();
-    // Configure NTP time sync now that we have internet
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    // Configure NTP time sync — EST (UTC-5) with 1hr DST offset
+    configTime(-5 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
     Serial.print("STA CONNECTED! IP: ");
     Serial.println(sysStatus.staIP);
     Serial.println("NTP configured");
@@ -341,8 +341,8 @@ bool bootAttemptSTA() {
   if (finalStatus == WL_CONNECTED) {
     sysStatus.staConnected = true;
     sysStatus.staIP = WiFi.localIP();
-    // Configure NTP time sync now that we have internet
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    // Configure NTP time sync — EST (UTC-5) with 1hr DST offset
+    configTime(-5 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
     Serial.print("CONNECTED! IP: ");
     Serial.println(sysStatus.staIP);
     Serial.print("RSSI: ");

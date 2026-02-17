@@ -237,8 +237,8 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
-    // Configure NTP time sync (UTC offset 0, DST offset 0 — adjust for your timezone)
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    // Configure NTP time sync — EST (UTC-5) with 1hr DST offset
+    configTime(-5 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
     Serial.println("NTP configured");
   } else {
     Serial.println("WiFi FAILED");
