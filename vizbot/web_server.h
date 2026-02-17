@@ -66,6 +66,10 @@ const char webpage[] PROGMEM = R"rawliteral(
       <span>Time Overlay</span>
       <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
     </div>
+    <div class="toggle-row">
+      <span>Hi-Res Background</span>
+      <div class="toggle" id="hiResToggle" onclick="toggleHiRes()"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -128,6 +132,12 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('botTimeToggle').className = 'toggle ' + (botTimeOn ? 'on' : '');
       api('/bot/time?v=' + (botTimeOn ? 1 : 0));
     }
+    let hiResOn = false;
+    function toggleHiRes() {
+      hiResOn = !hiResOn;
+      document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
+      api('/bot/hires?v=' + (hiResOn ? 1 : 0));
+    }
     function setBotColor(i) { api('/bot/background?v=' + i); }
     function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
 
@@ -142,6 +152,14 @@ const char webpage[] PROGMEM = R"rawliteral(
         const state = await r.json();
         document.getElementById('brightness').value = state.brightness;
         document.getElementById('brightnessVal').textContent = state.brightness;
+        if (state.timeOverlay !== undefined) {
+          botTimeOn = state.timeOverlay;
+          document.getElementById('botTimeToggle').className = 'toggle ' + (botTimeOn ? 'on' : '');
+        }
+        if (state.hiRes !== undefined) {
+          hiResOn = state.hiRes;
+          document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
+        }
       } catch(e) {}
     }
 
@@ -273,10 +291,15 @@ void handleRoot() {
   server.send(200, "text/html", webpage);
 }
 
+extern bool isBotTimeOverlayEnabled();
+extern bool hiResMode;
+
 void handleState() {
   String json = "{\"brightness\":" + String(brightness) +
                 ",\"speed\":" + String(speed) +
                 ",\"autoCycle\":" + (autoCycle ? "true" : "false") +
+                ",\"timeOverlay\":" + (isBotTimeOverlayEnabled() ? "true" : "false") +
+                ",\"hiRes\":" + (hiResMode ? "true" : "false") +
                 ",\"sys\":{" +
                   "\"lcd\":" + (sysStatus.lcdReady ? "true" : "false") +
                   ",\"leds\":" + (sysStatus.ledsReady ? "true" : "false") +
@@ -339,6 +362,15 @@ void handleBotTime() {
     } else {
       cmdSetTimeOverlay(server.arg("v").toInt() == 1);
     }
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+extern void cmdSetHiResMode(bool enabled);
+
+void handleBotHiRes() {
+  if (server.hasArg("v")) {
+    cmdSetHiResMode(server.arg("v").toInt() == 1);
   }
   server.send(200, "text/plain", "OK");
 }
@@ -418,6 +450,7 @@ void setupWebServer() {
   server.on("/bot/expression", handleBotExpression);
   server.on("/bot/say", handleBotSay);
   server.on("/bot/time", handleBotTime);
+  server.on("/bot/hires", handleBotHiRes);
   server.on("/bot/background", handleBotBackground);
 
   // WiFi provisioning endpoints

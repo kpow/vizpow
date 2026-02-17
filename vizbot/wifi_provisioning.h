@@ -234,8 +234,11 @@ void doWifiConnectBlocking() {
     saveWifiCredentials(wifiProv.ssid, wifiProv.pass, true);
     MDNS.end();
     startMDNS();
+    // Configure NTP time sync now that we have internet
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     Serial.print("STA CONNECTED! IP: ");
     Serial.println(sysStatus.staIP);
+    Serial.println("NTP configured");
   } else {
     // Failed — back to AP-only
     if (status == WL_NO_SSID_AVAIL) {
@@ -338,10 +341,13 @@ bool bootAttemptSTA() {
   if (finalStatus == WL_CONNECTED) {
     sysStatus.staConnected = true;
     sysStatus.staIP = WiFi.localIP();
+    // Configure NTP time sync now that we have internet
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     Serial.print("CONNECTED! IP: ");
     Serial.println(sysStatus.staIP);
     Serial.print("RSSI: ");
     Serial.println(WiFi.RSSI());
+    Serial.println("NTP configured");
     return true;
   }
 
