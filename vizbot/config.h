@@ -5,8 +5,8 @@
 // Board Selection - JUST CHANGE THIS ONE LINE
 // ============================================================================
 // Uncomment ONE of these:
-#define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-// #define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+// #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
+#define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
 
 // ============================================================================
 // Auto-configuration based on target
