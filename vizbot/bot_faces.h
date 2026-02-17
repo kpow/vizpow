@@ -123,13 +123,13 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 300
   },
 
-  // 1: HAPPY — big bright eyes, raised brows, big grin
+  // 1: HAPPY — big bright eyes, raised brows, big smile
   {
     .eyeWhiteW = 52, .eyeWhiteH = 50, .eyeSpacing = 44,
     .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = -2,
     .browOffsetY = -18, .browLength = 28, .browThickness = 5,
     .browAngleL = 10, .browAngleR = 10, .browVisible = true,
-    .mouthType = MOUTH_GRIN, .mouthWidth = 24, .mouthOffsetY = 58, .mouthCurve = 12,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 24, .mouthOffsetY = 58, .mouthCurve = 12,
     .eyeMode = EYE_NORMAL,
     .transitionMs = 250
   },
@@ -211,13 +211,13 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 350
   },
 
-  // 9: EXCITED — star/sparkle eyes, big grin
+  // 9: EXCITED — star/sparkle eyes, big smile
   {
     .eyeWhiteW = 52, .eyeWhiteH = 48, .eyeSpacing = 46,
     .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = 0,
     .browOffsetY = -18, .browLength = 26, .browThickness = 5,
     .browAngleL = 12, .browAngleR = 12, .browVisible = false,
-    .mouthType = MOUTH_GRIN, .mouthWidth = 26, .mouthOffsetY = 56, .mouthCurve = 14,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 26, .mouthOffsetY = 56, .mouthCurve = 14,
     .eyeMode = EYE_STAR,
     .transitionMs = 200
   },
