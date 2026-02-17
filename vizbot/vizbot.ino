@@ -39,6 +39,7 @@
 #endif
 #include "task_manager.h"
 #include "wifi_provisioning.h"
+#include "wled_display.h"
 #include "boot_sequence.h"
 
 // Global objects
@@ -226,6 +227,9 @@ void setup() {
 
   // Load persistent settings from NVS (brightness, palette, etc.)
   loadSettings();
+
+  // Load WLED display settings from NVS
+  loadWledSettings();
 
   // Apply loaded settings to hardware
   FastLED.setBrightness(brightness);

@@ -92,6 +92,27 @@ const char webpage[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
+  <div class="card">
+    <h2>WLED Display</h2>
+    <div id="wledStatus"></div>
+    <div style="margin-top:10px">
+      <div class="toggle-row">
+        <span>Forward Speech to WLED</span>
+        <div class="toggle" id="wledToggle" onclick="toggleWled()"></div>
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <div style="display:flex;gap:8px">
+        <input type="text" id="wledIP" placeholder="WLED IP (e.g. 192.168.1.100)"
+          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="15">
+        <button onclick="setWledIP()" style="padding:10px 16px">Set</button>
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <button onclick="testWled()">Test</button>
+    </div>
+  </div>
+
   <div class="status">Connected to VizBot &middot; vizbot.local</div>
 
   <script>
@@ -273,9 +294,41 @@ const char webpage[] PROGMEM = R"rawliteral(
       }
     }
 
+    // WLED display controls
+    let wledOn = false;
+    function toggleWled() {
+      wledOn = !wledOn;
+      document.getElementById('wledToggle').className = 'toggle ' + (wledOn ? 'on' : '');
+      api('/wled/config?on=' + (wledOn ? 1 : 0));
+    }
+    function setWledIP() {
+      const ip = document.getElementById('wledIP').value.trim();
+      if (ip) {
+        api('/wled/config?ip=' + encodeURIComponent(ip));
+        wledUpdateStatus();
+      }
+    }
+    function testWled() { api('/wled/test'); }
+    async function wledUpdateStatus() {
+      const r = await api('/wled/status');
+      if (!r) return;
+      const d = await r.json();
+      wledOn = d.enabled;
+      document.getElementById('wledToggle').className = 'toggle ' + (wledOn ? 'on' : '');
+      if (d.ip) document.getElementById('wledIP').value = d.ip;
+      const el = document.getElementById('wledStatus');
+      if (d.ip && d.enabled) {
+        el.innerHTML = '<div style="color:' + (d.reachable ? '#4ade80' : '#f87171') +
+          ';padding:4px;font-size:12px">' + (d.reachable ? 'Reachable' : 'Unreachable') + ' (' + d.ip + ')</div>';
+      } else {
+        el.innerHTML = '';
+      }
+    }
+
     getState();
     render();
     wifiInitCheck();
+    wledUpdateStatus();
   </script>
 </body>
 </html>
@@ -313,7 +366,8 @@ void handleState() {
                   ",\"fails\":" + String(sysStatus.failCount) +
                   ",\"sta\":" + (sysStatus.staConnected ? "true" : "false") +
                   (sysStatus.staConnected ? ",\"staIP\":\"" + sysStatus.staIP.toString() + "\"" : "") +
-                "}}";
+                "},\"wled\":" + getWledStatusJson() +
+                "}";
   server.send(200, "application/json", json);
 }
 
@@ -427,6 +481,45 @@ void handleWifiReset() {
 }
 
 // ============================================================================
+// WLED Display Handlers
+// ============================================================================
+// Forward declarations from wled_display.h
+extern void wledSetIP(const char* ip);
+extern void wledSetEnabled(bool on);
+extern void wledSetColor(uint8_t r, uint8_t g, uint8_t b);
+extern void wledSetSpeed(uint8_t spd);
+extern String getWledStatusJson();
+extern void wledQueueText(const char* text, uint16_t durationMs);
+
+void handleWledStatus() {
+  server.send(200, "application/json", getWledStatusJson());
+}
+
+void handleWledConfig() {
+  if (server.hasArg("ip")) {
+    wledSetIP(server.arg("ip").c_str());
+  }
+  if (server.hasArg("on")) {
+    wledSetEnabled(server.arg("on").toInt() == 1);
+  }
+  if (server.hasArg("speed")) {
+    wledSetSpeed(constrain(server.arg("speed").toInt(), 0, 255));
+  }
+  if (server.hasArg("r") && server.hasArg("g") && server.hasArg("b")) {
+    wledSetColor(
+      constrain(server.arg("r").toInt(), 0, 255),
+      constrain(server.arg("g").toInt(), 0, 255),
+      constrain(server.arg("b").toInt(), 0, 255));
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleWledTest() {
+  wledQueueText("Hello WLED!", 4000);
+  server.send(200, "text/plain", "OK");
+}
+
+// ============================================================================
 // Captive Portal — redirect OS connectivity checks to control page
 // ============================================================================
 // When a phone/laptop connects to vizBot WiFi, the OS sends a connectivity
@@ -458,6 +551,11 @@ void setupWebServer() {
   server.on("/wifi/connect", handleWifiConnect);
   server.on("/wifi/status", handleWifiStatus);
   server.on("/wifi/reset", handleWifiReset);
+
+  // WLED display endpoints
+  server.on("/wled/status", handleWledStatus);
+  server.on("/wled/config", handleWledConfig);
+  server.on("/wled/test", handleWledTest);
 
   // Captive portal detection endpoints — all redirect to root
   server.on("/generate_204", handleCaptiveRedirect);          // Android
