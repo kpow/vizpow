@@ -350,14 +350,30 @@ void pollWledDisplay() {
     }
   }
 
-  // Capture current state for restore
-  if (wledCaptureState()) {
-    DBG("WLED: captured, showing \"");
+  if (wledData.hasSavedState) {
+    // Already mid-display — keep original saved state, cancel pending restore
+    wledData.restoreAtMs = 0;
+    DBG("WLED: replacing text with \"");
+    DBG(wledData.textBuffer);
+    DBGLN("\"");
+
+    // Force WLED to reinitialize effect 122 by briefly switching away.
+    // WLED only clears effect data when the effect number actually changes.
+    char resetBody[80];
+    snprintf(resetBody, sizeof(resetBody),
+      "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":0}}",
+      WLED_SEGMENT_ID);
+    wledHttpPost(resetBody);
   } else {
-    DBG("WLED: capture failed, showing \"");
+    // First text — capture current state for later restore
+    if (wledCaptureState()) {
+      DBG("WLED: captured, showing \"");
+    } else {
+      DBG("WLED: capture failed, showing \"");
+    }
+    DBG(wledData.textBuffer);
+    DBGLN("\"");
   }
-  DBG(wledData.textBuffer);
-  DBGLN("\"");
 
   // Send text with sx=0 (static — fills screen instantly, no scrolling)
   char body[160];
