@@ -460,24 +460,60 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case EYE_HEART: {
-      int16_t heartSize = min(face.eyeWhiteW, face.eyeWhiteH) * 3 / 4;
+      // Big round eye whites first
       if (drawStroke) {
-        drawHeart(leftEyeCX, eyeCY, heartSize + BOT_STROKE_PX, BOT_COLOR_BG);
-        drawHeart(rightEyeCX, eyeCY, heartSize + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
       }
-      drawHeart(leftEyeCX, eyeCY, heartSize, botFaceColor);
-      drawHeart(rightEyeCX, eyeCY, heartSize, botFaceColor);
+      gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
+      gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
+
+      // Heart-shaped pupils (only if eyes are reasonably open)
+      if (effectiveEyeH > 8) {
+        int16_t maxPupilX = face.eyeWhiteW - face.pupilRadius - 4;
+        int16_t maxPupilY = effectiveEyeH - face.pupilRadius - 4;
+        int16_t pX = constrain(finalPupilX, -maxPupilX, maxPupilX);
+        int16_t pY = constrain(finalPupilY, -maxPupilY, maxPupilY);
+
+        int16_t heartSize = face.pupilRadius + 4;
+        drawHeart(leftEyeCX + pX, eyeCY + pY, heartSize, BOT_COLOR_PUPIL);
+        drawHeart(rightEyeCX + pX, eyeCY + pY, heartSize, BOT_COLOR_PUPIL);
+
+        prevFrame.leftPupilX = leftEyeCX + pX;
+        prevFrame.leftPupilY = eyeCY + pY;
+        prevFrame.rightPupilX = rightEyeCX + pX;
+        prevFrame.rightPupilY = eyeCY + pY;
+        prevFrame.pupilRadius = heartSize;
+      }
       break;
     }
 
     case EYE_X: {
-      int16_t xSize = min(face.eyeWhiteW, face.eyeWhiteH) * 2 / 3;
+      // Big round eye whites first
       if (drawStroke) {
-        drawXEye(leftEyeCX, eyeCY, xSize + BOT_STROKE_PX, BOT_COLOR_BG);
-        drawXEye(rightEyeCX, eyeCY, xSize + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
       }
-      drawXEye(leftEyeCX, eyeCY, xSize, botFaceColor);
-      drawXEye(rightEyeCX, eyeCY, xSize, botFaceColor);
+      gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
+      gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
+
+      // X-shaped pupils (only if eyes are reasonably open)
+      if (effectiveEyeH > 8) {
+        int16_t maxPupilX = face.eyeWhiteW - face.pupilRadius - 4;
+        int16_t maxPupilY = effectiveEyeH - face.pupilRadius - 4;
+        int16_t pX = constrain(finalPupilX, -maxPupilX, maxPupilX);
+        int16_t pY = constrain(finalPupilY, -maxPupilY, maxPupilY);
+
+        int16_t xSize = face.pupilRadius + 2;
+        drawXEye(leftEyeCX + pX, eyeCY + pY, xSize, BOT_COLOR_PUPIL);
+        drawXEye(rightEyeCX + pX, eyeCY + pY, xSize, BOT_COLOR_PUPIL);
+
+        prevFrame.leftPupilX = leftEyeCX + pX;
+        prevFrame.leftPupilY = eyeCY + pY;
+        prevFrame.rightPupilX = rightEyeCX + pX;
+        prevFrame.rightPupilY = eyeCY + pY;
+        prevFrame.pupilRadius = xSize;
+      }
       break;
     }
 
@@ -496,14 +532,32 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case EYE_STAR: {
-      int16_t starOuter = min(face.eyeWhiteW, face.eyeWhiteH) * 3 / 4;
-      int16_t starInner = starOuter * 2 / 5;
+      // Big round eye whites first
       if (drawStroke) {
-        drawStar(leftEyeCX, eyeCY, starOuter + BOT_STROKE_PX, starInner + BOT_STROKE_PX, BOT_COLOR_BG);
-        drawStar(rightEyeCX, eyeCY, starOuter + BOT_STROKE_PX, starInner + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
+        gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW + BOT_STROKE_PX, effectiveEyeH + BOT_STROKE_PX, BOT_COLOR_BG);
       }
-      drawStar(leftEyeCX, eyeCY, starOuter, starInner, botFaceColor);
-      drawStar(rightEyeCX, eyeCY, starOuter, starInner, botFaceColor);
+      gfx->fillEllipse(leftEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
+      gfx->fillEllipse(rightEyeCX, eyeCY, face.eyeWhiteW, effectiveEyeH, botFaceColor);
+
+      // Star-shaped pupils (only if eyes are reasonably open)
+      if (effectiveEyeH > 8) {
+        int16_t maxPupilX = face.eyeWhiteW - face.pupilRadius - 4;
+        int16_t maxPupilY = effectiveEyeH - face.pupilRadius - 4;
+        int16_t pX = constrain(finalPupilX, -maxPupilX, maxPupilX);
+        int16_t pY = constrain(finalPupilY, -maxPupilY, maxPupilY);
+
+        int16_t starOuter = face.pupilRadius + 4;
+        int16_t starInner = starOuter * 2 / 5;
+        drawStar(leftEyeCX + pX, eyeCY + pY, starOuter, starInner, BOT_COLOR_PUPIL);
+        drawStar(rightEyeCX + pX, eyeCY + pY, starOuter, starInner, BOT_COLOR_PUPIL);
+
+        prevFrame.leftPupilX = leftEyeCX + pX;
+        prevFrame.leftPupilY = eyeCY + pY;
+        prevFrame.rightPupilX = rightEyeCX + pX;
+        prevFrame.rightPupilY = eyeCY + pY;
+        prevFrame.pupilRadius = starOuter;
+      }
       break;
     }
 

@@ -123,14 +123,14 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 300
   },
 
-  // 1: HAPPY — upward arc eyes (^ ^), big smile
+  // 1: HAPPY — big bright eyes, raised brows, big smile
   {
-    .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
-    .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
-    .browOffsetY = -16, .browLength = 28, .browThickness = 5,
-    .browAngleL = 10, .browAngleR = 10, .browVisible = false,
-    .mouthType = MOUTH_GRIN, .mouthWidth = 24, .mouthOffsetY = 58, .mouthCurve = 12,
-    .eyeMode = EYE_CARET,
+    .eyeWhiteW = 52, .eyeWhiteH = 50, .eyeSpacing = 44,
+    .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = -2,
+    .browOffsetY = -18, .browLength = 28, .browThickness = 5,
+    .browAngleL = 10, .browAngleR = 10, .browVisible = true,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 24, .mouthOffsetY = 58, .mouthCurve = 12,
+    .eyeMode = EYE_NORMAL,
     .transitionMs = 250
   },
 
@@ -211,13 +211,13 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 350
   },
 
-  // 9: EXCITED — star/sparkle eyes, big grin
+  // 9: EXCITED — star/sparkle eyes, big smile
   {
     .eyeWhiteW = 52, .eyeWhiteH = 48, .eyeSpacing = 46,
     .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = 0,
     .browOffsetY = -18, .browLength = 26, .browThickness = 5,
     .browAngleL = 12, .browAngleR = 12, .browVisible = false,
-    .mouthType = MOUTH_GRIN, .mouthWidth = 26, .mouthOffsetY = 56, .mouthCurve = 14,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 26, .mouthOffsetY = 56, .mouthCurve = 14,
     .eyeMode = EYE_STAR,
     .transitionMs = 200
   },
@@ -310,14 +310,14 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 250
   },
 
-  // 18: BLISS — caret eyes but relaxed, big content smile
+  // 18: BLISS — soft relaxed eyes, gentle raised brows, content smile
   {
-    .eyeWhiteW = 48, .eyeWhiteH = 40, .eyeSpacing = 44,
-    .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
+    .eyeWhiteW = 50, .eyeWhiteH = 42, .eyeSpacing = 44,
+    .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = 2,
     .browOffsetY = -14, .browLength = 26, .browThickness = 5,
-    .browAngleL = 8, .browAngleR = 8, .browVisible = false,
+    .browAngleL = 8, .browAngleR = 8, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 20, .mouthOffsetY = 58, .mouthCurve = 10,
-    .eyeMode = EYE_CARET,
+    .eyeMode = EYE_NORMAL,
     .transitionMs = 400
   },
 
