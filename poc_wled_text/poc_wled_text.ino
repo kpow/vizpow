@@ -107,6 +107,17 @@ void setup() {
   Serial.printf("  SSID: %s\n", WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+  delay(200);
+
+  // WLED-proven settings — critical for reliable ESP32-S3 connections
+  WiFi.persistent(false);
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  WiFi.setAutoReconnect(false);
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   int tries = 0;
