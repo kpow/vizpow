@@ -252,18 +252,11 @@ void updateBotMode() {
   if (menuVisible) return;
 
   // ---- State machine: activity level transitions (personality-driven) ----
+  // Sleep is disabled for now — bot stays active or idle, never sleeps.
   const BotPersonality* p = botMode.personality;
   switch (botMode.state) {
     case BOT_ACTIVE:
-      if (timeSinceInteraction > p->sleepyTimeoutMs) {
-        botMode.state = BOT_SLEEPY;
-        botMode.stateEnteredTime = now;
-        botMode.face.transitionTo(EXPR_SLEEPY, 1000);
-
-        char buf[32];
-        getRandomSayingText(SAY_SLEEP, buf, sizeof(buf));
-        botMode.speechBubble.show(buf, 3000);
-      } else if (timeSinceInteraction > p->idleTimeoutMs) {
+      if (timeSinceInteraction > p->idleTimeoutMs) {
         if (botMode.state != BOT_IDLE) {
           botMode.state = BOT_IDLE;
           botMode.stateEnteredTime = now;
@@ -272,32 +265,13 @@ void updateBotMode() {
       break;
 
     case BOT_IDLE:
-      if (timeSinceInteraction > p->sleepyTimeoutMs) {
-        botMode.state = BOT_SLEEPY;
-        botMode.stateEnteredTime = now;
-        botMode.face.transitionTo(EXPR_SLEEPY, 1000);
-
-        char buf[32];
-        getRandomSayingText(SAY_SLEEP, buf, sizeof(buf));
-        botMode.speechBubble.show(buf, 3000);
-      }
+      // Stay idle — no sleep transitions
       break;
 
     case BOT_SLEEPY:
-      if (timeSinceInteraction > p->sleepTimeoutMs) {
-        botMode.state = BOT_SLEEPING;
-        botMode.stateEnteredTime = now;
-      }
-      break;
-
     case BOT_SLEEPING:
-      // Check for wake-up via motion
-      {
-        float mag = sqrtf(accelX * accelX + accelY * accelY + accelZ * accelZ);
-        if (mag > BOT_WAKE_THRESHOLD) {
-          botMode.wake();
-        }
-      }
+      // If somehow in a sleep state, wake immediately
+      botMode.wake();
       break;
   }
 
