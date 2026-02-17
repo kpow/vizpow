@@ -227,7 +227,7 @@ struct BotNotification {
 };
 
 // ============================================================================
-// Time Overlay (corner clock)
+// Time Overlay (centered, compact clock)
 // ============================================================================
 
 struct BotTimeOverlay {
@@ -260,12 +260,17 @@ struct BotTimeOverlay {
     char buf[8];
     snprintf(buf, sizeof(buf), "%02d:%02d", hours, minutes);
 
-    // Large time display — text size 3 = 18x24 per char, "00:00" = 90px wide
-    gfx->fillRoundRect(LCD_WIDTH - 104, 2, 102, 32, 6, 0x2104);  // Dark gray bg
+    // Compact centered time — text size 2 = 12x16 per char, "00:00" = 60px wide
+    int16_t pillW = 72;   // 60px text + 12px padding
+    int16_t pillH = 24;   // 16px text + 8px padding
+    int16_t pillX = (LCD_WIDTH - pillW) / 2;   // Centered horizontally
+    int16_t pillY = 4;                          // Near top of screen
 
-    gfx->setTextSize(3);
+    gfx->fillRoundRect(pillX, pillY, pillW, pillH, 6, 0x2104);  // Dark gray bg
+
+    gfx->setTextSize(2);
     gfx->setTextColor(0x07FF);  // Cyan text
-    gfx->setCursor(LCD_WIDTH - 98, 6);
+    gfx->setCursor(pillX + 6, pillY + 4);
     gfx->print(buf);
   }
 };

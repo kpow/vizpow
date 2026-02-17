@@ -60,6 +60,7 @@ enum CommandType : uint8_t {
   CMD_SET_TIME_OVERLAY,
   CMD_TOGGLE_TIME_OVERLAY,
   CMD_SET_AUTOCYCLE,
+  CMD_SET_HIRES_MODE,
 };
 
 // 32-byte command payload — fits all command types
@@ -151,6 +152,13 @@ void cmdSetAutoCycle(bool enabled) {
   pushCommand(cmd);
 }
 
+void cmdSetHiResMode(bool enabled) {
+  Command cmd;
+  cmd.type = CMD_SET_HIRES_MODE;
+  cmd.u8val = enabled ? 1 : 0;
+  pushCommand(cmd);
+}
+
 // ============================================================================
 // Drain Queue — called once per frame from the main loop
 // ============================================================================
@@ -163,6 +171,8 @@ extern void toggleBotTimeOverlay();
 extern bool isBotTimeOverlayEnabled();
 extern uint8_t brightness;
 extern bool autoCycle;
+extern bool hiResMode;
+extern void toggleHiResMode();
 
 void drainCommandQueue() {
   if (cmdQueue == nullptr) return;
@@ -200,6 +210,11 @@ void drainCommandQueue() {
       case CMD_SET_AUTOCYCLE:
         autoCycle = (cmd.u8val == 1);
         markSettingsDirty();
+        break;
+      case CMD_SET_HIRES_MODE:
+        if ((cmd.u8val == 1) != hiResMode) {
+          toggleHiResMode();  // handles screen clear + markSettingsDirty
+        }
         break;
     }
   }

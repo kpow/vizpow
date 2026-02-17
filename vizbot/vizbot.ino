@@ -218,12 +218,12 @@ void setup() {
   // =====================================================
   Serial.println();
   Serial.println("!!!!! VIZBOT WIFI TEST !!!!!");
-  Serial.println("Connecting to iPhone...");
+  Serial.println("Connecting to powerhouse...");
 
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
-  WiFi.begin("iPhone", "z1b3jukfjyfay");
+  WiFi.begin("powerhouse", "R00s3v3lt");
 
   int tries = 0;
   while (WiFi.status() != WL_CONNECTED && tries < 30) {
@@ -237,6 +237,9 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
+    // Configure NTP time sync — EST (UTC-5) with 1hr DST offset
+    configTime(-5 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
+    Serial.println("NTP configured");
   } else {
     Serial.println("WiFi FAILED");
   }
