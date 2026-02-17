@@ -35,6 +35,9 @@ const int   WLED_PORT = 80;
 
 // Saved state for restore
 int savedFx = -1;
+int savedSx = -1;     // speed
+int savedIx = -1;     // intensity
+int savedPal = -1;    // palette
 char savedSegName[32] = "";
 
 // ============================================================================
@@ -144,14 +147,24 @@ bool wledGetState(const char* ip, int port) {
     return false;
   }
 
-  // Find "fx": within seg
-  int fxIdx = response.indexOf("\"fx\":", segIdx);
-  if (fxIdx >= 0) {
-    savedFx = response.substring(fxIdx + 5).toInt();
-    Serial.printf("  Captured fx: %d\n", savedFx);
-  } else {
-    Serial.println("  WARNING: no 'fx' found");
-  }
+  // Helper lambda: find int value for a key within seg
+  auto findInt = [&](const char* key, int& out) {
+    char search[16];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+    int idx = response.indexOf(search, segIdx);
+    if (idx >= 0) {
+      out = response.substring(idx + strlen(search)).toInt();
+      Serial.printf("  Captured %s: %d\n", key, out);
+      return true;
+    }
+    Serial.printf("  WARNING: no '%s' found\n", key);
+    return false;
+  };
+
+  findInt("fx", savedFx);
+  findInt("sx", savedSx);
+  findInt("ix", savedIx);
+  findInt("pal", savedPal);
 
   // Find "n": (segment name) within seg
   int nIdx = response.indexOf("\"n\":\"", segIdx);
@@ -160,7 +173,7 @@ bool wledGetState(const char* ip, int port) {
     int nEnd = response.indexOf("\"", nIdx);
     if (nEnd > nIdx && (nEnd - nIdx) < 31) {
       response.substring(nIdx, nEnd).toCharArray(savedSegName, 32);
-      Serial.printf("  Captured segment name: \"%s\"\n", savedSegName);
+      Serial.printf("  Captured n: \"%s\"\n", savedSegName);
     }
   } else {
     Serial.println("  WARNING: no segment name found");
@@ -219,7 +232,8 @@ void setup() {
   Serial.println("[2/5] Reading current WLED state...");
   bool gotState = wledGetState(WLED_IP, WLED_PORT);
   if (gotState) {
-    Serial.printf("  OK — saved fx=%d, name=\"%s\"\n\n", savedFx, savedSegName);
+    Serial.printf("  OK — saved fx=%d sx=%d ix=%d pal=%d n=\"%s\"\n\n",
+      savedFx, savedSx, savedIx, savedPal, savedSegName);
   } else {
     Serial.println("  WARNING — couldn't read state (will skip restore)\n");
   }
@@ -252,10 +266,10 @@ void setup() {
   // ---- Step 5: Restore previous state ----
   Serial.println("[5/5] Restoring previous WLED state...");
   if (savedFx >= 0) {
-    char restoreBody[96];
+    char restoreBody[128];
     snprintf(restoreBody, sizeof(restoreBody),
-      "{\"seg\":[{\"fx\":%d,\"n\":\"%s\"}]}",
-      savedFx, savedSegName);
+      "{\"seg\":[{\"fx\":%d,\"sx\":%d,\"ix\":%d,\"pal\":%d,\"n\":\"%s\"}]}",
+      savedFx, savedSx, savedIx, savedPal, savedSegName);
     rc = wledPost(WLED_IP, WLED_PORT, restoreBody);
     if (rc == 200) {
       Serial.println("  OK — previous state restored!\n");
