@@ -33,8 +33,8 @@
 #define WLED_RETRY_BACKOFF_MS 30000
 
 // Scroll time: base + per-character (ms). Gives text time to scroll across 32px.
-#define WLED_SCROLL_BASE_MS 6000
-#define WLED_SCROLL_PER_CHAR_MS 600
+#define WLED_SCROLL_BASE_MS 12000
+#define WLED_SCROLL_PER_CHAR_MS 1200
 
 // ============================================================================
 // WLED State — shared between cores
