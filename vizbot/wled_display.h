@@ -344,23 +344,21 @@ void pollWledDisplay() {
     DBGLN("\"");
   }
 
-  // Send scrolling text
+  // Send static text (sx=0 — no scrolling, text fills display)
   char body[160];
   snprintf(body, sizeof(body),
-    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
+    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":0,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
     WLED_SEGMENT_ID,
     WLED_FX_SCROLL_TEXT,
-    wledData.scrollSpeed,
     wledData.r, wledData.g, wledData.b,
     wledData.textBuffer);
 
   if (wledHttpPost(body)) {
     wledData.reachable = true;
 
-    // Calculate display time based on text length
-    uint8_t textLen = strlen(wledData.textBuffer);
-    unsigned long scrollTime = WLED_SCROLL_BASE_MS + (textLen * WLED_SCROLL_PER_CHAR_MS);
-    unsigned long displayTime = max((unsigned long)wledData.textDurationMs, scrollTime);
+    // Static display — use the speech bubble duration directly
+    unsigned long displayTime = max((unsigned long)wledData.textDurationMs,
+                                    (unsigned long)WLED_SCROLL_BASE_MS);
     wledData.restoreAtMs = millis() + displayTime;
 
     DBG("WLED: sent OK, restore in ");
