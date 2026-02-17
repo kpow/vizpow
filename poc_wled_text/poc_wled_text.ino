@@ -6,10 +6,10 @@
  *
  * Flow:
  *   1. Connect to home WiFi
- *   2. GET current WLED state (capture effect index + segment name)
- *   3. Send scrolling text "Hello from vizBot!"
+ *   2. GET current WLED state (dump full JSON + capture segment fields)
+ *   3. Send scrolling text "Hello from vizBot!" targeting segment id:0
  *   4. Wait 5 seconds
- *   5. Restore previous effect + segment name
+ *   5. Restore previous state by segment id:0
  *
  * Hardware: Any ESP32-S3 board (no LEDs/LCD needed)
  * Serial: 115200 baud for debug output
@@ -33,6 +33,9 @@ const int   WLED_PORT = 80;
 // Scroll speed (0-255, higher = faster)
 #define WLED_SCROLL_SPEED 128
 
+// Which segment to target (by WLED segment ID)
+#define WLED_SEGMENT_ID 0
+
 // Saved state for restore
 int savedFx = -1;
 int savedSx = -1;     // speed
@@ -41,10 +44,10 @@ int savedPal = -1;    // palette
 char savedSegName[32] = "";
 
 // ============================================================================
-// Raw HTTP POST helper — avoids 30KB HTTPClient library
+// HTTP helpers — raw WiFiClient (avoids 30KB HTTPClient library)
 // ============================================================================
-// Returns HTTP status code (e.g. 200) or -1 on connection failure.
 
+// POST JSON to /json/state. Returns HTTP status code or -1.
 int wledPost(const char* ip, int port, const char* jsonBody) {
   WiFiClient client;
   client.setTimeout(2000);
@@ -67,7 +70,7 @@ int wledPost(const char* ip, int port, const char* jsonBody) {
                 "%s",
                 ip, bodyLen, jsonBody);
 
-  // Read response status line
+  // Wait for response
   unsigned long timeout = millis();
   while (client.available() == 0) {
     if (millis() - timeout > 3000) {
@@ -95,28 +98,23 @@ int wledPost(const char* ip, int port, const char* jsonBody) {
   return httpCode;
 }
 
-// ============================================================================
-// GET current state — capture effect index and segment name
-// ============================================================================
-// Reads /json/state and parses "fx" and "n" from the first segment.
-// Uses simple string search (no JSON library needed).
-
-bool wledGetState(const char* ip, int port) {
+// GET /json/state — returns full response body (after headers)
+String wledGet(const char* ip, int port, const char* path) {
   WiFiClient client;
   client.setTimeout(2000);
 
-  Serial.printf("  GET http://%s:%d/json/state\n", ip, port);
+  Serial.printf("  GET http://%s:%d%s\n", ip, port, path);
 
   if (!client.connect(ip, port)) {
     Serial.println("  ERROR: connection failed");
-    return false;
+    return "";
   }
 
-  client.printf("GET /json/state HTTP/1.1\r\n"
+  client.printf("GET %s HTTP/1.1\r\n"
                 "Host: %s\r\n"
                 "Connection: close\r\n"
                 "\r\n",
-                ip);
+                path, ip);
 
   // Wait for response
   unsigned long timeout = millis();
@@ -124,40 +122,65 @@ bool wledGetState(const char* ip, int port) {
     if (millis() - timeout > 3000) {
       Serial.println("  ERROR: response timeout");
       client.stop();
-      return false;
+      return "";
     }
   }
 
-  // Read full response
+  // Read full response into string
   String response = "";
-  while (client.available()) {
-    response += (char)client.read();
+  timeout = millis();
+  while (client.connected() || client.available()) {
+    if (client.available()) {
+      response += (char)client.read();
+    }
+    if (millis() - timeout > 5000) break;  // safety timeout
   }
   client.stop();
 
-  // Print first part of response for debugging
-  Serial.println("  --- Response body (first 500 chars) ---");
-  Serial.println(response.substring(response.indexOf("\r\n\r\n") + 4, response.indexOf("\r\n\r\n") + 504));
-  Serial.println("  --- end ---");
+  // Strip HTTP headers — body starts after \r\n\r\n
+  int bodyStart = response.indexOf("\r\n\r\n");
+  if (bodyStart >= 0) {
+    return response.substring(bodyStart + 4);
+  }
+  return response;
+}
 
-  // Find "seg" array, then "fx" within it
-  int segIdx = response.indexOf("\"seg\"");
+// ============================================================================
+// Parse segment state from JSON body
+// ============================================================================
+// Find the first segment in "seg":[...] and extract key fields.
+
+bool parseSegmentState(const String& json) {
+  // Find the seg array
+  int segIdx = json.indexOf("\"seg\"");
   if (segIdx < 0) {
-    Serial.println("  ERROR: no 'seg' found in response");
+    Serial.println("  ERROR: no 'seg' found in JSON");
     return false;
   }
 
-  // Helper lambda: find int value for a key within seg
-  auto findInt = [&](const char* key, int& out) {
-    char search[16];
-    snprintf(search, sizeof(search), "\"%s\":", key);
-    int idx = response.indexOf(search, segIdx);
+  // Find first '{' after seg (start of first segment object)
+  int segStart = json.indexOf('{', segIdx);
+  if (segStart < 0) return false;
+
+  // Find matching '}' for this segment (simple: find next '}')
+  int segEnd = json.indexOf('}', segStart);
+  if (segEnd < 0) return false;
+
+  // Extract just the first segment substring for cleaner parsing
+  String seg = json.substring(segStart, segEnd + 1);
+  Serial.println("  First segment object:");
+  Serial.println("  " + seg);
+
+  // Helper: find int value for "key":value in the segment string
+  auto findInt = [&](const char* key, int& out) -> bool {
+    char pattern[16];
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    int idx = seg.indexOf(pattern);
     if (idx >= 0) {
-      out = response.substring(idx + strlen(search)).toInt();
-      Serial.printf("  Captured %s: %d\n", key, out);
+      out = seg.substring(idx + strlen(pattern)).toInt();
+      Serial.printf("  -> %s = %d\n", key, out);
       return true;
     }
-    Serial.printf("  WARNING: no '%s' found\n", key);
     return false;
   };
 
@@ -166,20 +189,18 @@ bool wledGetState(const char* ip, int port) {
   findInt("ix", savedIx);
   findInt("pal", savedPal);
 
-  // Find "n": (segment name) within seg
-  int nIdx = response.indexOf("\"n\":\"", segIdx);
+  // Find "n":"value" — segment name
+  int nIdx = seg.indexOf("\"n\":\"");
   if (nIdx >= 0) {
-    nIdx += 5;  // skip past "n":"
-    int nEnd = response.indexOf("\"", nIdx);
+    nIdx += 5;
+    int nEnd = seg.indexOf("\"", nIdx);
     if (nEnd > nIdx && (nEnd - nIdx) < 31) {
-      response.substring(nIdx, nEnd).toCharArray(savedSegName, 32);
-      Serial.printf("  Captured n: \"%s\"\n", savedSegName);
+      seg.substring(nIdx, nEnd).toCharArray(savedSegName, 32);
+      Serial.printf("  -> n = \"%s\"\n", savedSegName);
     }
-  } else {
-    Serial.println("  WARNING: no segment name found");
   }
 
-  return true;
+  return (savedFx >= 0);
 }
 
 // ============================================================================
@@ -202,7 +223,6 @@ void setup() {
   WiFi.disconnect(true);
   delay(200);
 
-  // WLED-proven settings — critical for reliable ESP32-S3 connections
   WiFi.persistent(false);
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
@@ -221,32 +241,46 @@ void setup() {
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.printf("  FAILED — status: %d\n", WiFi.status());
-    Serial.println("\n*** WiFi connection failed. Check credentials. ***");
     return;
   }
 
-  Serial.printf("  CONNECTED! IP: %s\n", WiFi.localIP().toString().c_str());
-  Serial.printf("  RSSI: %d dBm\n\n", WiFi.RSSI());
+  Serial.printf("  CONNECTED! IP: %s  RSSI: %d dBm\n\n",
+    WiFi.localIP().toString().c_str(), WiFi.RSSI());
 
   // ---- Step 2: Capture current WLED state ----
   Serial.println("[2/5] Reading current WLED state...");
-  bool gotState = wledGetState(WLED_IP, WLED_PORT);
+  String stateJson = wledGet(WLED_IP, WLED_PORT, "/json/state");
+
+  if (stateJson.length() == 0) {
+    Serial.println("  ERROR: empty response from WLED\n");
+    return;
+  }
+
+  // Print full JSON so we can see everything
+  Serial.println("  === FULL WLED STATE JSON ===");
+  // Print in chunks (Serial buffer is limited)
+  for (unsigned int i = 0; i < stateJson.length(); i += 200) {
+    Serial.print(stateJson.substring(i, min((unsigned int)stateJson.length(), i + 200)));
+  }
+  Serial.println("\n  === END JSON ===\n");
+
+  bool gotState = parseSegmentState(stateJson);
   if (gotState) {
-    Serial.printf("  OK — saved fx=%d sx=%d ix=%d pal=%d n=\"%s\"\n\n",
+    Serial.printf("  OK — saved: fx=%d sx=%d ix=%d pal=%d n=\"%s\"\n\n",
       savedFx, savedSx, savedIx, savedPal, savedSegName);
   } else {
-    Serial.println("  WARNING — couldn't read state (will skip restore)\n");
+    Serial.println("  WARNING — couldn't parse state (will skip restore)\n");
   }
 
   delay(200);
 
-  // ---- Step 3: Send scrolling text ----
-  Serial.println("[3/5] Sending scrolling text to WLED...");
+  // ---- Step 3: Send scrolling text (target segment by ID) ----
+  Serial.println("[3/5] Sending scrolling text to WLED segment %d...");
 
-  char body[128];
+  char body[160];
   snprintf(body, sizeof(body),
-    "{\"seg\":[{\"fx\":%d,\"sx\":%d,\"col\":[[255,255,255]],\"n\":\"Hello from vizBot!\"}]}",
-    WLED_FX_SCROLL_TEXT, WLED_SCROLL_SPEED);
+    "{\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"col\":[[255,255,255]],\"n\":\"Hello from vizBot!\"}}",
+    WLED_SEGMENT_ID, WLED_FX_SCROLL_TEXT, WLED_SCROLL_SPEED);
 
   int rc = wledPost(WLED_IP, WLED_PORT, body);
   if (rc == 200) {
@@ -263,13 +297,13 @@ void setup() {
   }
   Serial.println();
 
-  // ---- Step 5: Restore previous state ----
+  // ---- Step 5: Restore previous state (target segment by ID) ----
   Serial.println("[5/5] Restoring previous WLED state...");
   if (savedFx >= 0) {
-    char restoreBody[128];
+    char restoreBody[160];
     snprintf(restoreBody, sizeof(restoreBody),
-      "{\"seg\":[{\"fx\":%d,\"sx\":%d,\"ix\":%d,\"pal\":%d,\"n\":\"%s\"}]}",
-      savedFx, savedSx, savedIx, savedPal, savedSegName);
+      "{\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"ix\":%d,\"pal\":%d,\"n\":\"%s\"}}",
+      WLED_SEGMENT_ID, savedFx, savedSx, savedIx, savedPal, savedSegName);
     rc = wledPost(WLED_IP, WLED_PORT, restoreBody);
     if (rc == 200) {
       Serial.println("  OK — previous state restored!\n");
@@ -280,12 +314,10 @@ void setup() {
     Serial.println("  SKIPPED — no saved state to restore\n");
   }
 
-  // ---- Done ----
   Serial.println("========================================");
   Serial.println("  POC complete! Check results above.");
   Serial.println("========================================");
 }
 
 void loop() {
-  // Nothing — POC runs once in setup()
 }
