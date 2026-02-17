@@ -263,7 +263,9 @@ void setup() {
 
   // Apply loaded settings to hardware
   FastLED.setBrightness(brightness);
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
   analogWrite(LCD_BL, lcdBrightness);
+  #endif
 
   // Set palette from saved index
   currentPalette = palettes[paletteIndex % NUM_PALETTES];
@@ -272,11 +274,11 @@ void setup() {
   resetEffectShuffle();
   resetPaletteShuffle();
 
-  // Apply saved background style
+  // Apply saved background style + enter bot mode (LCD only)
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
   setBotBackgroundStyle(botBackgroundStyle);
-
-  // Enter bot mode
   enterBotMode();
+  #endif
 
   // Start WiFi server task on Core 0 (render stays on Core 1)
   if (wifiEnabled) {
@@ -292,7 +294,8 @@ void loop() {
     readIMU();
   }
 
-  // Shake reaction for bot (requires working IMU)
+  // Shake reaction for bot (requires working IMU + LCD bot mode)
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
   if (sysStatus.imuReady && botMode.initialized) {
     float mag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
     if (mag > SHAKE_THRESHOLD && !botMode.shakeReacting) {
@@ -302,6 +305,7 @@ void loop() {
       botMode.registerInteraction();
     }
   }
+  #endif
 
   // Handle touch gestures (only if touch initialized)
   #if defined(TOUCH_ENABLED)
@@ -331,7 +335,10 @@ void loop() {
   flushSettingsIfDirty();
 
   // Run bot mode (handles its own LCD rendering)
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
   runBotMode();
-
   delay(BOT_FRAME_DELAY_MS);
+  #else
+  delay(20);
+  #endif
 }
