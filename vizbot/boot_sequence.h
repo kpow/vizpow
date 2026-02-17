@@ -250,9 +250,14 @@ bool bootStageTouch() {
   #endif
 }
 
-// Stage 6: WiFi AP
+// Stage 6: WiFi AP (preserves STA if already connected)
 bool bootStageWiFi() {
-  WiFi.mode(WIFI_AP);
+  if (sysStatus.staConnected) {
+    // STA already connected from bootAttemptSTA — use AP+STA so we don't kill it
+    WiFi.mode(WIFI_AP_STA);
+  } else {
+    WiFi.mode(WIFI_AP);
+  }
   delay(100);
 
   bool ok = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
@@ -420,6 +425,15 @@ void runBootSequence() {
   // Mark WiFi enabled globally if it came up
   extern bool wifiEnabled;
   wifiEnabled = sysStatus.wifiReady;
+
+  // If STA connected at boot, seed the provisioning state machine so the
+  // AP linger timer starts.  After WIFI_AP_LINGER_MS the AP will shut down
+  // and the device switches to STA-only — no manual reconnection needed.
+  if (sysStatus.staConnected && sysStatus.wifiReady) {
+    wifiProv.connectedAtMs = millis();
+    wifiProv.state = PROV_CONNECTED;
+    DBGLN("STA connected at boot — AP linger timer started");
+  }
 
   DBGLN("=== Boot sequence complete ===");
   DBG("Boot time: ");
