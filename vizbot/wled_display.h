@@ -89,7 +89,7 @@ void loadWledSettings() {
     wledData.ip[15] = '\0';
   }
   wledData.enabled     = prefs.getBool("wledOn", true);
-  wledData.scrollSpeed = prefs.getUChar("wledSpd", 128);
+  wledData.scrollSpeed = prefs.getUChar("wledSpd", 255);
   wledData.r           = prefs.getUChar("wledR", 255);
   wledData.g           = prefs.getUChar("wledG", 255);
   wledData.b           = prefs.getUChar("wledB", 255);
@@ -344,12 +344,13 @@ void pollWledDisplay() {
     DBGLN("\"");
   }
 
-  // Send static text (sx=0 — no scrolling, text fills display)
+  // Send scrolling text
   char body[160];
   snprintf(body, sizeof(body),
-    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":0,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
+    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
     WLED_SEGMENT_ID,
     WLED_FX_SCROLL_TEXT,
+    wledData.scrollSpeed,
     wledData.r, wledData.g, wledData.b,
     wledData.textBuffer);
 
