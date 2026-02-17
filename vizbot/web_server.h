@@ -346,6 +346,7 @@ void handleRoot() {
 
 extern bool isBotTimeOverlayEnabled();
 extern bool hiResMode;
+extern String getWledStatusJson();
 
 void handleState() {
   String json = "{\"brightness\":" + String(brightness) +
