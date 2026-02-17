@@ -34,7 +34,7 @@
 
 // Scroll time: base + per-character (ms). Gives text time to scroll across 32px.
 #define WLED_SCROLL_BASE_MS 3000
-#define WLED_SCROLL_PER_CHAR_MS 180
+#define WLED_SCROLL_PER_CHAR_MS 300
 
 // ============================================================================
 // WLED State — shared between cores
@@ -89,7 +89,7 @@ void loadWledSettings() {
     wledData.ip[15] = '\0';
   }
   wledData.enabled     = prefs.getBool("wledOn", true);
-  wledData.scrollSpeed = prefs.getUChar("wledSpd", 220);
+  wledData.scrollSpeed = prefs.getUChar("wledSpd", 128);
   wledData.r           = prefs.getUChar("wledR", 255);
   wledData.g           = prefs.getUChar("wledG", 255);
   wledData.b           = prefs.getUChar("wledB", 255);
@@ -291,7 +291,7 @@ void pollWledDisplay() {
     if (wledData.hasSavedState) {
       char body[160];
       snprintf(body, sizeof(body),
-        "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"ix\":%d,\"pal\":%d,\"n\":\"%s\"}}",
+        "{\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"ix\":%d,\"pal\":%d,\"n\":\"%s\"}}",
         WLED_SEGMENT_ID,
         wledData.savedFx, wledData.savedSx,
         wledData.savedIx, wledData.savedPal,
@@ -333,7 +333,7 @@ void pollWledDisplay() {
   // Step 2: Send scrolling text
   char body[160];
   snprintf(body, sizeof(body),
-    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"ix\":0,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
+    "{\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
     WLED_SEGMENT_ID,
     WLED_FX_SCROLL_TEXT,
     wledData.scrollSpeed,
