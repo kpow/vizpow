@@ -347,7 +347,7 @@ void pollWledDisplay() {
   // Send scrolling text
   char body[160];
   snprintf(body, sizeof(body),
-    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"ix\":0,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
+    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
     WLED_SEGMENT_ID,
     WLED_FX_SCROLL_TEXT,
     wledData.scrollSpeed,
