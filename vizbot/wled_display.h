@@ -89,7 +89,7 @@ void loadWledSettings() {
     wledData.ip[15] = '\0';
   }
   wledData.enabled     = prefs.getBool("wledOn", true);
-  wledData.scrollSpeed = prefs.getUChar("wledSpd", 255);
+  wledData.scrollSpeed = prefs.getUChar("wledSpd", 200);
   wledData.r           = prefs.getUChar("wledR", 255);
   wledData.g           = prefs.getUChar("wledG", 255);
   wledData.b           = prefs.getUChar("wledB", 255);
