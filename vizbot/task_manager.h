@@ -61,6 +61,7 @@ enum CommandType : uint8_t {
   CMD_TOGGLE_TIME_OVERLAY,
   CMD_SET_AUTOCYCLE,
   CMD_SET_HIRES_MODE,
+  CMD_TOGGLE_INFO_MODE,
 };
 
 // 32-byte command payload — fits all command types
@@ -159,6 +160,13 @@ void cmdSetHiResMode(bool enabled) {
   pushCommand(cmd);
 }
 
+void cmdToggleInfoMode() {
+  Command cmd;
+  cmd.type = CMD_TOGGLE_INFO_MODE;
+  cmd.u8val = 0;
+  pushCommand(cmd);
+}
+
 // ============================================================================
 // Drain Queue — called once per frame from the main loop
 // ============================================================================
@@ -216,6 +224,15 @@ void drainCommandQueue() {
           toggleHiResMode();  // handles screen clear + markSettingsDirty
         }
         break;
+      case CMD_TOGGLE_INFO_MODE: {
+        extern struct InfoModeData infoMode;
+        if (infoMode.active) {
+          infoMode.beginExitTransition();
+        } else {
+          infoMode.beginEnterTransition();
+        }
+        break;
+      }
     }
   }
 }

@@ -34,13 +34,13 @@ extern bool menuVisible;
 // Constants
 // ============================================================================
 
-// Mini eye position (top-right corner)
-#define MINI_EYE_CX       206     // Center X of mini eye pair
-#define MINI_EYE_CY       16      // Center Y of mini eye pair
-#define MINI_EYE_W        12      // White ellipse half-width
-#define MINI_EYE_H        10      // White ellipse half-height
-#define MINI_EYE_SPACING  14      // Distance from center to each eye
-#define MINI_PUPIL_R      4       // Pupil radius
+// Mini eye position (top-right area, pulled from corner)
+#define MINI_EYE_CX       190     // Center X of mini eye pair
+#define MINI_EYE_CY       24      // Center Y of mini eye pair
+#define MINI_EYE_W        18      // White ellipse half-width (50% larger)
+#define MINI_EYE_H        15      // White ellipse half-height (50% larger)
+#define MINI_EYE_SPACING  21      // Distance from center to each eye (50% larger)
+#define MINI_PUPIL_R      6       // Pupil radius (50% larger)
 
 // Transition timing
 #define INFO_TRANSITION_MS     600   // Shrink/expand animation duration
@@ -316,37 +316,42 @@ void renderCurrentWeather() {
     return;
   }
 
-  // Weather icon (left side)
+  // Weather icon (under the mini eyes, right side)
   uint8_t iconType = wmoToIcon(weatherData.current.weatherCode);
-  drawWeatherIcon(38, 58, 36, iconType);
+  drawWeatherIcon(MINI_EYE_CX, 64, 44, iconType);
 
-  // Temperature (large, right of icon)
+  // Temperature (big, centered in the left space)
   int tempInt = (int)(weatherData.current.tempF + 0.5f);
   char tempBuf[8];
   snprintf(tempBuf, sizeof(tempBuf), "%d", tempInt);
 
   uint16_t tempColor = getTempColor(tempInt);
-  gfx->setTextSize(5);  // ~30x40 per char
+  gfx->setTextSize(7);  // ~42x56 per char
   gfx->setTextColor(tempColor);
-  gfx->setCursor(80, 42);
+  int16_t tempTextW = strlen(tempBuf) * 42;
+  // Degree symbol width
+  int16_t degreeW = 18;  // textSize 3 "o" = ~18px
+  int16_t totalW = tempTextW + degreeW;
+  // Center in the space left of the icon (0 to ~165)
+  int16_t leftSpace = MINI_EYE_CX - 44 - 10;  // icon left edge minus margin
+  int16_t tempX = (leftSpace - totalW) / 2;
+  if (tempX < 4) tempX = 4;
+  gfx->setCursor(tempX, 42);
   gfx->print(tempBuf);
 
-  // Degree symbol + F (smaller, after temp number)
-  int16_t afterTempX = 80 + strlen(tempBuf) * 30;
-  gfx->setTextSize(2);
+  // Degree symbol (after temp number, no F)
+  int16_t afterTempX = tempX + tempTextW;
+  gfx->setTextSize(3);
   gfx->setTextColor(0xC618);
-  gfx->setCursor(afterTempX + 2, 44);
-  gfx->print("o");  // Degree approximation
-  gfx->setCursor(afterTempX + 14, 52);
-  gfx->print("F");
+  gfx->setCursor(afterTempX + 2, 40);
+  gfx->print("o");
 
   // Condition text
   gfx->setTextSize(2);
   gfx->setTextColor(0xFFFF);
-  // Center the condition text
   int16_t textW = strlen(weatherData.current.conditionText) * 12;
   int16_t textX = (LCD_WIDTH - textW) / 2;
-  gfx->setCursor(textX, 100);
+  gfx->setCursor(textX, 108);
   gfx->print(weatherData.current.conditionText);
 }
 
@@ -357,8 +362,9 @@ void renderCurrentWeather() {
 void renderForecastBars() {
   if (!weatherData.valid) return;
 
-  // Divider line
-  gfx->drawLine(20, 128, LCD_WIDTH - 20, 128, 0x4208);
+  // Divider line between current conditions and forecast
+  gfx->drawLine(20, 130, LCD_WIDTH - 20, 130, 0x4208);
+  gfx->drawLine(20, 131, LCD_WIDTH - 20, 131, 0x4208);
 
   // Find global min/max across all 3 days for bar scaling
   float globalMin = 200, globalMax = -200;
@@ -369,54 +375,48 @@ void renderForecastBars() {
   float range = globalMax - globalMin;
   if (range < 10) range = 10;  // Minimum range to avoid squished bars
 
-  // Bar area
-  int16_t barAreaTop = 168;
-  int16_t barAreaBot = 240;
-  int16_t barAreaH = barAreaBot - barAreaTop;
-  int16_t barW = 28;
+  // Bars grow upward from the very bottom of the screen
+  int16_t barBot = LCD_HEIGHT;           // Bottom edge of screen (280)
+  int16_t barMaxH = 95;                  // Max bar height
+  int16_t barW = 50;                     // Wide bars
+  int16_t dayLabelY = LCD_HEIGHT - 18;   // Day name at bottom of bar
 
   for (int i = 0; i < 3; i++) {
     int16_t colCX = 40 + i * 80;  // Column centers at x=40, 120, 200
 
-    // Day label
-    gfx->setTextSize(2);
-    gfx->setTextColor(0xC618);
-    int16_t dayTextW = strlen(weatherData.forecast[i].dayName) * 12;
-    gfx->setCursor(colCX - dayTextW / 2, 136);
-    gfx->print(weatherData.forecast[i].dayName);
-
-    // Bar position calculation
-    float lowNorm = (weatherData.forecast[i].lowF - globalMin) / range;
+    // Bar height based on high temp (uneven tops across the 3 bars)
     float highNorm = (weatherData.forecast[i].highF - globalMin) / range;
-    int16_t barTop = barAreaBot - (int16_t)(highNorm * barAreaH);
-    int16_t barBot = barAreaBot - (int16_t)(lowNorm * barAreaH);
-    if (barBot - barTop < 6) barBot = barTop + 6;  // Minimum bar height
+    int16_t barH = 30 + (int16_t)(highNorm * (barMaxH - 30));  // Min 30px, max barMaxH
+    int16_t barTop = barBot - barH;
 
     // Bar color based on high temp
     uint16_t barColor = getTempColor((int)(weatherData.forecast[i].highF + 0.5f));
 
-    // Draw bar with rounded corners
-    gfx->fillRoundRect(colCX - barW / 2, barTop, barW, barBot - barTop, 4, barColor);
+    // Draw bar (flat bottom at screen edge, rounded top corners only)
+    gfx->fillRect(colCX - barW / 2, barTop + 4, barW, barH - 4, barColor);
+    gfx->fillRoundRect(colCX - barW / 2, barTop, barW, 12, 4, barColor);
 
-    // High temp label (above bar)
-    char buf[6];
-    snprintf(buf, sizeof(buf), "%d", (int)(weatherData.forecast[i].highF + 0.5f));
+    // High/Low temps above bar
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%d/%d",
+             (int)(weatherData.forecast[i].highF + 0.5f),
+             (int)(weatherData.forecast[i].lowF + 0.5f));
     gfx->setTextSize(1);
     gfx->setTextColor(0xFFFF);
     int16_t labelW = strlen(buf) * 6;
-    gfx->setCursor(colCX - labelW / 2, barTop - 12);
+    gfx->setCursor(colCX - labelW / 2, barTop - 14);
     gfx->print(buf);
 
-    // Low temp label (below bar)
-    snprintf(buf, sizeof(buf), "%d", (int)(weatherData.forecast[i].lowF + 0.5f));
-    gfx->setTextColor(0x7BEF);  // Muted gray
-    labelW = strlen(buf) * 6;
-    gfx->setCursor(colCX - labelW / 2, barBot + 4);
-    gfx->print(buf);
-
-    // Small weather icon below everything
+    // Small weather icon above temps
     uint8_t dayIcon = wmoToIcon(weatherData.forecast[i].weatherCode);
-    drawWeatherIcon(colCX, 264, 16, dayIcon);
+    drawWeatherIcon(colCX, barTop - 30, 14, dayIcon);
+
+    // Day name inside bar at the bottom
+    gfx->setTextSize(2);
+    gfx->setTextColor(0x0000);  // Black text on colored bar
+    int16_t dayTextW = strlen(weatherData.forecast[i].dayName) * 12;
+    gfx->setCursor(colCX - dayTextW / 2, dayLabelY);
+    gfx->print(weatherData.forecast[i].dayName);
   }
 }
 
@@ -450,7 +450,7 @@ void renderInfoTransition(float t, bool entering) {
   int16_t eyeW = (int16_t)(botMode.face.eyeWhiteW * scale);
   int16_t eyeH = (int16_t)(botMode.face.eyeWhiteH * scale);
   int16_t spacing = (int16_t)(botMode.face.eyeSpacing * scale);
-  int16_t pupilR = max(2, (int16_t)(botMode.face.pupilRadius * scale));
+  int16_t pupilR = max((int16_t)2, (int16_t)(botMode.face.pupilRadius * scale));
 
   // Apply blink
   float blinkAmount = botMode.face.blinkAmount;
@@ -473,7 +473,7 @@ void renderInfoTransition(float t, bool entering) {
   // Brows (fade out early in enter, fade in late in exit)
   if (ease < 0.4f && botMode.face.browVisible && scale > 0.5f) {
     int16_t browLen = (int16_t)(botMode.face.browLength * scale);
-    int16_t browThick = max(1, (int16_t)(botMode.face.browThickness * scale));
+    int16_t browThick = max((int16_t)1, (int16_t)(botMode.face.browThickness * scale));
     int16_t browY = cy - effectiveH - (int16_t)(botMode.face.browOffsetY * scale);
 
     float browAngleL = botMode.face.browAngleL * DEG_TO_RAD;

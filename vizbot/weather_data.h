@@ -6,6 +6,9 @@
 #include "config.h"
 #include "system_status.h"
 
+extern char weatherLat[12];
+extern char weatherLon[12];
+
 // ============================================================================
 // Weather Data — Open-Meteo API integration
 // ============================================================================
@@ -301,7 +304,7 @@ void fetchWeather() {
     "&temperature_unit=fahrenheit"
     "&forecast_days=3"
     "&timezone=auto HTTP/1.1",
-    WEATHER_LAT, WEATHER_LON);
+    weatherLat, weatherLon);
 
   client.println(request);
   client.println("Host: api.open-meteo.com");

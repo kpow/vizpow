@@ -76,10 +76,16 @@ CRGBPalette16 currentPalette;
 float accelX = 0, accelY = 0, accelZ = 0;
 float gyroX = 0, gyroY = 0, gyroZ = 0;
 
+// Weather location (runtime, saved to NVS)
+char weatherLat[12] = WEATHER_LAT_DEFAULT;
+char weatherLon[12] = WEATHER_LON_DEFAULT;
+
 // Sustained shake tracking (for info mode toggle)
 unsigned long shakeStartTime = 0;        // When continuous shaking began
 bool shakeSustainedTriggered = false;    // Whether sustained shake already fired
-uint8_t shakeAboveCount = 0;            // Consecutive frames above threshold
+uint8_t shakeAboveCount = 0;            // Total frames above threshold
+uint8_t shakeGapFrames = 0;             // Frames below threshold (grace period)
+#define SHAKE_GAP_TOLERANCE 6           // Allow up to 6 frames (~200ms) below threshold
 
 // Fisher-Yates shuffle
 void shuffleArray(uint8_t* arr, uint8_t size) {
@@ -273,17 +279,20 @@ void loop() {
     float mag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
 
     // Track sustained shaking for info mode toggle
+    // Acceleration oscillates during shaking, so we allow brief dips below threshold
     if (mag > SHAKE_SUSTAIN_THRESHOLD) {
       if (shakeStartTime == 0) {
         shakeStartTime = millis();
         shakeAboveCount = 0;
       }
       shakeAboveCount++;
+      shakeGapFrames = 0;  // Reset gap counter on any above-threshold frame
 
-      // Check if sustained shake threshold met (~2 seconds of continuous shaking)
-      if (!shakeSustainedTriggered && shakeAboveCount >= 12 &&
+      // Check if sustained shake threshold met (~2 seconds of shaking)
+      if (!shakeSustainedTriggered && shakeAboveCount >= 8 &&
           (millis() - shakeStartTime) >= SUSTAINED_SHAKE_DURATION_MS) {
         shakeSustainedTriggered = true;
+        DBGLN("Sustained shake detected — toggling info mode");
         // Toggle info mode
         if (infoMode.active) {
           infoMode.beginExitTransition();
@@ -291,19 +300,21 @@ void loop() {
           infoMode.beginEnterTransition();
         }
       }
-    } else {
-      // Shake ended — if it was short and strong, treat as quick shake (dizzy)
-      if (shakeStartTime > 0 && !shakeSustainedTriggered && !infoMode.active) {
-        if (mag > 0.5f && shakeAboveCount >= 2 && !botMode.shakeReacting) {
-          // Was shaking but stopped before sustained threshold — check if peak was strong
-          // The frames while shaking would have had mag > SHAKE_SUSTAIN_THRESHOLD
-          // Now mag dropped below threshold — this is a quick shake
-          botMode.onShake();
+    } else if (shakeStartTime > 0) {
+      // Below threshold but we were shaking — allow brief gaps
+      shakeGapFrames++;
+      if (shakeGapFrames > SHAKE_GAP_TOLERANCE) {
+        // Shake truly ended — if it was short, treat as quick shake (dizzy)
+        if (!shakeSustainedTriggered && !infoMode.active) {
+          if (shakeAboveCount >= 2 && !botMode.shakeReacting) {
+            botMode.onShake();
+          }
         }
+        shakeStartTime = 0;
+        shakeAboveCount = 0;
+        shakeGapFrames = 0;
+        shakeSustainedTriggered = false;
       }
-      shakeStartTime = 0;
-      shakeAboveCount = 0;
-      shakeSustainedTriggered = false;
     }
 
     // Regular interaction tracking (unchanged)
