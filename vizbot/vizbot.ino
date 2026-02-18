@@ -32,6 +32,7 @@
 #include "effects_ambient.h"
 #include "display_lcd.h"
 #include "bot_mode.h"
+#include "info_mode.h"
 #include "web_server.h"
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
@@ -74,6 +75,11 @@ CRGBPalette16 currentPalette;
 // IMU data
 float accelX = 0, accelY = 0, accelZ = 0;
 float gyroX = 0, gyroY = 0, gyroZ = 0;
+
+// Sustained shake tracking (for info mode toggle)
+unsigned long shakeStartTime = 0;        // When continuous shaking began
+bool shakeSustainedTriggered = false;    // Whether sustained shake already fired
+uint8_t shakeAboveCount = 0;            // Consecutive frames above threshold
 
 // Fisher-Yates shuffle
 void shuffleArray(uint8_t* arr, uint8_t size) {
@@ -262,12 +268,45 @@ void loop() {
     readIMU();
   }
 
-  // Shake reaction for bot (requires working IMU)
+  // Shake detection: sustained shake toggles info mode, quick shake = dizzy
   if (sysStatus.imuReady && botMode.initialized) {
     float mag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
-    if (mag > SHAKE_THRESHOLD && !botMode.shakeReacting) {
-      botMode.onShake();
+
+    // Track sustained shaking for info mode toggle
+    if (mag > SHAKE_SUSTAIN_THRESHOLD) {
+      if (shakeStartTime == 0) {
+        shakeStartTime = millis();
+        shakeAboveCount = 0;
+      }
+      shakeAboveCount++;
+
+      // Check if sustained shake threshold met (~2 seconds of continuous shaking)
+      if (!shakeSustainedTriggered && shakeAboveCount >= 12 &&
+          (millis() - shakeStartTime) >= SUSTAINED_SHAKE_DURATION_MS) {
+        shakeSustainedTriggered = true;
+        // Toggle info mode
+        if (infoMode.active) {
+          infoMode.beginExitTransition();
+        } else {
+          infoMode.beginEnterTransition();
+        }
+      }
+    } else {
+      // Shake ended — if it was short and strong, treat as quick shake (dizzy)
+      if (shakeStartTime > 0 && !shakeSustainedTriggered && !infoMode.active) {
+        if (mag > 0.5f && shakeAboveCount >= 2 && !botMode.shakeReacting) {
+          // Was shaking but stopped before sustained threshold — check if peak was strong
+          // The frames while shaking would have had mag > SHAKE_SUSTAIN_THRESHOLD
+          // Now mag dropped below threshold — this is a quick shake
+          botMode.onShake();
+        }
+      }
+      shakeStartTime = 0;
+      shakeAboveCount = 0;
+      shakeSustainedTriggered = false;
     }
+
+    // Regular interaction tracking (unchanged)
     if (mag > 1.3f) {
       botMode.registerInteraction();
     }
@@ -280,15 +319,17 @@ void loop() {
   }
   #endif
 
-  // Auto-cycle ambient effects and palettes (for bot background overlay)
-  if (autoCycle && millis() - lastChange > 20000) {
-    lastChange = millis();
-    effectIndex = nextShuffledEffect();
-  }
-  if (autoCycle && millis() - lastPaletteChange > 5000) {
-    lastPaletteChange = millis();
-    paletteIndex = nextShuffledPalette();
-    currentPalette = palettes[paletteIndex];
+  // Auto-cycle ambient effects and palettes (skip while in info mode)
+  if (!infoMode.active) {
+    if (autoCycle && millis() - lastChange > 20000) {
+      lastChange = millis();
+      effectIndex = nextShuffledEffect();
+    }
+    if (autoCycle && millis() - lastPaletteChange > 5000) {
+      lastPaletteChange = millis();
+      paletteIndex = nextShuffledPalette();
+      currentPalette = palettes[paletteIndex];
+    }
   }
 
   // Apply queued commands from WiFi/touch before rendering
@@ -300,8 +341,12 @@ void loop() {
   // Flush dirty settings to NVS (debounced — waits 2s after last change)
   flushSettingsIfDirty();
 
-  // Run bot mode (handles its own LCD rendering)
-  runBotMode();
+  // Run the appropriate mode
+  if (infoMode.active) {
+    runInfoMode();
+  } else {
+    runBotMode();
+  }
 
   delay(BOT_FRAME_DELAY_MS);
 }

@@ -24,6 +24,7 @@ enum SayingCategory : uint8_t {
   SAY_STATUS,
   SAY_WAKE,
   SAY_SLEEP,
+  SAY_INFO_ENTER,
   SAY_CATEGORY_COUNT
 };
 
@@ -208,6 +209,18 @@ const char* const saySleep[] PROGMEM = {
 };
 #define NUM_SAY_SLEEP 5
 
+// Info mode entry sayings
+const char say_info_0[] PROGMEM = "Let me check...";
+const char say_info_1[] PROGMEM = "Hmm, lemme see";
+const char say_info_2[] PROGMEM = "One sec...";
+const char say_info_3[] PROGMEM = "Checking!";
+const char say_info_4[] PROGMEM = "Oh? Let's look";
+
+const char* const sayInfoEnter[] PROGMEM = {
+  say_info_0, say_info_1, say_info_2, say_info_3, say_info_4
+};
+#define NUM_SAY_INFO_ENTER 5
+
 // ============================================================================
 // Selection helpers
 // ============================================================================
@@ -230,6 +243,7 @@ const char* getRandomSaying(SayingCategory category) {
     case SAY_STATUS:        pool = sayStatus;      count = NUM_SAY_STATUS;     break;
     case SAY_WAKE:          pool = sayWake;        count = NUM_SAY_WAKE;       break;
     case SAY_SLEEP:         pool = saySleep;       count = NUM_SAY_SLEEP;      break;
+    case SAY_INFO_ENTER:    pool = sayInfoEnter;   count = NUM_SAY_INFO_ENTER; break;
     default:                pool = sayIdle;        count = NUM_SAY_IDLE;       break;
   }
 

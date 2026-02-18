@@ -458,11 +458,17 @@ void handleTouch() {
       waitingForLift = true;
     }
   } else {
-    // Finger lifted - short tap triggers bot reaction
+    // Finger lifted - short tap triggers bot reaction or info page cycle
     if (touchStartTime > 0 && !longPressTriggered && !menuVisible &&
         (now - touchStartTime < LONG_PRESS_MS)) {
-      botMode.onTap();
-      DBGLN("Bot tap reaction");
+      extern struct InfoModeData infoMode;
+      if (infoMode.active) {
+        infoMode.nextPage();
+        DBGLN("Info page cycle");
+      } else {
+        botMode.onTap();
+        DBGLN("Bot tap reaction");
+      }
     }
 
     touchStartTime = 0;
