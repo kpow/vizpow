@@ -98,7 +98,6 @@ struct BotModeState {
   BotSpeechBubble speechBubble;
   BotNotification notification;
   BotTimeOverlay timeOverlay;
-  BotWeatherOverlay weatherOverlay;
 
   // Timing
   unsigned long lastInteraction;     // Last touch/shake event
@@ -135,7 +134,6 @@ struct BotModeState {
     speechBubble.init();
     notification.init();
     timeOverlay.init();
-    weatherOverlay.init();
     personalityIndex = PERSONALITY_CHILL;
     personality = &botPersonalities[PERSONALITY_CHILL];
     lastInteraction = millis();
@@ -334,7 +332,6 @@ void updateBotMode() {
   // Update overlays
   botMode.speechBubble.update();
   botMode.notification.update();
-  botMode.weatherOverlay.update();
 }
 
 // ============================================================================
@@ -490,8 +487,6 @@ void renderBotMode() {
   botMode.speechBubble.render();
   botMode.notification.render();
   botMode.timeOverlay.render();
-  botMode.weatherOverlay.render();
-
   // ---- Flush canvas to screen in one atomic transfer — zero flicker ----
   botCanvas->flush();
 
@@ -609,14 +604,6 @@ uint8_t getBotPersonality() {
   return botMode.personalityIndex;
 }
 
-void setBotWeatherEnabled(bool enabled) {
-  botMode.weatherOverlay.enabled = enabled;
-}
-
-void setBotWeatherLocation(float lat, float lon) {
-  botMode.weatherOverlay.setLocation(lat, lon);
-}
-
 #else
 
 // Stubs when LCD is not available
@@ -630,8 +617,6 @@ inline void toggleBotTimeOverlay() {}
 inline bool isBotTimeOverlayEnabled() { return false; }
 inline void setBotPersonality(uint8_t index) {}
 inline uint8_t getBotPersonality() { return 0; }
-inline void setBotWeatherEnabled(bool enabled) {}
-inline void setBotWeatherLocation(float lat, float lon) {}
 inline void setBotBackgroundStyle(uint8_t style) {}
 inline uint8_t getBotBackgroundStyle() { return 0; }
 
