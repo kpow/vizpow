@@ -281,16 +281,6 @@ struct BotTimeOverlay {
   }
 };
 
-// Weather overlay removed to save flash (HTTPClient library is ~30KB)
-struct BotWeatherOverlay {
-  bool enabled;
-  bool hasLocation;
-  void init() { enabled = false; hasLocation = false; }
-  void setLocation(float lat, float lon) {}
-  void update() {}
-  void render() {}
-};
-
 #else
 
 // Stubs when LCD not available
@@ -314,15 +304,6 @@ struct BotNotification {
 struct BotTimeOverlay {
   bool enabled;
   void init() { enabled = false; }
-  void render() {}
-};
-
-struct BotWeatherOverlay {
-  bool enabled;
-  bool hasLocation;
-  void init() { enabled = false; hasLocation = false; }
-  void setLocation(float lat, float lon) {}
-  void update() {}
   void render() {}
 };
 
