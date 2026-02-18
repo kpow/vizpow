@@ -22,6 +22,8 @@ extern bool    autoCycle;
 extern uint8_t botBackgroundStyle;
 extern uint8_t lcdBrightness;
 extern bool    hiResMode;
+extern char    weatherLat[12];
+extern char    weatherLon[12];
 
 // ── Load ────────────────────────────────────────────────────────────────────
 void loadSettings() {
@@ -39,6 +41,12 @@ void loadSettings() {
   autoCycle          = prefs.getBool ("autoCyc",  autoCycle);
   botBackgroundStyle = prefs.getUChar("bgStyle",  botBackgroundStyle);
   hiResMode          = prefs.getBool ("hiRes",    hiResMode);
+
+  // Weather location
+  String lat = prefs.getString("wLat", weatherLat);
+  String lon = prefs.getString("wLon", weatherLon);
+  strncpy(weatherLat, lat.c_str(), sizeof(weatherLat) - 1);
+  strncpy(weatherLon, lon.c_str(), sizeof(weatherLon) - 1);
 
   prefs.end();
 
@@ -62,6 +70,8 @@ void saveSettings() {
   prefs.putBool ("autoCyc", autoCycle);
   prefs.putUChar("bgStyle", botBackgroundStyle);
   prefs.putBool ("hiRes",   hiResMode);
+  prefs.putString("wLat",   weatherLat);
+  prefs.putString("wLon",   weatherLon);
 
   prefs.end();
   settingsDirty = false;

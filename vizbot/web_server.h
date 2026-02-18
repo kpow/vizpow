@@ -73,6 +73,23 @@ const char webpage[] PROGMEM = R"rawliteral(
   </div>
 
   <div class="card">
+    <h2>Info Mode</h2>
+    <div class="toggle-row">
+      <span>Show Weather</span>
+      <div class="toggle" id="infoToggle" onclick="toggleInfo()"></div>
+    </div>
+    <div style="margin-top:12px">
+      <div style="color:#aaa;font-size:13px;margin-bottom:6px">Location</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="weatherZip" placeholder="Zip code or city name"
+          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
+        <button onclick="setLocationZip()" id="zipBtn" style="padding:10px 16px">Set</button>
+      </div>
+      <div id="locationInfo" style="color:#6b7;font-size:12px;margin-top:6px"></div>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>WiFi Setup</h2>
     <div id="wifiStatus"></div>
     <div id="wifiScan" style="margin-top:10px">
@@ -159,6 +176,25 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
       api('/bot/hires?v=' + (hiResOn ? 1 : 0));
     }
+    let infoOn = false;
+    function toggleInfo() {
+      infoOn = !infoOn;
+      document.getElementById('infoToggle').className = 'toggle ' + (infoOn ? 'on' : '');
+      api('/info/toggle');
+    }
+    async function setLocationZip() {
+      const zip = document.getElementById('weatherZip').value.trim();
+      if (!zip) return;
+      document.getElementById('zipBtn').textContent = '...';
+      const r = await api('/info/zip?zip=' + encodeURIComponent(zip));
+      document.getElementById('zipBtn').textContent = 'Set';
+      if (r && r.ok) {
+        const d = await r.json();
+        document.getElementById('locationInfo').textContent = 'Set to ' + d.lat + ', ' + d.lon;
+      } else {
+        document.getElementById('locationInfo').textContent = 'Location not found';
+      }
+    }
     function setBotColor(i) { api('/bot/background?v=' + i); }
     function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
 
@@ -180,6 +216,13 @@ const char webpage[] PROGMEM = R"rawliteral(
         if (state.hiRes !== undefined) {
           hiResOn = state.hiRes;
           document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
+        }
+        if (state.infoActive !== undefined) {
+          infoOn = state.infoActive;
+          document.getElementById('infoToggle').className = 'toggle ' + (infoOn ? 'on' : '');
+        }
+        if (state.weatherLat && state.weatherLon) {
+          document.getElementById('locationInfo').textContent = 'Current: ' + state.weatherLat + ', ' + state.weatherLon;
         }
       } catch(e) {}
     }
@@ -347,6 +390,9 @@ void handleRoot() {
 extern bool isBotTimeOverlayEnabled();
 extern bool hiResMode;
 extern String getWledStatusJson();
+extern struct InfoModeData infoMode;
+extern char weatherLat[12];
+extern char weatherLon[12];
 
 void handleState() {
   String json = "{\"brightness\":" + String(brightness) +
@@ -368,6 +414,9 @@ void handleState() {
                   ",\"sta\":" + (sysStatus.staConnected ? "true" : "false") +
                   (sysStatus.staConnected ? ",\"staIP\":\"" + sysStatus.staIP.toString() + "\"" : "") +
                 "},\"wled\":" + getWledStatusJson() +
+                ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
+                ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
+                ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
                 "}";
   server.send(200, "application/json", json);
 }
@@ -441,6 +490,111 @@ void handleBotBackground() {
     cmdSetBgStyle(style);
   }
   server.send(200, "text/plain", "OK");
+}
+
+// ============================================================================
+// Info Mode Handlers
+// ============================================================================
+
+extern void cmdToggleInfoMode();
+extern void requestWeatherFetch();
+
+void handleInfoToggle() {
+  cmdToggleInfoMode();
+  server.send(200, "text/plain", "OK");
+}
+
+void handleInfoLocation() {
+  if (server.hasArg("lat") && server.hasArg("lon")) {
+    strncpy(weatherLat, server.arg("lat").c_str(), sizeof(weatherLat) - 1);
+    weatherLat[sizeof(weatherLat) - 1] = '\0';
+    strncpy(weatherLon, server.arg("lon").c_str(), sizeof(weatherLon) - 1);
+    weatherLon[sizeof(weatherLon) - 1] = '\0';
+    markSettingsDirty();
+    // Re-fetch weather with new location
+    requestWeatherFetch();
+    DBGLN("Location updated: " + String(weatherLat) + ", " + String(weatherLon));
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleInfoZip() {
+  if (!server.hasArg("zip")) {
+    server.send(400, "text/plain", "Missing zip");
+    return;
+  }
+  String zip = server.arg("zip");
+
+  // Use Open-Meteo geocoding API to resolve zip to lat/lon
+  WiFiClient client;
+  client.setTimeout(5000);
+  if (!client.connect("geocoding-api.open-meteo.com", 80)) {
+    server.send(500, "text/plain", "Geocode connect failed");
+    return;
+  }
+
+  String path = "GET /v1/search?name=" + zip + "&count=1&language=en&format=json HTTP/1.1";
+  client.println(path);
+  client.println("Host: geocoding-api.open-meteo.com");
+  client.println("Connection: close");
+  client.println();
+
+  unsigned long timeout = millis();
+  while (client.available() == 0) {
+    if (millis() - timeout > 6000) {
+      client.stop();
+      server.send(500, "text/plain", "Geocode timeout");
+      return;
+    }
+    delay(10);
+  }
+
+  // Read response
+  String response = "";
+  while (client.available()) {
+    response += (char)client.read();
+  }
+  client.stop();
+
+  // Find body after headers
+  int bodyStart = response.indexOf("\r\n\r\n");
+  if (bodyStart < 0) {
+    server.send(500, "text/plain", "Bad geocode response");
+    return;
+  }
+  String body = response.substring(bodyStart + 4);
+
+  // Extract latitude and longitude from JSON
+  int latIdx = body.indexOf("\"latitude\":");
+  int lonIdx = body.indexOf("\"longitude\":");
+  if (latIdx < 0 || lonIdx < 0) {
+    server.send(404, "text/plain", "Location not found");
+    return;
+  }
+
+  // Parse lat
+  int latStart = latIdx + 11;
+  int latEnd = body.indexOf(',', latStart);
+  String latStr = body.substring(latStart, latEnd);
+  latStr.trim();
+
+  // Parse lon
+  int lonStart = lonIdx + 12;
+  int lonEnd = body.indexOf(',', lonStart);
+  if (lonEnd < 0) lonEnd = body.indexOf('}', lonStart);
+  String lonStr = body.substring(lonStart, lonEnd);
+  lonStr.trim();
+
+  strncpy(weatherLat, latStr.c_str(), sizeof(weatherLat) - 1);
+  weatherLat[sizeof(weatherLat) - 1] = '\0';
+  strncpy(weatherLon, lonStr.c_str(), sizeof(weatherLon) - 1);
+  weatherLon[sizeof(weatherLon) - 1] = '\0';
+  markSettingsDirty();
+  requestWeatherFetch();
+
+  String result = "{\"lat\":\"" + String(weatherLat) + "\",\"lon\":\"" + String(weatherLon) + "\"}";
+  server.send(200, "application/json", result);
+  DBGLN("Zip lookup: " + zip + " -> " + String(weatherLat) + ", " + String(weatherLon));
 }
 
 // ============================================================================
@@ -546,6 +700,11 @@ void setupWebServer() {
   server.on("/bot/time", handleBotTime);
   server.on("/bot/hires", handleBotHiRes);
   server.on("/bot/background", handleBotBackground);
+
+  // Info mode endpoints
+  server.on("/info/toggle", handleInfoToggle);
+  server.on("/info/location", handleInfoLocation);
+  server.on("/info/zip", handleInfoZip);
 
   // WiFi provisioning endpoints
   server.on("/wifi/scan", handleWifiScan);

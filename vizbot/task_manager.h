@@ -61,6 +61,7 @@ enum CommandType : uint8_t {
   CMD_TOGGLE_TIME_OVERLAY,
   CMD_SET_AUTOCYCLE,
   CMD_SET_HIRES_MODE,
+  CMD_TOGGLE_INFO_MODE,
 };
 
 // 32-byte command payload — fits all command types
@@ -159,6 +160,13 @@ void cmdSetHiResMode(bool enabled) {
   pushCommand(cmd);
 }
 
+void cmdToggleInfoMode() {
+  Command cmd;
+  cmd.type = CMD_TOGGLE_INFO_MODE;
+  cmd.u8val = 0;
+  pushCommand(cmd);
+}
+
 // ============================================================================
 // Drain Queue — called once per frame from the main loop
 // ============================================================================
@@ -216,6 +224,15 @@ void drainCommandQueue() {
           toggleHiResMode();  // handles screen clear + markSettingsDirty
         }
         break;
+      case CMD_TOGGLE_INFO_MODE: {
+        extern struct InfoModeData infoMode;
+        if (infoMode.active) {
+          infoMode.beginExitTransition();
+        } else {
+          infoMode.beginEnterTransition();
+        }
+        break;
+      }
     }
   }
 }
@@ -238,6 +255,9 @@ extern void pollWifiConnectTask();
 // Defined in wled_display.h — sends queued text to WLED + handles restore timer.
 extern void pollWledDisplay();
 
+// Defined in weather_data.h — checks fetchRequested flag and fetches if needed.
+extern void pollWeatherFetch();
+
 static TaskHandle_t wifiTaskHandle = nullptr;
 
 void wifiServerTask(void* param) {
@@ -245,6 +265,7 @@ void wifiServerTask(void* param) {
     if (wifiEnabled) {
       pollWifiConnectTask();             // connect request + STA poll
       pollWledDisplay();                 // WLED text send + restore
+      pollWeatherFetch();                // Weather API fetch (if requested)
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP
     }

@@ -32,6 +32,7 @@
 #include "effects_ambient.h"
 #include "display_lcd.h"
 #include "bot_mode.h"
+#include "info_mode.h"
 #include "web_server.h"
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
@@ -74,6 +75,17 @@ CRGBPalette16 currentPalette;
 // IMU data
 float accelX = 0, accelY = 0, accelZ = 0;
 float gyroX = 0, gyroY = 0, gyroZ = 0;
+
+// Weather location (runtime, saved to NVS)
+char weatherLat[12] = WEATHER_LAT_DEFAULT;
+char weatherLon[12] = WEATHER_LON_DEFAULT;
+
+// Sustained shake tracking (for info mode toggle)
+unsigned long shakeStartTime = 0;        // When continuous shaking began
+bool shakeSustainedTriggered = false;    // Whether sustained shake already fired
+uint8_t shakeAboveCount = 0;            // Total frames above threshold
+uint8_t shakeGapFrames = 0;             // Frames below threshold (grace period)
+#define SHAKE_GAP_TOLERANCE 6           // Allow up to 6 frames (~200ms) below threshold
 
 // Fisher-Yates shuffle
 void shuffleArray(uint8_t* arr, uint8_t size) {
@@ -262,12 +274,50 @@ void loop() {
     readIMU();
   }
 
-  // Shake reaction for bot (requires working IMU)
+  // Shake detection: sustained shake toggles info mode, quick shake = dizzy
   if (sysStatus.imuReady && botMode.initialized) {
     float mag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
-    if (mag > SHAKE_THRESHOLD && !botMode.shakeReacting) {
-      botMode.onShake();
+
+    // Track sustained shaking for info mode toggle
+    // Acceleration oscillates during shaking, so we allow brief dips below threshold
+    if (mag > SHAKE_SUSTAIN_THRESHOLD) {
+      if (shakeStartTime == 0) {
+        shakeStartTime = millis();
+        shakeAboveCount = 0;
+      }
+      shakeAboveCount++;
+      shakeGapFrames = 0;  // Reset gap counter on any above-threshold frame
+
+      // Check if sustained shake threshold met (~2 seconds of shaking)
+      if (!shakeSustainedTriggered && shakeAboveCount >= 8 &&
+          (millis() - shakeStartTime) >= SUSTAINED_SHAKE_DURATION_MS) {
+        shakeSustainedTriggered = true;
+        DBGLN("Sustained shake detected — toggling info mode");
+        // Toggle info mode
+        if (infoMode.active) {
+          infoMode.beginExitTransition();
+        } else {
+          infoMode.beginEnterTransition();
+        }
+      }
+    } else if (shakeStartTime > 0) {
+      // Below threshold but we were shaking — allow brief gaps
+      shakeGapFrames++;
+      if (shakeGapFrames > SHAKE_GAP_TOLERANCE) {
+        // Shake truly ended — if it was short, treat as quick shake (dizzy)
+        if (!shakeSustainedTriggered && !infoMode.active) {
+          if (shakeAboveCount >= 2 && !botMode.shakeReacting) {
+            botMode.onShake();
+          }
+        }
+        shakeStartTime = 0;
+        shakeAboveCount = 0;
+        shakeGapFrames = 0;
+        shakeSustainedTriggered = false;
+      }
     }
+
+    // Regular interaction tracking (unchanged)
     if (mag > 1.3f) {
       botMode.registerInteraction();
     }
@@ -280,15 +330,17 @@ void loop() {
   }
   #endif
 
-  // Auto-cycle ambient effects and palettes (for bot background overlay)
-  if (autoCycle && millis() - lastChange > 20000) {
-    lastChange = millis();
-    effectIndex = nextShuffledEffect();
-  }
-  if (autoCycle && millis() - lastPaletteChange > 5000) {
-    lastPaletteChange = millis();
-    paletteIndex = nextShuffledPalette();
-    currentPalette = palettes[paletteIndex];
+  // Auto-cycle ambient effects and palettes (skip while in info mode)
+  if (!infoMode.active) {
+    if (autoCycle && millis() - lastChange > 20000) {
+      lastChange = millis();
+      effectIndex = nextShuffledEffect();
+    }
+    if (autoCycle && millis() - lastPaletteChange > 5000) {
+      lastPaletteChange = millis();
+      paletteIndex = nextShuffledPalette();
+      currentPalette = palettes[paletteIndex];
+    }
   }
 
   // Apply queued commands from WiFi/touch before rendering
@@ -300,8 +352,12 @@ void loop() {
   // Flush dirty settings to NVS (debounced — waits 2s after last change)
   flushSettingsIfDirty();
 
-  // Run bot mode (handles its own LCD rendering)
-  runBotMode();
+  // Run the appropriate mode
+  if (infoMode.active) {
+    runInfoMode();
+  } else {
+    runBotMode();
+  }
 
   delay(BOT_FRAME_DELAY_MS);
 }

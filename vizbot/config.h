@@ -102,6 +102,13 @@
 #define WIFI_AP_LINGER_MS 30000            // Keep AP alive after STA connects (user needs time to switch)
 #define WIFI_NVS_NAMESPACE "vizwifi"       // NVS namespace for WiFi credentials
 
+// Info Mode — sustained shake to toggle weather/info view
+#define SUSTAINED_SHAKE_DURATION_MS 500    // How long to shake to trigger info mode
+#define SHAKE_SUSTAIN_THRESHOLD     1.2f   // Accel magnitude for sustained shake detection
+#define WEATHER_REFRESH_MS          600000 // 10 minutes between weather API calls
+#define WEATHER_LAT_DEFAULT         "37.54"
+#define WEATHER_LON_DEFAULT         "-77.43"
+
 // Debug serial output (comment out to save ~700 bytes of flash)
 #define DEBUG_SERIAL
 #ifdef DEBUG_SERIAL

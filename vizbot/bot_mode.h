@@ -387,8 +387,8 @@ void renderBotAmbientBackground() {
 // then flush the whole buffer to the display in one atomic SPI transfer.
 // This is the standard double-buffer / sprite technique for TFT displays.
 
-static Arduino_Canvas *botCanvas = nullptr;
-static Arduino_GFX *gfxReal = nullptr;   // The actual hardware display
+Arduino_Canvas *botCanvas = nullptr;
+Arduino_GFX *gfxReal = nullptr;   // The actual hardware display
 static bool botFirstFrame = true;
 
 void renderBotMode() {

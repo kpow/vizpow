@@ -290,7 +290,11 @@ void drawMenu() {
     drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, autoCycle ? "AUTO ON" : "AUTO OFF", autoCycle ? 0x0400 : 0x4000);
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 2: (empty for now)
+    // Row 2: Info mode toggle
+    {
+      extern struct InfoModeData infoMode;
+      drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, infoMode.active ? "INFO ON" : "INFO OFF", infoMode.active ? 0x0400 : 0x4000);
+    }
     rowY += BTN_HEIGHT + BTN_GAP;
 
     // Row 3: (empty for now)
@@ -394,6 +398,18 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
         if (col == 0) toggleWifiAP();
         else touchToggleAutoCycle();
         break;
+      case 1:  // Info mode toggle
+        if (col == 0) {
+          extern struct InfoModeData infoMode;
+          if (infoMode.active) {
+            infoMode.beginExitTransition();
+          } else {
+            infoMode.beginEnterTransition();
+          }
+          hideMenu();
+          return false;
+        }
+        break;
       case 3:  // Back | Close
         if (col == 0) { menuPage = 0; }
         else return true;
@@ -458,11 +474,17 @@ void handleTouch() {
       waitingForLift = true;
     }
   } else {
-    // Finger lifted - short tap triggers bot reaction
+    // Finger lifted - short tap triggers bot reaction or info page cycle
     if (touchStartTime > 0 && !longPressTriggered && !menuVisible &&
         (now - touchStartTime < LONG_PRESS_MS)) {
-      botMode.onTap();
-      DBGLN("Bot tap reaction");
+      extern struct InfoModeData infoMode;
+      if (infoMode.active) {
+        infoMode.nextPage();
+        DBGLN("Info page cycle");
+      } else {
+        botMode.onTap();
+        DBGLN("Bot tap reaction");
+      }
     }
 
     touchStartTime = 0;
