@@ -32,9 +32,20 @@
 // Retry backoff after failure (don't spam unreachable device)
 #define WLED_RETRY_BACKOFF_MS 30000
 
-// Scroll time: base + per-character (ms). Gives text time to scroll across 32px.
-#define WLED_SCROLL_BASE_MS 12000
-#define WLED_SCROLL_PER_CHAR_MS 1200
+// Display geometry
+#define WLED_DISPLAY_WIDTH_PX  32
+#define WLED_CHAR_WIDTH_PX     4   // ~4px per char with WLED's default font
+
+// Max chars that fit on screen — threshold for hold vs scroll behavior
+#define WLED_STATIC_MAX_CHARS  8
+
+// Hold duration (ms) — how long short text stays on screen before scrolling off
+#define WLED_HOLD_MS  3000
+
+// Estimated ms-per-pixel for scroll timing at default speed (200).
+// Used to calculate single-pass and scroll-off durations.
+// Needs empirical tuning on real hardware.
+#define WLED_SCROLL_MS_PER_PX  130
 
 // ============================================================================
 // WLED State — shared between cores
@@ -43,6 +54,13 @@
 enum WledSendState : uint8_t {
   WLED_IDLE = 0,
   WLED_SEND_REQUESTED,
+};
+
+// Animation phases for static hold + scroll-off
+enum WledPhase : uint8_t {
+  WLED_PHASE_NONE = 0,      // Idle or single-pass scroll (long text)
+  WLED_PHASE_HOLD,          // Text displayed statically (sx=0)
+  WLED_PHASE_SCROLL_OFF,    // Text scrolling off to the left
 };
 
 struct WledDisplayData {
@@ -67,6 +85,11 @@ struct WledDisplayData {
 
   // Restore timer (Core 0 only)
   unsigned long restoreAtMs;
+
+  // Animation phase state (Core 0 only)
+  WledPhase phase;
+  unsigned long phaseEndMs;
+  uint8_t currentTextLen;
 
   // Runtime state (Core 0 only)
   bool reachable;
@@ -101,6 +124,9 @@ void loadWledSettings() {
   wledData.hasSavedState = false;
   wledData.restoreAtMs   = 0;
   wledData.savedFx       = -1;
+  wledData.phase         = WLED_PHASE_NONE;
+  wledData.phaseEndMs    = 0;
+  wledData.currentTextLen = 0;
 
   DBG("WLED: ");
   DBG(wledData.enabled ? "ON" : "OFF");
@@ -284,6 +310,37 @@ void wledQueueText(const char* text, uint16_t durationMs) {
 // ============================================================================
 
 void pollWledDisplay() {
+  // ---- Phase transitions (hold → scroll-off → restore) ----
+  if (wledData.phase == WLED_PHASE_HOLD && millis() >= wledData.phaseEndMs) {
+    // Hold complete — start scrolling text off screen
+    char body[80];
+    snprintf(body, sizeof(body),
+      "{\"transition\":0,\"seg\":{\"id\":%d,\"sx\":%d}}",
+      WLED_SEGMENT_ID, wledData.scrollSpeed);
+
+    if (wledHttpPost(body)) {
+      wledData.phase = WLED_PHASE_SCROLL_OFF;
+      unsigned long scrollOffMs = (unsigned long)(WLED_DISPLAY_WIDTH_PX +
+        wledData.currentTextLen * WLED_CHAR_WIDTH_PX) * WLED_SCROLL_MS_PER_PX;
+      wledData.phaseEndMs = millis() + scrollOffMs;
+      DBG("WLED: hold done, scrolling off in ");
+      DBG(scrollOffMs);
+      DBGLN("ms");
+    } else {
+      // Failed to update speed — just trigger restore
+      wledData.phase = WLED_PHASE_NONE;
+      wledData.restoreAtMs = millis();
+      DBGLN("WLED: scroll-off send failed, restoring");
+    }
+  }
+
+  if (wledData.phase == WLED_PHASE_SCROLL_OFF && millis() >= wledData.phaseEndMs) {
+    // Scroll-off complete — trigger restore
+    wledData.phase = WLED_PHASE_NONE;
+    wledData.restoreAtMs = millis();
+    DBGLN("WLED: scroll-off done");
+  }
+
   // ---- Restore previous effect (jump cut back) ----
   if (wledData.restoreAtMs > 0 && millis() >= wledData.restoreAtMs) {
     wledData.restoreAtMs = 0;
@@ -306,7 +363,7 @@ void pollWledDisplay() {
     }
   }
 
-  // ---- Send scrolling text ----
+  // ---- Send text ----
   if (wledData.sendState != WLED_SEND_REQUESTED) return;
 
   // Consume the request
@@ -318,6 +375,10 @@ void pollWledDisplay() {
       return;
     }
   }
+
+  // Cancel any active phase
+  wledData.phase = WLED_PHASE_NONE;
+  wledData.phaseEndMs = 0;
 
   if (wledData.hasSavedState) {
     // Already mid-display — keep original saved state, cancel pending restore
@@ -344,27 +405,47 @@ void pollWledDisplay() {
     DBGLN("\"");
   }
 
-  // Send scrolling text
+  // Determine text length and display mode
+  uint8_t textLen = strlen(wledData.textBuffer);
+  wledData.currentTextLen = textLen;
+  bool useHold = (textLen <= WLED_STATIC_MAX_CHARS);
+
+  // Send text — short text uses sx=0 (static), long text uses scroll speed
   char body[160];
   snprintf(body, sizeof(body),
     "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
     WLED_SEGMENT_ID,
     WLED_FX_SCROLL_TEXT,
-    wledData.scrollSpeed,
+    useHold ? 0 : wledData.scrollSpeed,
     wledData.r, wledData.g, wledData.b,
     wledData.textBuffer);
 
   if (wledHttpPost(body)) {
     wledData.reachable = true;
 
-    // Static display — use the speech bubble duration directly
-    unsigned long displayTime = max((unsigned long)wledData.textDurationMs,
-                                    (unsigned long)WLED_SCROLL_BASE_MS);
-    wledData.restoreAtMs = millis() + displayTime;
+    if (useHold) {
+      // Short text: appear instantly (sx=0), hold, then scroll off
+      wledData.phase = WLED_PHASE_HOLD;
+      wledData.phaseEndMs = millis() + WLED_HOLD_MS;
+      wledData.restoreAtMs = 0;  // phases handle restore
 
-    DBG("WLED: sent OK, restore in ");
-    DBG(displayTime);
-    DBGLN("ms");
+      DBG("WLED: static hold \"");
+      DBG(wledData.textBuffer);
+      DBG("\" for ");
+      DBG(WLED_HOLD_MS);
+      DBGLN("ms");
+    } else {
+      // Long text: single-pass scroll, no looping
+      unsigned long onePassMs = (unsigned long)(WLED_DISPLAY_WIDTH_PX +
+        textLen * WLED_CHAR_WIDTH_PX) * WLED_SCROLL_MS_PER_PX;
+      wledData.restoreAtMs = millis() + onePassMs;
+
+      DBG("WLED: scroll \"");
+      DBG(wledData.textBuffer);
+      DBG("\" one-pass ");
+      DBG(onePassMs);
+      DBGLN("ms");
+    }
   } else {
     wledData.reachable = false;
     wledData.lastFailTime = millis();
