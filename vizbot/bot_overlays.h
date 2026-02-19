@@ -41,7 +41,7 @@ struct BotSpeechBubble {
   // Animation timing
   static const uint16_t POP_IN_MS = 150;
   static const uint16_t FADE_OUT_MS = 200;
-  static const uint16_t DEFAULT_DURATION = 3500;  // 3.5 seconds visible
+  static const uint16_t DEFAULT_DURATION = 5000;  // 5 seconds visible
 
   // Bubble position and size
   int16_t bubbleX, bubbleY, bubbleW, bubbleH;
@@ -63,15 +63,16 @@ struct BotSpeechBubble {
 
     // Calculate bubble dimensions based on text
     uint8_t textLen = strlen(text);
-    // Text size 2 = 12x16 per char
-    bubbleW = textLen * 12 + 20;  // 10px padding each side
+    // Text size 1 = 6x8 per char
+    bubbleW = textLen * 6 + 20;   // 10px padding each side
     if (bubbleW > 234) bubbleW = 234;  // Max width (near full screen)
-    bubbleH = 36;  // 16px text + 20px padding
+    bubbleH = 20;  // 8px text + 12px padding
     bubbleX = (LCD_WIDTH - bubbleW) / 2;  // Centered
     bubbleY = 220;  // Below the face
 
     // Forward speech text to WLED display (if configured)
-    wledQueueText(text, durationMs);
+    // Add POP_IN_MS offset so WLED clears as LCD bubble starts fading
+    wledQueueText(text, durationMs + POP_IN_MS);
   }
 
   // Show from PROGMEM string
@@ -139,14 +140,14 @@ struct BotSpeechBubble {
 
     // Draw text (only when fully visible or popping in past 50%)
     if (scale > 0.5f) {
-      gfx->setTextSize(2);
+      gfx->setTextSize(1);
       gfx->setTextColor(OVERLAY_TEXT);
 
-      // Center text in bubble (text size 2 = 12x16 per char)
+      // Center text in bubble (text size 1 = 6x8 per char)
       uint8_t textLen = strlen(text);
-      int16_t textW = textLen * 12;
+      int16_t textW = textLen * 6;
       int16_t textX = sx + (sw - textW) / 2;
-      int16_t textY = sy + (sh - 16) / 2;
+      int16_t textY = sy + (sh - 8) / 2;
 
       gfx->setCursor(textX, textY);
       gfx->print(text);
@@ -287,8 +288,8 @@ struct BotTimeOverlay {
 struct BotSpeechBubble {
   bool active;
   void init() { active = false; }
-  void show(const char* msg, uint16_t d = 3500) {}
-  void showP(const char* p, uint16_t d = 3500) {}
+  void show(const char* msg, uint16_t d = 5000) {}
+  void showP(const char* p, uint16_t d = 5000) {}
   void update() {}
   void render() {}
 };
