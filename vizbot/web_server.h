@@ -643,6 +643,7 @@ extern void wledSetIP(const char* ip);
 extern void wledSetEnabled(bool on);
 extern void wledSetColor(uint8_t r, uint8_t g, uint8_t b);
 extern void wledSetSpeed(uint8_t spd);
+extern void wledSetIx(uint8_t ix);
 extern String getWledStatusJson();
 extern void wledQueueText(const char* text, uint16_t durationMs);
 
@@ -660,6 +661,9 @@ void handleWledConfig() {
   if (server.hasArg("speed")) {
     wledSetSpeed(constrain(server.arg("speed").toInt(), 0, 255));
   }
+  if (server.hasArg("ix")) {
+    wledSetIx(constrain(server.arg("ix").toInt(), 0, 255));
+  }
   if (server.hasArg("r") && server.hasArg("g") && server.hasArg("b")) {
     wledSetColor(
       constrain(server.arg("r").toInt(), 0, 255),
@@ -670,7 +674,7 @@ void handleWledConfig() {
 }
 
 void handleWledTest() {
-  wledQueueText("Hello WLED!", 4000);
+  wledQueueText("Hello", 5000);
   server.send(200, "text/plain", "OK");
 }
 
