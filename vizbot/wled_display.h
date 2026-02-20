@@ -194,17 +194,15 @@ void wledPixelDrawText(const char* text, uint8_t r, uint8_t g, uint8_t b) {
 // ============================================================================
 
 // Remap logical row-major pixel buffer to physical LED order for DDP.
-// Physical strip: horizontal rows, right-to-left start (Top Right), serpentine.
-//   row 0 (y=0): LEDs 0-31,   x=31→0  (right to left)
-//   row 1 (y=1): LEDs 32-63,  x=0→31  (left to right, serpentine)
-//   row 2 (y=2): LEDs 64-95,  x=31→0  ...
+// Physical strip: all rows run right-to-left (no serpentine).
+//   LED 0 = top-right (x=31, y=0)
+//   LED 31 = top-left (x=0, y=0)
+//   LED 32 = second-row right (x=31, y=1)  ← same direction, not reversed
 static void wledRemapPixels(uint8_t* ddpOut, const uint8_t* logicalBuf) {
   for (uint8_t y = 0; y < WLED_DISPLAY_HEIGHT; y++) {
     for (uint8_t x = 0; x < WLED_DISPLAY_WIDTH; x++) {
       uint16_t srcOff = (y * WLED_DISPLAY_WIDTH + x) * 3;
-      uint16_t ledIdx = (y & 1)
-        ? y * WLED_DISPLAY_WIDTH + x                          // odd row: left→right
-        : y * WLED_DISPLAY_WIDTH + (WLED_DISPLAY_WIDTH - 1 - x); // even row: right→left
+      uint16_t ledIdx = y * WLED_DISPLAY_WIDTH + (WLED_DISPLAY_WIDTH - 1 - x); // all rows: right→left
       uint16_t dstOff = ledIdx * 3;
       ddpOut[dstOff]     = logicalBuf[srcOff];
       ddpOut[dstOff + 1] = logicalBuf[srcOff + 1];
