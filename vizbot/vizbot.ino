@@ -34,6 +34,7 @@
 #include "bot_mode.h"
 #include "info_mode.h"
 #include "wled_display.h"
+#include "wled_weather_view.h"
 #include "web_server.h"
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
@@ -353,6 +354,20 @@ void loop() {
   if (wledPal >= 0) {
     paletteIndex = (uint8_t)wledPal;
     currentPalette = palettes[paletteIndex];
+  }
+
+  // Drive WLED weather display while info mode is active
+  static bool prevInfoActive = false;
+  if (infoMode.active && !prevInfoActive) {
+    wledWeatherViewReset();                    // reset card cycle on entry
+  }
+  if (!infoMode.active && prevInfoActive && wledIsSyncing()) {
+    wledWeatherViewOnExit();                   // linger 2.5s before WLED restores
+  }
+  prevInfoActive = infoMode.active;
+
+  if (infoMode.active && wledIsSyncing()) {
+    wledWeatherViewUpdate();
   }
 
   // Poll WiFi provisioning state machine (scan results, STA connect, AP linger)
