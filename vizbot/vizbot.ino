@@ -33,6 +33,7 @@
 #include "display_lcd.h"
 #include "bot_mode.h"
 #include "info_mode.h"
+#include "wled_display.h"
 #include "web_server.h"
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
@@ -40,7 +41,6 @@
 #endif
 #include "task_manager.h"
 #include "wifi_provisioning.h"
-#include "wled_display.h"
 #include "boot_sequence.h"
 
 // Global objects

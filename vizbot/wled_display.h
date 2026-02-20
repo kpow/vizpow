@@ -3,27 +3,39 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <Preferences.h>
 #include "config.h"
 #include "system_status.h"
+#include "wled_font.h"
 
 // ============================================================================
-// WLED Display — Forward speech bubble text to WLED LED matrix
+// WLED Display — Direct pixel control via DDP (Distributed Display Protocol)
 // ============================================================================
-// Sends scrolling text to a WLED-controlled 32x8 LED pixel grid on the LAN.
-// Uses WLED's HTTP JSON API with scrolling text effect (FX 122).
+// Renders a 32x8 pixel buffer on the ESP32 and transmits raw RGB data to a
+// WLED-controlled LED matrix over UDP using DDP. This gives full creative
+// freedom — custom fonts, pixel art, sprites, animations.
 //
 // Cross-core design (matches wifi_provisioning.h pattern):
-//   Core 1 (render loop) calls wledQueueText() from speechBubble.show()
-//   Core 0 (WiFi task) calls pollWledDisplay() to send HTTP requests
+//   Core 1 (render loop) calls wledQueueText() or wledQueueFrame()
+//   Core 0 (WiFi task)   calls pollWledDisplay() to send DDP + manage restore
 //
-// Uses raw WiFiClient — no HTTPClient library (~30KB flash savings).
+// DDP is first-class in WLED (enabled by default since 0.13). WLED auto-enters
+// "realtime mode" on DDP frames and auto-resumes its previous effect when
+// frames stop (2.5s timeout). We use HTTP restore for instant cut-back.
 // ============================================================================
 
-// WLED scrolling text effect index
-#define WLED_FX_SCROLL_TEXT 122
+// Display geometry
+#define WLED_DISPLAY_WIDTH   32
+#define WLED_DISPLAY_HEIGHT  8
+#define WLED_NUM_PIXELS      (WLED_DISPLAY_WIDTH * WLED_DISPLAY_HEIGHT)  // 256
+#define WLED_PIXEL_BYTES     (WLED_NUM_PIXELS * 3)                       // 768
 
-// Default segment ID to target
+// DDP protocol constants
+#define WLED_DDP_PORT        4048
+#define WLED_DDP_HEADER_SIZE 10
+
+// Default segment ID to target (for HTTP restore)
 #define WLED_SEGMENT_ID 0
 
 // Timeouts
@@ -32,36 +44,42 @@
 // Retry backoff after failure (don't spam unreachable device)
 #define WLED_RETRY_BACKOFF_MS 30000
 
-// Display geometry
-#define WLED_DISPLAY_WIDTH_PX  32
-
 // ============================================================================
 // WLED State — shared between cores
 // ============================================================================
 
 enum WledSendState : uint8_t {
   WLED_IDLE = 0,
-  WLED_SEND_REQUESTED,
+  WLED_FRAME_REQUESTED,       // DDP frame ready in pixel buffer
 };
 
-// Animation phases for static hold
+// Animation phases for hold timer
 enum WledPhase : uint8_t {
-  WLED_PHASE_NONE = 0,      // Idle — no text active
-  WLED_PHASE_HOLD,          // Text displayed statically (sx=0)
+  WLED_PHASE_NONE = 0,        // Idle — nothing active
+  WLED_PHASE_HOLD,            // Frame displayed, waiting for hold to expire
 };
 
 struct WledDisplayData {
   // Configuration (persisted in NVS)
   char ip[16];
   bool enabled;
-  uint8_t scrollSpeed;     // 0-255 (kept for restore compatibility)
-  uint8_t textIx;          // 0-255 WLED intensity/font-size param
-  uint8_t r, g, b;         // text color
+  uint8_t scrollSpeed;       // 0-255 (kept for NVS compatibility)
+  uint8_t textIx;            // 0-255 (kept for NVS compatibility)
+  uint8_t r, g, b;           // text color
 
-  // Cross-core text buffer (Core 1 writes, Core 0 reads)
+  // Pixel buffer — 256 pixels × 3 bytes RGB (BSS, not stack)
+  uint8_t pixelBuffer[WLED_PIXEL_BYTES];
+
+  // DDP transport (Core 0 only)
+  WiFiUDP udp;
+  uint8_t ddpSequence;
+
+  // Cross-core signaling (Core 1 writes, Core 0 reads)
   volatile WledSendState sendState;
+  uint16_t frameDurationMs;
+
+  // Text buffer for wledQueueText compatibility (Core 1 writes, Core 0 reads)
   char textBuffer[32];
-  uint16_t textDurationMs;
 
   // Saved segment state for restore (Core 0 only)
   int savedFx;
@@ -114,6 +132,9 @@ void loadWledSettings() {
   wledData.savedFx       = -1;
   wledData.phase         = WLED_PHASE_NONE;
   wledData.phaseEndMs    = 0;
+  wledData.ddpSequence   = 0;
+
+  memset(wledData.pixelBuffer, 0, WLED_PIXEL_BYTES);
 
   DBG("WLED: ");
   DBG(wledData.enabled ? "ON" : "OFF");
@@ -135,6 +156,90 @@ void saveWledSettings() {
 
   prefs.end();
   DBGLN("WLED settings saved");
+}
+
+// ============================================================================
+// Pixel buffer drawing functions — called from Core 1
+// ============================================================================
+
+void wledPixelClear() {
+  memset(wledData.pixelBuffer, 0, WLED_PIXEL_BYTES);
+}
+
+void wledPixelSet(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b) {
+  if (x >= WLED_DISPLAY_WIDTH || y >= WLED_DISPLAY_HEIGHT) return;
+  uint16_t offset = (y * WLED_DISPLAY_WIDTH + x) * 3;
+  wledData.pixelBuffer[offset]     = r;
+  wledData.pixelBuffer[offset + 1] = g;
+  wledData.pixelBuffer[offset + 2] = b;
+}
+
+void wledPixelFill(uint8_t r, uint8_t g, uint8_t b) {
+  for (uint16_t i = 0; i < WLED_PIXEL_BYTES; i += 3) {
+    wledData.pixelBuffer[i]     = r;
+    wledData.pixelBuffer[i + 1] = g;
+    wledData.pixelBuffer[i + 2] = b;
+  }
+}
+
+// Render centered text into the pixel buffer using the 3x5 font
+void wledPixelDrawText(const char* text, uint8_t r, uint8_t g, uint8_t b) {
+  wledFontDrawString(wledData.pixelBuffer,
+                     WLED_DISPLAY_WIDTH, WLED_DISPLAY_HEIGHT,
+                     text, r, g, b);
+}
+
+// ============================================================================
+// DDP Transport — called from Core 0 (WiFi task)
+// ============================================================================
+
+// Remap logical row-major pixel buffer to physical LED order for DDP.
+// Physical strip: all rows run right-to-left (no serpentine).
+//   LED 0 = top-right (x=31, y=0)
+//   LED 31 = top-left (x=0, y=0)
+//   LED 32 = second-row right (x=31, y=1)  ← same direction, not reversed
+static void wledRemapPixels(uint8_t* ddpOut, const uint8_t* logicalBuf) {
+  for (uint8_t y = 0; y < WLED_DISPLAY_HEIGHT; y++) {
+    for (uint8_t x = 0; x < WLED_DISPLAY_WIDTH; x++) {
+      uint16_t srcOff = (y * WLED_DISPLAY_WIDTH + x) * 3;
+      uint16_t ledIdx = y * WLED_DISPLAY_WIDTH + (WLED_DISPLAY_WIDTH - 1 - x); // all rows: right→left
+      uint16_t dstOff = ledIdx * 3;
+      ddpOut[dstOff]     = logicalBuf[srcOff];
+      ddpOut[dstOff + 1] = logicalBuf[srcOff + 1];
+      ddpOut[dstOff + 2] = logicalBuf[srcOff + 2];
+    }
+  }
+}
+
+// Send the pixel buffer to WLED via DDP over UDP.
+// DDP header is 10 bytes, followed by 768 bytes of RGB data.
+// Total packet: 778 bytes — well within UDP MTU of 1472 bytes.
+bool wledSendDDP() {
+  IPAddress targetIP;
+  if (!targetIP.fromString(wledData.ip)) return false;
+
+  // Build 10-byte DDP header
+  uint8_t header[WLED_DDP_HEADER_SIZE];
+  header[0] = 0x41;                            // Version 1 + push flag
+  header[1] = wledData.ddpSequence & 0x0F;     // Sequence (0-15, wrapping)
+  header[2] = 0x01;                            // RGB, 8-bit per channel
+  header[3] = 0x01;                            // Device ID
+  header[4] = 0x00;                            // Data offset (big-endian)
+  header[5] = 0x00;
+  header[6] = 0x00;
+  header[7] = 0x00;
+  header[8] = (WLED_PIXEL_BYTES >> 8) & 0xFF;  // Data length high byte
+  header[9] = WLED_PIXEL_BYTES & 0xFF;          // Data length low byte
+
+  wledData.ddpSequence = (wledData.ddpSequence + 1) & 0x0F;
+
+  uint8_t ddpPayload[WLED_PIXEL_BYTES];
+  wledRemapPixels(ddpPayload, wledData.pixelBuffer);
+
+  if (!wledData.udp.beginPacket(targetIP, WLED_DDP_PORT)) return false;
+  wledData.udp.write(header, WLED_DDP_HEADER_SIZE);
+  wledData.udp.write(ddpPayload, WLED_PIXEL_BYTES);
+  return wledData.udp.endPacket();
 }
 
 // ============================================================================
@@ -279,18 +384,38 @@ bool wledCaptureState() {
 }
 
 // ============================================================================
-// Queue Text — called from Core 1 (render loop) via speechBubble.show()
+// Queue functions — called from Core 1 (render loop)
 // ============================================================================
 
+// Queue a raw pixel frame for DDP transmission.
+// The pixel buffer must already be populated before calling this.
+void wledQueueFrame(uint16_t durationMs) {
+  if (!wledData.enabled) return;
+  if (wledData.ip[0] == '\0') return;
+  if (!sysStatus.staConnected) return;
+
+  wledData.frameDurationMs = durationMs;
+  wledData.sendState = WLED_FRAME_REQUESTED;
+}
+
+// Queue text for display — renders into pixel buffer, then queues DDP frame.
+// Drop-in replacement for old FX 122 path. All existing callers work unchanged.
 void wledQueueText(const char* text, uint16_t durationMs) {
   if (!wledData.enabled) return;
   if (wledData.ip[0] == '\0') return;
   if (!sysStatus.staConnected) return;
 
+  // Store text for debug logging
   strncpy(wledData.textBuffer, text, 31);
   wledData.textBuffer[31] = '\0';
-  wledData.textDurationMs = durationMs;
-  wledData.sendState = WLED_SEND_REQUESTED;
+
+  // Render text into pixel buffer
+  wledPixelClear();
+  wledPixelDrawText(text, wledData.r, wledData.g, wledData.b);
+
+  // Queue as DDP frame
+  wledData.frameDurationMs = durationMs;
+  wledData.sendState = WLED_FRAME_REQUESTED;
 }
 
 // ============================================================================
@@ -305,14 +430,14 @@ void pollWledDisplay() {
     DBGLN("WLED: hold done, restoring");
   }
 
-  // ---- Restore previous effect (instant cut back) ----
+  // ---- Restore previous effect via HTTP (instant, no 2.5s DDP timeout) ----
   if (wledData.restoreAtMs > 0 && millis() >= wledData.restoreAtMs) {
     wledData.restoreAtMs = 0;
 
     if (wledData.hasSavedState) {
       char body[160];
       snprintf(body, sizeof(body),
-        "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"ix\":%d,\"pal\":%d,\"n\":\"%s\"}}",
+        "{\"on\":true,\"live\":false,\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":%d,\"ix\":%d,\"pal\":%d,\"n\":\"%s\"}}",
         WLED_SEGMENT_ID,
         wledData.savedFx, wledData.savedSx,
         wledData.savedIx, wledData.savedPal,
@@ -327,8 +452,8 @@ void pollWledDisplay() {
     }
   }
 
-  // ---- Send text ----
-  if (wledData.sendState != WLED_SEND_REQUESTED) return;
+  // ---- Send DDP frame ----
+  if (wledData.sendState != WLED_FRAME_REQUESTED) return;
 
   // Consume the request
   wledData.sendState = WLED_IDLE;
@@ -347,56 +472,36 @@ void pollWledDisplay() {
   if (wledData.hasSavedState) {
     // Already mid-display — keep original saved state, cancel pending restore
     wledData.restoreAtMs = 0;
-    DBG("WLED: replacing with \"");
+    DBG("WLED: replacing frame \"");
     DBG(wledData.textBuffer);
     DBGLN("\"");
   } else {
-    // First text — capture current state for later restore
+    // First frame — capture current state for later restore
     if (wledCaptureState()) {
-      DBG("WLED: captured, sending \"");
+      DBG("WLED: captured, sending DDP \"");
     } else {
-      DBG("WLED: capture failed, sending \"");
+      DBG("WLED: capture failed, sending DDP \"");
     }
     DBG(wledData.textBuffer);
     DBGLN("\"");
   }
 
-  // Force WLED to reinitialize effect 122 by briefly switching away.
-  // WLED only resets scroll position when the effect number actually changes,
-  // so we always bounce through fx=0 to ensure text pops on without scrolling.
-  char resetBody[80];
-  snprintf(resetBody, sizeof(resetBody),
-    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":0}}",
-    WLED_SEGMENT_ID);
-  wledHttpPost(resetBody);
-
-  // Send text — always static (sx=0), no scrolling, with ix for font size
-  char body[200];
-  snprintf(body, sizeof(body),
-    "{\"transition\":0,\"seg\":{\"id\":%d,\"fx\":%d,\"sx\":0,\"ix\":%d,\"col\":[[%d,%d,%d]],\"n\":\"%s\"}}",
-    WLED_SEGMENT_ID,
-    WLED_FX_SCROLL_TEXT,
-    wledData.textIx,
-    wledData.r, wledData.g, wledData.b,
-    wledData.textBuffer);
-
-  if (wledHttpPost(body)) {
+  // Send pixel buffer via DDP
+  if (wledSendDDP()) {
     wledData.reachable = true;
 
-    // Static hold: text appears instantly, stays for duration, then restores
+    // Hold: frame displayed, wait for duration, then restore
     wledData.phase = WLED_PHASE_HOLD;
-    wledData.phaseEndMs = millis() + wledData.textDurationMs;
+    wledData.phaseEndMs = millis() + wledData.frameDurationMs;
     wledData.restoreAtMs = 0;
 
-    DBG("WLED: hold \"");
-    DBG(wledData.textBuffer);
-    DBG("\" for ");
-    DBG(wledData.textDurationMs);
+    DBG("WLED: DDP frame for ");
+    DBG(wledData.frameDurationMs);
     DBGLN("ms");
   } else {
     wledData.reachable = false;
     wledData.lastFailTime = millis();
-    DBGLN("WLED: send failed");
+    DBGLN("WLED: DDP send failed");
   }
 }
 
