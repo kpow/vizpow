@@ -338,13 +338,22 @@ void loop() {
     }
     if (autoCycle && millis() - lastPaletteChange > 5000) {
       lastPaletteChange = millis();
-      paletteIndex = nextShuffledPalette();
-      currentPalette = palettes[paletteIndex];
+      if (!wledIsSyncing()) {
+        paletteIndex = nextShuffledPalette();
+        currentPalette = palettes[paletteIndex];
+      }
     }
   }
 
   // Apply queued commands from WiFi/touch before rendering
   drainCommandQueue();
+
+  // Sync local palette to WLED when bot sends DDP frames
+  int8_t wledPal = wledConsumePalSync();
+  if (wledPal >= 0) {
+    paletteIndex = (uint8_t)wledPal;
+    currentPalette = palettes[paletteIndex];
+  }
 
   // Poll WiFi provisioning state machine (scan results, STA connect, AP linger)
   pollWifiProvisioning();

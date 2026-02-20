@@ -44,6 +44,9 @@
 // Retry backoff after failure (don't spam unreachable device)
 #define WLED_RETRY_BACKOFF_MS 30000
 
+// How often to poll WLED palette when idle (faster than WLED's typical ~5s cycle)
+#define WLED_PAL_POLL_INTERVAL_MS 1000
+
 // ============================================================================
 // WLED State — shared between cores
 // ============================================================================
@@ -96,9 +99,13 @@ struct WledDisplayData {
   WledPhase phase;
   unsigned long phaseEndMs;
 
+  // Palette sync (Core 0 writes, Core 1 reads)
+  volatile int8_t pendingPalSync;   // -1 = none; ≥0 = local palette index to apply
+
   // Runtime state (Core 0 only)
   bool reachable;
   unsigned long lastFailTime;
+  unsigned long lastPalPollMs;
 };
 
 static WledDisplayData wledData = {};
@@ -133,6 +140,7 @@ void loadWledSettings() {
   wledData.phase         = WLED_PHASE_NONE;
   wledData.phaseEndMs    = 0;
   wledData.ddpSequence   = 0;
+  wledData.pendingPalSync = -1;
 
   memset(wledData.pixelBuffer, 0, WLED_PIXEL_BYTES);
 
@@ -328,6 +336,39 @@ String wledHttpGet(const char* path) {
 // Capture current WLED segment state (for restore)
 // ============================================================================
 
+// Map WLED palette ID → local palettes[] index (best visual match)
+// WLED IDs 0-5 are meta/dynamic; 6-11 are FastLED standard palettes.
+static const int8_t WLED_TO_LOCAL_PAL[] = {
+  0,  // 0  Default          → Rainbow
+  0,  // 1  Random Cycle     → Rainbow
+  0,  // 2  Color 1          → Rainbow
+  0,  // 3  Colors 1&2       → Rainbow
+  7,  // 4  Color Gradient   → Sunset
+  0,  // 5  Colors Only      → Rainbow
+  4,  // 6  Party            → PartyColors_p
+  6,  // 7  Cloud            → CloudColors_p
+  2,  // 8  Lava             → LavaColors_p
+  1,  // 9  Ocean            → OceanColors_p
+  3,  // 10 Forest           → ForestColors_p
+  0,  // 11 Rainbow          → RainbowColors_p
+  0,  // 12 Rainbow Bands    → Rainbow
+  7,  // 13 Sunset           → Sunset
+  8,  // 14 Rivendell        → Cyber (closest cool-green)
+  1,  // 15 Analogous        → Ocean
+  9,  // 16 Splash           → Toxic
+  10, // 17 Pastel           → Ice
+  5,  // 18 Sunset 2         → HeatColors_p
+  11, // 19 Beech            → Blood
+  12, // 20 Vintage          → Vaporwave
+};
+#define WLED_TO_LOCAL_PAL_SIZE (sizeof(WLED_TO_LOCAL_PAL)/sizeof(WLED_TO_LOCAL_PAL[0]))
+
+inline int8_t wledMapPalette(int wledPal) {
+  if (wledPal < 0) return 0;
+  if ((uint8_t)wledPal < WLED_TO_LOCAL_PAL_SIZE) return WLED_TO_LOCAL_PAL[wledPal];
+  return 0;  // Unknown WLED palette → Rainbow
+}
+
 bool wledCaptureState() {
   String json = wledHttpGet("/json/state");
   if (json.length() == 0) return false;
@@ -360,6 +401,7 @@ bool wledCaptureState() {
   findInt("sx", wledData.savedSx);
   findInt("ix", wledData.savedIx);
   findInt("pal", wledData.savedPal);
+  wledData.pendingPalSync = wledMapPalette(wledData.savedPal);
 
   // Parse segment name
   wledData.savedSegName[0] = '\0';
@@ -419,6 +461,40 @@ void wledQueueText(const char* text, uint16_t durationMs) {
 }
 
 // ============================================================================
+// Lightweight palette poll — reads only `pal` from WLED, no saved-state touch
+// ============================================================================
+
+void wledPollPalette() {
+  String json = wledHttpGet("/json/state");
+  if (json.length() == 0) {
+    wledData.reachable = false;
+    wledData.lastFailTime = millis();
+    return;
+  }
+
+  wledData.reachable = true;
+
+  int segIdx = json.indexOf("\"seg\"");
+  if (segIdx < 0) return;
+  int segStart = json.indexOf('{', segIdx);
+  if (segStart < 0) return;
+  int segEnd = json.indexOf('}', segStart);
+  if (segEnd < 0) return;
+
+  String seg = json.substring(segStart, segEnd + 1);
+  int palIdx = seg.indexOf("\"pal\":");
+  if (palIdx < 0) return;
+
+  int pal = seg.substring(palIdx + 6).toInt();
+  wledData.pendingPalSync = wledMapPalette(pal);
+
+  DBG("WLED: pal poll wled=");
+  DBG(pal);
+  DBG(" local=");
+  DBGLN(wledData.pendingPalSync);
+}
+
+// ============================================================================
 // Poll — called from Core 0 (WiFi task)
 // ============================================================================
 
@@ -450,6 +526,15 @@ void pollWledDisplay() {
       }
       wledData.hasSavedState = false;
     }
+  }
+
+  // ---- Periodic palette sync when idle (no bot frame active) ----
+  if (wledData.enabled && wledData.ip[0] != '\0' && sysStatus.staConnected &&
+      wledData.phase == WLED_PHASE_NONE &&
+      wledData.sendState == WLED_IDLE &&
+      millis() - wledData.lastPalPollMs >= WLED_PAL_POLL_INTERVAL_MS) {
+    wledData.lastPalPollMs = millis();
+    wledPollPalette();
   }
 
   // ---- Send DDP frame ----
@@ -562,6 +647,20 @@ String getWledStatusJson() {
   json += wledData.b;
   json += "}";
   return json;
+}
+
+// True when WLED is configured, connected, and reachable — suppresses local palette auto-cycle.
+inline bool wledIsSyncing() {
+  return wledData.enabled && wledData.ip[0] != '\0' &&
+         sysStatus.staConnected && wledData.reachable;
+}
+
+// Returns mapped local palette index if a WLED palette sync is pending, else -1.
+// Clears the pending flag — call once per loop iteration from Core 1.
+int8_t wledConsumePalSync() {
+  int8_t v = wledData.pendingPalSync;
+  if (v >= 0) wledData.pendingPalSync = -1;
+  return v;
 }
 
 #endif // WLED_DISPLAY_H
