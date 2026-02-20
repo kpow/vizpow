@@ -181,7 +181,7 @@ void ambientMatrixHiRes() {
       speeds[x] = random8(1, 4);
     }
     if (drops[x] < 35) {
-      CRGB color = ColorFromPalette(currentPalette, 100, 255);
+      CRGB color = ColorFromPalette(currentPalette, x * 8, 255);
       hiResBuffer[x][drops[x]] = toRGB565(color);
     }
   }
@@ -473,9 +473,9 @@ void ambientMatrix() {
   for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
     drops[x] = (drops[x] + 1) % (MATRIX_HEIGHT + random8(3));
     if (drops[x] < MATRIX_HEIGHT) {
-      leds[XY(x, drops[x])] = ColorFromPalette(currentPalette, 100, 255);
+      leds[XY(x, drops[x])] = ColorFromPalette(currentPalette, x * 32, 255);
       if (drops[x] > 0) {
-        leds[XY(x, drops[x] - 1)] = ColorFromPalette(currentPalette, 100, 150);
+        leds[XY(x, drops[x] - 1)] = ColorFromPalette(currentPalette, x * 32, 150);
       }
     }
   }
