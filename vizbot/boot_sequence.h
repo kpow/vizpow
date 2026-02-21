@@ -291,7 +291,7 @@ bool bootStageWiFi() {
   }
   delay(100);
 
-  bool ok = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+  bool ok = WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   if (ok) {
     // Must be called AFTER softAP — disables radio power saving so beacons keep going
     WiFi.setSleep(false);
@@ -453,7 +453,13 @@ void runBootSequence() {
   bootDrawStage("Portal");
   ok = bootStageDNS();
   if (ok) {
-    bootDrawResult(true, sysStatus.mdnsReady ? "DNS + vizbot.local" : "DNS only");
+    char mdnsLabel[28];
+    if (sysStatus.mdnsReady) {
+      snprintf(mdnsLabel, sizeof(mdnsLabel), "DNS + %s.local", mdnsHostname);
+      bootDrawResult(true, mdnsLabel);
+    } else {
+      bootDrawResult(true, "DNS only");
+    }
   } else {
     bootDrawResult(false, "No WiFi");
   }

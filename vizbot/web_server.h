@@ -224,6 +224,9 @@ const char webpage[] PROGMEM = R"rawliteral(
         if (state.weatherLat && state.weatherLon) {
           document.getElementById('locationInfo').textContent = 'Current: ' + state.weatherLat + ', ' + state.weatherLon;
         }
+        if (state.device) {
+          document.querySelector('.status').textContent = 'Connected to ' + state.device + ' \u00B7 ' + state.hostname;
+        }
       } catch(e) {}
     }
 
@@ -417,6 +420,8 @@ void handleState() {
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
+                ",\"device\":\"" + String(apSSID) + "\"" +
+                ",\"hostname\":\"" + String(mdnsHostname) + ".local\"" +
                 "}";
   server.send(200, "application/json", json);
 }
@@ -752,13 +757,13 @@ void stopDNS() {
   DBGLN("DNS server stopped");
 }
 
-// Start mDNS (vizbot.local)
+// Start mDNS with the per-device unique hostname (e.g. vizbot-a3f2.local)
 bool startMDNS() {
-  bool ok = MDNS.begin(MDNS_HOSTNAME);
+  bool ok = MDNS.begin(mdnsHostname);
   if (ok) {
     MDNS.addService("http", "tcp", 80);
     DBG("mDNS started: ");
-    DBG(MDNS_HOSTNAME);
+    DBG(mdnsHostname);
     DBGLN(".local");
   } else {
     DBGLN("mDNS failed to start");

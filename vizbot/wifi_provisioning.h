@@ -202,7 +202,7 @@ void doWifiConnectBlocking() {
   WiFi.setTxPower(WIFI_POWER_19_5dBm);             // Full TX power for router range
   WiFi.setAutoReconnect(false);                     // We handle retries ourselves
 
-  WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+  WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());
   Serial.print("TX power: ");
@@ -253,7 +253,7 @@ void doWifiConnectBlocking() {
     delay(100);
     WiFi.mode(WIFI_AP);
     delay(100);
-    WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+    WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
     WiFi.setSleep(false);
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
     clearWifiCredentials();
@@ -356,7 +356,7 @@ bool bootAttemptSTA() {
   delay(100);
   WiFi.mode(WIFI_AP);
   delay(100);
-  WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+  WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   WiFi.setSleep(false);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   sysStatus.apIP = WiFi.softAPIP();
@@ -378,7 +378,7 @@ void resetWifiProvisioning() {
     delay(100);
     WiFi.mode(WIFI_AP);
     delay(100);
-    WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+    WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
     WiFi.setSleep(false);
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
 

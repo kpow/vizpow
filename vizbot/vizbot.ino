@@ -32,6 +32,7 @@
 #endif
 
 #include "config.h"
+#include "device_id.h"  // Per-device unique SSID + mDNS hostname (from eFuse MAC)
 #include "palettes.h"
 #include "display_lcd.h"    // Must come before any file that calls gfx->methods() (defines DisplayProxy)
 #include "effects_ambient.h"
@@ -180,7 +181,7 @@ void startWifiAP() {
     WiFi.mode(WIFI_AP);
     delay(100);
   }
-  bool apStarted = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, false, 4);
+  bool apStarted = WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   DBGLN("--- WiFi AP restart ---");
   DBG("softAP returned: ");
   DBGLN(apStarted ? "YES" : "NO");
@@ -239,6 +240,7 @@ void setup() {
   delay(500);
 
   DBGLN("\n=== vizBot starting ===");
+  initDeviceID();   // Compute unique apSSID / mdnsHostname from eFuse MAC
 
   // Core S3: M5Unified must init first — it sets up AW9523 expander,
   // AXP2101 PMU, ILI9342C display, BMI270 IMU, and capacitive touch.
