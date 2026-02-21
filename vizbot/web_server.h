@@ -91,6 +91,15 @@ const char webpage[] PROGMEM = R"rawliteral(
 
   <div class="card">
     <h2>WiFi Setup</h2>
+    <div style="margin-bottom:12px">
+      <div style="color:#aaa;font-size:12px;margin-bottom:6px">Device Name &mdash; sets AP name and .local hostname (restart to apply)</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="deviceNameInput" placeholder="e.g. vizbot-desk"
+          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="23">
+        <button onclick="setDeviceName()" id="deviceNameBtn" style="padding:10px 16px">Set</button>
+      </div>
+      <div id="deviceNameStatus" style="font-size:12px;color:#aaa;margin-top:4px"></div>
+    </div>
     <div id="wifiStatus"></div>
     <div id="wifiScan" style="margin-top:10px">
       <button onclick="wifiDoScan()" id="scanBtn">Scan Networks</button>
@@ -227,7 +236,22 @@ const char webpage[] PROGMEM = R"rawliteral(
         if (state.device) {
           document.querySelector('.status').textContent = 'Connected to ' + state.device + ' \u00B7 ' + state.hostname;
         }
+        if (state.deviceName) {
+          document.getElementById('deviceNameInput').value = state.deviceName;
+        }
       } catch(e) {}
+    }
+
+    async function setDeviceName() {
+      const name = document.getElementById('deviceNameInput').value.trim();
+      if (!name) return;
+      document.getElementById('deviceNameBtn').textContent = '...';
+      document.getElementById('deviceNameBtn').disabled = true;
+      const r = await api('/device/name?name=' + encodeURIComponent(name));
+      document.getElementById('deviceNameBtn').textContent = 'Set';
+      document.getElementById('deviceNameBtn').disabled = false;
+      document.getElementById('deviceNameStatus').textContent =
+        (r && r.ok) ? 'Saved \u2014 restart device to apply.' : 'Error saving name.';
     }
 
     // WiFi provisioning UI
@@ -422,6 +446,7 @@ void handleState() {
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
                 ",\"device\":\"" + String(apSSID) + "\"" +
                 ",\"hostname\":\"" + String(mdnsHostname) + ".local\"" +
+                ",\"deviceName\":\"" + String(apSSID) + "\"" +
                 "}";
   server.send(200, "application/json", json);
 }
@@ -640,6 +665,25 @@ void handleWifiReset() {
   server.send(200, "text/plain", "OK");
 }
 
+void handleSetDeviceName() {
+  if (server.hasArg("name")) {
+    String name = server.arg("name");
+    name.trim();
+    if (name.length() > 0 && name.length() < DEVICE_NAME_MAX) {
+      saveDeviceName(name.c_str());
+      server.send(200, "text/plain", "Saved. Restart device to apply new name.");
+      return;
+    }
+    if (name.length() == 0) {
+      // Empty name clears the custom name — MAC suffix will be used on next boot
+      saveDeviceName("");
+      server.send(200, "text/plain", "Cleared. MAC suffix will be used on next boot.");
+      return;
+    }
+  }
+  server.send(400, "text/plain", "Invalid name");
+}
+
 // ============================================================================
 // WLED Display Handlers
 // ============================================================================
@@ -720,6 +764,7 @@ void setupWebServer() {
   server.on("/wifi/connect", handleWifiConnect);
   server.on("/wifi/status", handleWifiStatus);
   server.on("/wifi/reset", handleWifiReset);
+  server.on("/device/name", handleSetDeviceName);
 
   // WLED display endpoints
   server.on("/wled/status", handleWledStatus);
