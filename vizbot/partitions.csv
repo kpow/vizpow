@@ -1,0 +1,18 @@
+# Custom partition table for vizbot on 4MB flash boards
+# (TARGET_LCD: ESP32-S3-Touch-LCD-1.69, TARGET_LED: Waveshare ESP32-S3-Matrix)
+#
+# Eliminates the unused dual-OTA fallback slot from the Arduino default scheme,
+# nearly doubling app space from ~1.9MB to ~3.9MB on the same 4MB chip.
+#
+# NVS offset is unchanged from Arduino default (0x9000), so saved WiFi
+# credentials and settings survive a reflash with this partition table.
+#
+# Arduino IDE: Tools > Partition Scheme > Custom
+#
+# Note: M5Stack Core S3 (TARGET_CORES3) has 16MB flash — use the board's
+# default partition scheme in the IDE when flashing that target.
+#
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,         data, nvs,     0x9000,   0x5000,
+otadata,     data, ota,     0xe000,   0x2000,
+app0,        app,  ota_0,   0x10000,  0x3E0000,

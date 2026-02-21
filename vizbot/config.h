@@ -6,8 +6,8 @@
 // ============================================================================
 // Uncomment ONE of these:
 // #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-// #define TARGET_LCD    // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
-#define TARGET_CORES3    // M5Stack Core S3 (320x240 IPS, touch, BMI270)
+#define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+// #define TARGET_CORES3 // M5Stack Core S3 (320x240 IPS, touch, BMI270)
 
 // ============================================================================
 // Auto-configuration based on target
@@ -121,9 +121,12 @@
 #define MATRIX_HEIGHT 8
 
 // WiFi AP configuration
-#define WIFI_SSID "vizBot"
-#define WIFI_PASSWORD "12345678"
-#define MDNS_HOSTNAME "vizbot"   // vizbot.local
+// Note: WIFI_SSID_BASE and MDNS_HOSTNAME_BASE are base strings.
+// initDeviceID() appends a 4-hex MAC suffix at runtime (e.g. "vizBot-A3F2")
+// so each device on the same network has a unique SSID and mDNS hostname.
+#define WIFI_SSID_BASE     "vizBot"
+#define WIFI_PASSWORD      "12345678"
+#define MDNS_HOSTNAME_BASE "vizbot"   // Full runtime name: vizbot-xxxx.local
 
 // Display mode
 #define MODE_BOT 0
