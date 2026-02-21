@@ -80,9 +80,11 @@ struct BotExpression {
 // Pupils: ~12-14px radius. Brows: thick arcs above eyes.
 // ============================================================================
 
-// Face center coordinates
-#define BOT_FACE_CX 120
-#define BOT_FACE_CY 118
+// Face center coordinates (default for 240x280 portrait; overridden per board in config.h)
+#ifndef BOT_FACE_CX
+  #define BOT_FACE_CX 120
+  #define BOT_FACE_CY 118
+#endif
 
 // Number of defined expressions
 #define BOT_NUM_EXPRESSIONS 20

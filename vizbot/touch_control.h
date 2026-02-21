@@ -8,7 +8,11 @@
 // Only compile touch code if enabled
 #if defined(TOUCH_ENABLED)
 
+#ifdef TARGET_CORES3
+#include <M5Unified.h>
+#else
 #include <Arduino_GFX_Library.h>
+#endif
 
 // LCD dimensions (must match display_lcd.h)
 #ifndef LCD_WIDTH
@@ -16,9 +20,10 @@
 #define LCD_HEIGHT 280
 #endif
 
-// CST816T Touch Controller
-#define TOUCH_I2C_ADDR 0x15
-#define TOUCH_RST_PIN 21
+// CST816T Touch Controller (TARGET_LCD only)
+#ifndef TARGET_CORES3
+#define TOUCH_RST_PIN 21   // CST816T reset pin (NOT used on Core S3 — GPIO21 is touch IRQ there)
+#endif
 
 // CST816T Register addresses
 #define TOUCH_REG_GESTURE 0x01
@@ -51,7 +56,13 @@ extern void resetEffectShuffle();
 extern CRGBPalette16 palettes[];
 
 // External GFX object from display_lcd.h
+// Type differs per target: DisplayProxy* for Core S3, Arduino_GFX* otherwise
+#ifdef TARGET_CORES3
+struct DisplayProxy;  // forward declaration (defined in display_lcd.h)
+extern DisplayProxy *gfx;
+#else
 extern Arduino_GFX *gfx;
+#endif
 
 // Hi-res mode support
 #if defined(HIRES_ENABLED)
@@ -101,13 +112,15 @@ const char* paletteNames[] = {
   "Ice", "Blood", "Vaporwave", "DeepForest", "Gold"
 };
 
-// Reset touch controller
+// Reset touch controller (CST816T only — Core S3 uses M5Unified)
 void resetTouch() {
+  #ifndef TARGET_CORES3
   pinMode(TOUCH_RST_PIN, OUTPUT);
   digitalWrite(TOUCH_RST_PIN, LOW);
   delay(10);
   digitalWrite(TOUCH_RST_PIN, HIGH);
   delay(50);
+  #endif
 }
 
 // Read register from touch controller
@@ -123,6 +136,13 @@ uint8_t touchReadRegister(uint8_t reg) {
 
 // Initialize touch controller
 bool initTouch() {
+  #ifdef TARGET_CORES3
+  // M5.begin() (called in vizbot.ino setup) already initialized the Core S3
+  // capacitive touch controller. Nothing further needed here.
+  touchInitialized = true;
+  DBGLN("Touch OK via M5Unified (Core S3)");
+  return true;
+  #else
   resetTouch();
   delay(100);
 
@@ -163,15 +183,27 @@ bool initTouch() {
 
   DBGLN("Touch not found");
   return false;
+  #endif
 }
 
 // I2C mutex (defined in task_manager.h)
 extern bool i2cAcquire(uint32_t timeoutMs);
 extern void i2cRelease();
 
-// Read touch coordinates (with I2C mutex protection)
+// Read touch coordinates
 bool readTouch(uint16_t &x, uint16_t &y) {
   if (!touchInitialized) return false;
+
+  #ifdef TARGET_CORES3
+  // M5Unified capacitive touch — M5.update() is called in the main loop
+  auto detail = M5.Touch.getDetail();
+  if (detail.isPressed()) {
+    x = detail.x;
+    y = detail.y;
+    return true;
+  }
+  return false;
+  #else
   if (!i2cAcquire(30)) return false;  // Skip if bus busy
 
   uint8_t fingerNum = touchReadRegister(TOUCH_REG_FINGER_NUM);
@@ -191,6 +223,7 @@ bool readTouch(uint16_t &x, uint16_t &y) {
   y = ((yh & 0x0F) << 8) | yl;
 
   return true;
+  #endif
 }
 
 // Draw a solid button with centered text
@@ -334,7 +367,11 @@ void touchBrightnessUp() {
   if (lcdBrightness < 255) {
     lcdBrightness += 25;
     if (lcdBrightness > 255) lcdBrightness = 255;
-    analogWrite(LCD_BL, lcdBrightness);
+    #ifdef TARGET_CORES3
+      M5.Display.setBrightness(lcdBrightness);
+    #else
+      analogWrite(LCD_BL, lcdBrightness);
+    #endif
     markSettingsDirty();
   }
 }
@@ -343,7 +380,11 @@ void touchBrightnessDown() {
   if (lcdBrightness > 25) {
     lcdBrightness -= 25;
     if (lcdBrightness < 25) lcdBrightness = 25;
-    analogWrite(LCD_BL, lcdBrightness);
+    #ifdef TARGET_CORES3
+      M5.Display.setBrightness(lcdBrightness);
+    #else
+      analogWrite(LCD_BL, lcdBrightness);
+    #endif
     markSettingsDirty();
   }
 }
@@ -422,6 +463,11 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
 // Main touch handler - call in loop()
 void handleTouch() {
   if (!touchInitialized) return;
+
+  // Core S3: refresh M5Unified state (touch, buttons) before reading
+  #ifdef TARGET_CORES3
+  M5.update();
+  #endif
 
   unsigned long now = millis();
   uint16_t x, y;

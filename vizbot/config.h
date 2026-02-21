@@ -6,7 +6,8 @@
 // ============================================================================
 // Uncomment ONE of these:
 // #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-#define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+// #define TARGET_LCD    // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+#define TARGET_CORES3    // M5Stack Core S3 (320x240 IPS, touch, BMI270)
 
 // ============================================================================
 // Auto-configuration based on target
@@ -36,8 +37,23 @@
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
   #define INTRO_SPARKLE_BRIGHTNESS 255
+#elif defined(TARGET_CORES3)
+  #define BOARD_M5CORES3
+  #define DISPLAY_LCD_ONLY
+  #define HIRES_ENABLED  // Hi-res ambient for bot background overlay
+  #define TOUCH_ENABLED
+  // Full power profile for USB-powered Core S3
+  #define DEFAULT_BRIGHTNESS 15
+  #define INTRO_DURATION_MS 2000
+  #define INTRO_FADE_RATE 20
+  #define INTRO_SPARKLE_BRIGHTNESS 255
+  // Type aliases: let existing 'extern Arduino_GFX *gfx' and 'Arduino_Canvas *botCanvas'
+  // declarations resolve to DisplayProxy* without including Arduino_GFX_Library.h
+  struct DisplayProxy;
+  #define Arduino_GFX    DisplayProxy
+  #define Arduino_Canvas DisplayProxy
 #else
-  #error "Please define TARGET_LED or TARGET_LCD"
+  #error "Please define TARGET_LED, TARGET_LCD, or TARGET_CORES3"
 #endif
 
 // Manual override: uncomment to enable both displays (if hardware supports)
@@ -67,12 +83,34 @@
   #define LCD_RST 8
   #define LCD_BL 15
 
+  // LCD dimensions
+  #define LCD_WIDTH 240
+  #define LCD_HEIGHT 280
+
   // Touch controller (CST816T) - shares I2C bus with IMU
   #define TOUCH_I2C_ADDR 0x15
   #define TOUCH_ENABLED
 
+#elif defined(BOARD_M5CORES3)
+  // M5Stack Core S3 - LCD, touch, and IMU managed by M5Unified
+  #define DATA_PIN   38            // Onboard single RGB LED (compute buffer placeholder)
+  #define I2C_SDA    12            // Internal I2C bus SDA
+  #define I2C_SCL    11            // Internal I2C bus SCL
+  // Note: LCD reset/backlight are via AW9523 I2C expander (M5Unified handles this)
+  // Note: Touch IRQ is GPIO21 (handled by M5Unified internally)
+  #define TOUCH_I2C_ADDR 0x38     // FT6336 capacitive touch (informational; M5Unified drives it)
+
+  // LCD dimensions (landscape 320x240)
+  #define LCD_WIDTH 320
+  #define LCD_HEIGHT 240
+
+  // Face center for landscape layout — horizontally centered, slightly above
+  // vertical center to leave room for mouth and speech bubbles below
+  #define BOT_FACE_CX 160
+  #define BOT_FACE_CY 105
+
 #else
-  #error "Please define a board: BOARD_ESP32S3_MATRIX or BOARD_ESP32S3_TOUCH_LCD"
+  #error "Please define a board: BOARD_ESP32S3_MATRIX, BOARD_ESP32S3_TOUCH_LCD, or BOARD_M5CORES3"
 #endif
 
 // ============================================================================
