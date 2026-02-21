@@ -2,8 +2,11 @@
 #define BOT_OVERLAYS_H
 
 #include <Arduino.h>
+#ifndef TARGET_CORES3
 #include <Arduino_GFX_Library.h>
+#endif
 #include "config.h"
+#include "layout.h"
 
 // ============================================================================
 // Bot Overlays — Speech Bubbles, Notifications, Time Display
@@ -65,10 +68,10 @@ struct BotSpeechBubble {
     uint8_t textLen = strlen(text);
     // Text size 1 = 6x8 per char
     bubbleW = textLen * 6 + 20;   // 10px padding each side
-    if (bubbleW > 234) bubbleW = 234;  // Max width (near full screen)
+    if (bubbleW > OVERLAY_BUBBLE_MAX_W) bubbleW = OVERLAY_BUBBLE_MAX_W;
     bubbleH = 20;  // 8px text + 12px padding
     bubbleX = (LCD_WIDTH - bubbleW) / 2;  // Centered
-    bubbleY = 220;  // Below the face
+    bubbleY = OVERLAY_BUBBLE_Y;
 
     // Forward speech text to WLED display (if configured)
     // Add POP_IN_MS offset so WLED clears as LCD bubble starts fading

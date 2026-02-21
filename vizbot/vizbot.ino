@@ -25,12 +25,16 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ESPmDNS.h>
+#ifdef TARGET_CORES3
+#include <M5Unified.h>
+#else
 #include "SensorQMI8658.hpp"
+#endif
 
 #include "config.h"
 #include "palettes.h"
+#include "display_lcd.h"    // Must come before any file that calls gfx->methods() (defines DisplayProxy)
 #include "effects_ambient.h"
-#include "display_lcd.h"
 #include "bot_mode.h"
 #include "info_mode.h"
 #include "wled_display.h"
@@ -46,7 +50,9 @@
 
 // Global objects
 CRGB leds[NUM_LEDS];
+#ifndef TARGET_CORES3
 SensorQMI8658 imu;
+#endif
 WebServer server(80);
 DNSServer dnsServer;
 bool wifiEnabled = false;
@@ -154,12 +160,18 @@ void introAnimation() {
 }
 
 void readIMU() {
+  #ifdef TARGET_CORES3
+  // BMI270 via M5Unified — no I2C mutex needed (M5Unified manages internally)
+  M5.Imu.getAccel(&accelX, &accelY, &accelZ);
+  M5.Imu.getGyro(&gyroX, &gyroY, &gyroZ);
+  #else
   if (!i2cAcquire()) return;  // Skip this cycle if bus is busy
   if (imu.getDataReady()) {
     imu.getAccelerometer(accelX, accelY, accelZ);
     imu.getGyroscope(gyroX, gyroY, gyroZ);
   }
   i2cRelease();
+  #endif
 }
 
 // Start or restart the WiFi AP hotspot (used by touch menu toggle)
@@ -228,6 +240,13 @@ void setup() {
 
   DBGLN("\n=== vizBot starting ===");
 
+  // Core S3: M5Unified must init first — it sets up AW9523 expander,
+  // AXP2101 PMU, ILI9342C display, BMI270 IMU, and capacitive touch.
+  #ifdef TARGET_CORES3
+  auto cfg = M5.config();
+  M5.begin(cfg);
+  #endif
+
   // Initialize task infrastructure (I2C mutex + command queue)
   initTaskManager();
 
@@ -246,7 +265,7 @@ void setup() {
 
   // Apply loaded settings to hardware
   FastLED.setBrightness(brightness);
-  analogWrite(LCD_BL, lcdBrightness);
+  setLCDBacklight(lcdBrightness);
 
   // Set palette from saved index
   currentPalette = palettes[paletteIndex % NUM_PALETTES];

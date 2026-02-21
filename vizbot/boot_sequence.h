@@ -9,6 +9,7 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include "config.h"
+#include "layout.h"
 #include "system_status.h"
 
 // Global instance — defined here, extern'd via system_status.h
@@ -17,17 +18,18 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
 
+#ifndef TARGET_CORES3
 #include <Arduino_GFX_Library.h>
+#else
+#include <M5Unified.h>
+#endif
 
 // ============================================================================
 // Boot Display Constants
 // ============================================================================
 
 #define BOOT_TEXT_SIZE     2
-#define BOOT_LINE_HEIGHT   22
-#define BOOT_LEFT_MARGIN   10
-#define BOOT_TOP_MARGIN    30
-#define BOOT_STATUS_X      200   // Right-aligned status column
+// BOOT_LINE_HEIGHT, BOOT_LEFT_MARGIN, BOOT_TOP_MARGIN, BOOT_STATUS_X from layout.h
 
 // Colors (RGB565)
 #define BOOT_COLOR_BG      0x0000  // Black
@@ -44,7 +46,12 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 // ============================================================================
 
 // External GFX pointer (initialized in display_lcd.h before boot runs)
+#ifdef TARGET_CORES3
+struct DisplayProxy;
+extern DisplayProxy *gfx;
+#else
 extern Arduino_GFX *gfx;
+#endif
 
 static uint8_t bootStageIndex = 0;
 static const uint8_t BOOT_TOTAL_STAGES = 9;
@@ -147,7 +154,9 @@ void bootDrawSummary() {
 
 // External references for hardware init
 extern CRGB leds[];
+#ifndef TARGET_CORES3
 extern SensorQMI8658 imu;
+#endif
 extern WebServer server;
 extern DNSServer dnsServer;
 
@@ -162,8 +171,12 @@ extern bool bootAttemptSTA();
 // Stage 1: LCD — already initialized before boot screen starts
 bool bootStageLCD() {
   // LCD was already initialized to show this boot screen.
-  // Verify gfx pointer is valid.
+  #ifdef TARGET_CORES3
+  // DisplayProxy* is always valid (points to static instance)
+  bool ok = true;
+  #else
   bool ok = (gfx != nullptr);
+  #endif
   sysStatus.lcdReady = ok;
   return ok;
 }
@@ -189,6 +202,15 @@ bool bootStageLEDs() {
 
 // Stage 3: I2C Bus
 bool bootStageI2C() {
+  #ifdef TARGET_CORES3
+  // M5Unified initialized I2C during M5.begin() in setup() and manages the bus
+  // internally via its own low-level driver — Arduino Wire is never started here.
+  // A Wire bus scan would find nothing and incorrectly report failure.
+  // M5.begin() completing (we are past setup()) is sufficient proof I2C is up.
+  sysStatus.i2cReady = true;
+  return true;
+
+  #else
   Wire.begin(I2C_SDA, I2C_SCL);
   delay(50);
 
@@ -204,15 +226,23 @@ bool bootStageI2C() {
 
   sysStatus.i2cReady = found;
   return found;
+  #endif
 }
 
-// Stage 4: IMU (QMI8658)
+// Stage 4: IMU
 bool bootStageIMU() {
   if (!sysStatus.i2cReady) {
     sysStatus.imuReady = false;
     return false;
   }
 
+  #ifdef TARGET_CORES3
+  // BMI270 via M5Unified — already initialized by M5.begin().
+  // Do a test read; az should be ~1.0 when resting flat.
+  float ax = 0, ay = 0, az = 0;
+  M5.Imu.getAccel(&ax, &ay, &az);
+  bool ok = (ax != 0.0f || ay != 0.0f || az != 0.0f);
+  #else
   bool ok = imu.begin(Wire, QMI8658_L_SLAVE_ADDRESS, I2C_SDA, I2C_SCL);
   if (ok) {
     imu.configAccelerometer(
@@ -228,6 +258,7 @@ bool bootStageIMU() {
     imu.enableAccelerometer();
     imu.enableGyroscope();
   }
+  #endif
 
   sysStatus.imuReady = ok;
   return ok;
@@ -347,26 +378,42 @@ void runBootSequence() {
   // --- Stage 2: LEDs ---
   bootDrawStage("LEDs");
   ok = bootStageLEDs();
+  #ifdef TARGET_CORES3
+  bootDrawResult(ok, ok ? "RGB LED GPIO38" : nullptr);
+  #else
   bootDrawResult(ok, ok ? "64 WS2812B GPIO14" : nullptr);
+  #endif
   delay(80);
 
   // --- Stage 3: I2C Bus ---
   bootDrawStage("I2C Bus");
   ok = bootStageI2C();
+  #ifdef TARGET_CORES3
+  bootDrawResult(ok, ok ? "SDA:12 SCL:11" : "No devices found");
+  #else
   bootDrawResult(ok, ok ? "SDA:11 SCL:10" : "No devices found");
+  #endif
   delay(80);
 
   // --- Stage 4: IMU ---
   bootDrawStage("IMU");
   ok = bootStageIMU();
+  #ifdef TARGET_CORES3
+  bootDrawResult(ok, ok ? "BMI270 M5Unified" : "Sensor missing");
+  #else
   bootDrawResult(ok, ok ? "QMI8658 @ 0x6B" : "Sensor missing");
+  #endif
   delay(80);
 
   // --- Stage 5: Touch ---
   bootDrawStage("Touch");
   ok = bootStageTouch();
   #if defined(TOUCH_ENABLED)
+  #ifdef TARGET_CORES3
+  bootDrawResult(ok, ok ? "Cap. M5Unified" : "No response");
+  #else
   bootDrawResult(ok, ok ? "CST816 @ 0x15" : "No response");
+  #endif
   #else
   bootDrawResult(false, "Disabled in config");
   #endif

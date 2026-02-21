@@ -2,8 +2,11 @@
 #define INFO_MODE_H
 
 #include <Arduino.h>
+#ifndef TARGET_CORES3
 #include <Arduino_GFX_Library.h>
+#endif
 #include "config.h"
+#include "layout.h"
 #include "bot_faces.h"
 #include "bot_eyes.h"
 #include "weather_data.h"
@@ -34,13 +37,11 @@ extern bool menuVisible;
 // Constants
 // ============================================================================
 
-// Mini eye position (top-right area, pulled from corner)
-#define MINI_EYE_CX       190     // Center X of mini eye pair
-#define MINI_EYE_CY       24      // Center Y of mini eye pair
-#define MINI_EYE_W        18      // White ellipse half-width (50% larger)
-#define MINI_EYE_H        15      // White ellipse half-height (50% larger)
-#define MINI_EYE_SPACING  21      // Distance from center to each eye (50% larger)
-#define MINI_PUPIL_R      6       // Pupil radius (50% larger)
+// Mini eye position — MINI_EYE_CX and MINI_EYE_CY come from layout.h (derived from LCD_WIDTH)
+#define MINI_EYE_W        18      // White ellipse half-width
+#define MINI_EYE_H        15      // White ellipse half-height
+#define MINI_EYE_SPACING  21      // Distance from center to each eye
+#define MINI_PUPIL_R      6       // Pupil radius
 
 // Transition timing
 #define INFO_TRANSITION_MS     600   // Shrink/expand animation duration
@@ -299,18 +300,18 @@ void renderCurrentWeather() {
     gfx->setTextSize(2);
     gfx->setTextColor(0xC618);  // Light gray
     if (weatherData.fetching) {
-      gfx->setCursor(60, 80);
+      gfx->setCursor(INFO_LOADING_X, INFO_LOADING_Y);
       gfx->print("Fetching...");
     } else if (!sysStatus.staConnected) {
-      gfx->setCursor(60, 70);
+      gfx->setCursor(INFO_LOADING_X, INFO_LOADING_Y - 10);
       gfx->print("No WiFi");
       gfx->setTextSize(1);
-      gfx->setCursor(40, 100);
+      gfx->setCursor(INFO_LOADING_X - 20, INFO_LOADING_Y + 20);
       gfx->print("Connect to a network");
-      gfx->setCursor(45, 112);
+      gfx->setCursor(INFO_LOADING_X - 15, INFO_LOADING_Y + 32);
       gfx->print("via the web UI");
     } else {
-      gfx->setCursor(60, 80);
+      gfx->setCursor(INFO_LOADING_X, INFO_LOADING_Y);
       gfx->print(weatherData.errorMsg);
     }
     return;
@@ -318,7 +319,7 @@ void renderCurrentWeather() {
 
   // Weather icon (under the mini eyes, right side)
   uint8_t iconType = wmoToIcon(weatherData.current.weatherCode);
-  drawWeatherIcon(MINI_EYE_CX, 64, 44, iconType);
+  drawWeatherIcon(MINI_EYE_CX, INFO_ICON_Y, 44, iconType);
 
   // Temperature (big, centered in the left space)
   int tempInt = (int)(weatherData.current.tempF + 0.5f);
@@ -336,7 +337,7 @@ void renderCurrentWeather() {
   int16_t leftSpace = MINI_EYE_CX - 44 - 10;  // icon left edge minus margin
   int16_t tempX = (leftSpace - totalW) / 2;
   if (tempX < 4) tempX = 4;
-  gfx->setCursor(tempX, 42);
+  gfx->setCursor(tempX, INFO_TEMP_Y);
   gfx->print(tempBuf);
 
   // Degree symbol (after temp number, no F)
@@ -351,7 +352,7 @@ void renderCurrentWeather() {
   gfx->setTextColor(0xFFFF);
   int16_t textW = strlen(weatherData.current.conditionText) * 12;
   int16_t textX = (LCD_WIDTH - textW) / 2;
-  gfx->setCursor(textX, 108);
+  gfx->setCursor(textX, INFO_CONDITION_Y);
   gfx->print(weatherData.current.conditionText);
 }
 
@@ -363,8 +364,8 @@ void renderForecastBars() {
   if (!weatherData.valid) return;
 
   // Divider line between current conditions and forecast
-  gfx->drawLine(20, 130, LCD_WIDTH - 20, 130, 0x4208);
-  gfx->drawLine(20, 131, LCD_WIDTH - 20, 131, 0x4208);
+  gfx->drawLine(20, INFO_DIVIDER_Y, LCD_WIDTH - 20, INFO_DIVIDER_Y, 0x4208);
+  gfx->drawLine(20, INFO_DIVIDER_Y + 1, LCD_WIDTH - 20, INFO_DIVIDER_Y + 1, 0x4208);
 
   // Find global min/max across all 3 days for bar scaling
   float globalMin = 200, globalMax = -200;
@@ -376,13 +377,14 @@ void renderForecastBars() {
   if (range < 10) range = 10;  // Minimum range to avoid squished bars
 
   // Bars grow upward from the very bottom of the screen
-  int16_t barBot = LCD_HEIGHT;           // Bottom edge of screen (280)
-  int16_t barMaxH = 95;                  // Max bar height
-  int16_t barW = 50;                     // Wide bars
-  int16_t dayLabelY = LCD_HEIGHT - 18;   // Day name at bottom of bar
+  int16_t barBot = LCD_HEIGHT;
+  int16_t barMaxH = FORECAST_BAR_MAX_H;
+  int16_t barW = FORECAST_BAR_W;
+  int16_t dayLabelY = LCD_HEIGHT - 18;
 
+  const int16_t forecastCols[3] = { FORECAST_COL_0, FORECAST_COL_1, FORECAST_COL_2 };
   for (int i = 0; i < 3; i++) {
-    int16_t colCX = 40 + i * 80;  // Column centers at x=40, 120, 200
+    int16_t colCX = forecastCols[i];
 
     // Bar height based on high temp (uneven tops across the 3 bars)
     float highNorm = (weatherData.forecast[i].highF - globalMin) / range;
@@ -432,8 +434,8 @@ void renderWeatherPage() {
 // ============================================================================
 // Render Transition Animation
 // ============================================================================
-// During enter: face center moves (120,118) → (206,16), scale 1.0 → 0.3
-// During exit: reverse
+// During enter: face center moves (BOT_FACE_CX, BOT_FACE_CY) → (MINI_EYE_CX, MINI_EYE_CY),
+//              scale 1.0 → 0.3. During exit: reverse.
 // ============================================================================
 
 void renderInfoTransition(float t, bool entering) {
@@ -526,15 +528,17 @@ void renderInfoMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
 
-  // Initialize canvas if needed (same as renderBotMode)
+  // Initialize canvas / begin double-buffered frame
+  #ifndef TARGET_CORES3
   if (botCanvas == nullptr) {
     gfxReal = gfx;
     botCanvas = new Arduino_Canvas(LCD_WIDTH, LCD_HEIGHT, gfxReal);
     botCanvas->begin();
   }
-
-  // Swap gfx to canvas
   gfx = botCanvas;
+  #else
+  gfx->beginCanvas();
+  #endif
 
   // Clear canvas
   gfx->fillScreen(BOT_COLOR_BG);
@@ -581,11 +585,13 @@ void renderInfoMode() {
       break;
   }
 
-  // Flush canvas to screen
+  // Flush canvas to screen atomically
+  #ifndef TARGET_CORES3
   botCanvas->flush();
-
-  // Restore real display pointer
   gfx = gfxReal;
+  #else
+  gfx->flushCanvas();
+  #endif
 }
 
 // ============================================================================

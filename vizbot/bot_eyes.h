@@ -2,7 +2,9 @@
 #define BOT_EYES_H
 
 #include <Arduino.h>
+#ifndef TARGET_CORES3
 #include <Arduino_GFX_Library.h>
+#endif
 #include "config.h"
 #include "bot_faces.h"
 

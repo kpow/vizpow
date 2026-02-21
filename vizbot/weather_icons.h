@@ -2,7 +2,9 @@
 #define WEATHER_ICONS_H
 
 #include <Arduino.h>
+#ifndef TARGET_CORES3
 #include <Arduino_GFX_Library.h>
+#endif
 
 // ============================================================================
 // Procedural Weather Icons — drawn with TFT primitives

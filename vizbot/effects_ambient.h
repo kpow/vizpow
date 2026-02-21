@@ -3,6 +3,7 @@
 
 #include <FastLED.h>
 #include "config.h"
+#include "layout.h"
 
 // External references to globals defined in main sketch
 extern CRGB leds[];
@@ -10,7 +11,9 @@ extern CRGBPalette16 currentPalette;
 
 // Hi-res mode support for LCD display
 #if defined(HIRES_ENABLED)
+#ifndef TARGET_CORES3
 #include <Arduino_GFX_Library.h>
+#endif
 extern Arduino_GFX *gfx;
 extern bool hiResMode;
 extern bool hiResRenderedThisFrame;
@@ -34,8 +37,8 @@ void ambientPlasmaHiRes() {
   static uint16_t t = 0;
   t += 4;
 
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       uint8_t value = sin8(x + t) + sin8(y + t) + sin8((x + y) / 2 + t);
       CRGB color = ColorFromPalette(currentPalette, value);
       gfx->fillRect(x, y, 8, 8, toRGB565(color));
@@ -49,8 +52,8 @@ void ambientRainbowHiRes() {
   static uint8_t hue = 0;
   hue += 2;
 
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       uint8_t h = hue + (x / 4) + (y / 4);
       CRGB color = ColorFromPalette(currentPalette, h);
       gfx->fillRect(x, y, 8, 8, toRGB565(color));
@@ -85,8 +88,8 @@ void ambientFireHiRes() {
   }
 
   // Render
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       CRGB color = ColorFromPalette(currentPalette, heat[x / 8][y / 8]);
       gfx->fillRect(x, y, 8, 8, toRGB565(color));
     }
@@ -99,8 +102,8 @@ void ambientOceanHiRes() {
   static uint16_t t = 0;
   t += 8;
 
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       uint8_t n = inoise8(x * 3, y * 3, t);
       CRGB color = ColorFromPalette(currentPalette, n);
       gfx->fillRect(x, y, 8, 8, toRGB565(color));
@@ -137,8 +140,8 @@ void ambientSparkleHiRes() {
   }
 
   // Render
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       gfx->fillRect(x, y, 8, 8, hiResBuffer[x / 8][y / 8]);
     }
   }
@@ -187,8 +190,8 @@ void ambientMatrixHiRes() {
   }
 
   // Render
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       gfx->fillRect(x, y, 8, 8, hiResBuffer[x / 8][y / 8]);
     }
   }
@@ -200,8 +203,8 @@ void ambientLavaHiRes() {
   static uint16_t t = 0;
   t += 5;
 
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       uint8_t n = inoise8(x * 4, y * 4, t);
       CRGB color = ColorFromPalette(currentPalette, n);
       gfx->fillRect(x, y, 8, 8, toRGB565(color));
@@ -215,8 +218,8 @@ void ambientAuroraHiRes() {
   static uint16_t t = 0;
   t += 4;
 
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       uint8_t n = inoise8(x * 2, y * 2 + t, t / 2);
       CRGB color = ColorFromPalette(currentPalette, n);
       gfx->fillRect(x, y, 8, 8, toRGB565(color));
@@ -250,8 +253,8 @@ void ambientConfettiHiRes() {
   }
 
   // Render
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       gfx->fillRect(x, y, 8, 8, hiResBuffer[x / 8][y / 8]);
     }
   }
@@ -289,8 +292,8 @@ void ambientCometHiRes() {
   }
 
   // Render
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       gfx->fillRect(x, y, 8, 8, hiResBuffer[x / 8][y / 8]);
     }
   }
@@ -306,8 +309,8 @@ void ambientGalaxyHiRes() {
   const float centerY = 140.0;
   const float maxDist = 160.0;
 
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       float dx = x - centerX;
       float dy = y - centerY;
       float angle = atan2(dy, dx);
@@ -352,7 +355,7 @@ void ambientHeartHiRes() {
     for (int r = 0; r < scale * 16; r++) {
       int fx = centerX + (hx * scale * r) / (scale * 16);
       int fy = centerY + (hy * scale * r) / (scale * 16);
-      if (fx >= 0 && fx < 240 && fy >= 0 && fy < 280) {
+      if (fx >= 0 && fx < LCD_WIDTH && fy >= 0 && fy < LCD_HEIGHT) {
         gfx->fillRect(fx, fy, 4, 4, hc);
       }
     }
@@ -370,8 +373,8 @@ void ambientDonutHiRes() {
   const float innerR = 40;
   const float outerR = 90;
 
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
+  for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
+    for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
       float dx = x - centerX;
       float dy = y - centerY;
       float dist = sqrt(dx * dx + dy * dy);
