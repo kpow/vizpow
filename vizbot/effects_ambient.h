@@ -28,9 +28,13 @@ inline uint16_t toRGB565(CRGB color) {
   return ((color.r & 0xF8) << 8) | ((color.g & 0xFC) << 3) | (color.b >> 3);
 }
 
+// Grid dimensions derived from LCD size (compile-time constants)
+#define HIRES_COLS (LCD_WIDTH / 8)
+#define HIRES_ROWS (LCD_HEIGHT / 8)
+
 // Shared buffer for hi-res effects (saves ~8KB RAM)
 // Only one effect runs at a time, so they can share
-static uint16_t hiResBuffer[30][35];
+static uint16_t hiResBuffer[HIRES_COLS][HIRES_ROWS];
 
 // Hi-res Plasma - overlapping sine waves
 void ambientPlasmaHiRes() {
@@ -64,25 +68,25 @@ void ambientRainbowHiRes() {
 
 // Hi-res Fire - heat rises from bottom
 void ambientFireHiRes() {
-  static uint8_t heat[30][35];  // 1KB - keep separate
+  static uint8_t heat[HIRES_COLS][HIRES_ROWS];  // keep separate
 
   // Cool down
-  for (int x = 0; x < 30; x++) {
-    for (int y = 0; y < 35; y++) {
+  for (int x = 0; x < HIRES_COLS; x++) {
+    for (int y = 0; y < HIRES_ROWS; y++) {
       heat[x][y] = qsub8(heat[x][y], random8(0, 12));
     }
   }
 
   // Spark at bottom
-  for (int x = 0; x < 30; x++) {
+  for (int x = 0; x < HIRES_COLS; x++) {
     if (random8() < 180) {
-      heat[x][34] = qadd8(heat[x][34], random8(160, 255));
+      heat[x][HIRES_ROWS - 1] = qadd8(heat[x][HIRES_ROWS - 1], random8(160, 255));
     }
   }
 
   // Heat rises
-  for (int y = 0; y < 34; y++) {
-    for (int x = 0; x < 30; x++) {
+  for (int y = 0; y < HIRES_ROWS - 1; y++) {
+    for (int x = 0; x < HIRES_COLS; x++) {
       heat[x][y] = (heat[x][y] + heat[x][y + 1] + heat[x][y + 1]) / 3;
     }
   }
@@ -117,8 +121,8 @@ void ambientSparkleHiRes() {
   // Uses shared hiResBuffer
 
   // Fade existing
-  for (int x = 0; x < 30; x++) {
-    for (int y = 0; y < 35; y++) {
+  for (int x = 0; x < HIRES_COLS; x++) {
+    for (int y = 0; y < HIRES_ROWS; y++) {
       // Fade by reducing each channel
       uint16_t c = hiResBuffer[x][y];
       uint8_t r = ((c >> 11) & 0x1F);
@@ -133,8 +137,8 @@ void ambientSparkleHiRes() {
 
   // Add new sparkles
   for (int i = 0; i < 3; i++) {
-    int x = random8(30);
-    int y = random8(35);
+    int x = random8(HIRES_COLS);
+    int y = random8(HIRES_ROWS);
     CRGB color = ColorFromPalette(currentPalette, random8(), 255);
     hiResBuffer[x][y] = toRGB565(color);
   }
@@ -150,21 +154,21 @@ void ambientSparkleHiRes() {
 
 // Hi-res Matrix - falling code rain
 void ambientMatrixHiRes() {
-  static uint8_t drops[30];      // Drop Y positions
-  static uint8_t speeds[30];     // Drop speeds
+  static uint8_t drops[HIRES_COLS];      // Drop Y positions
+  static uint8_t speeds[HIRES_COLS];     // Drop speeds
   static bool init = false;
 
   if (!init) {
-    for (int i = 0; i < 30; i++) {
-      drops[i] = random8(35);
+    for (int i = 0; i < HIRES_COLS; i++) {
+      drops[i] = random8(HIRES_ROWS);
       speeds[i] = random8(1, 4);
     }
     init = true;
   }
 
   // Fade screen (uses shared hiResBuffer)
-  for (int x = 0; x < 30; x++) {
-    for (int y = 0; y < 35; y++) {
+  for (int x = 0; x < HIRES_COLS; x++) {
+    for (int y = 0; y < HIRES_ROWS; y++) {
       uint16_t c = hiResBuffer[x][y];
       uint8_t r = ((c >> 11) & 0x1F);
       uint8_t g = ((c >> 5) & 0x3F);
@@ -177,13 +181,13 @@ void ambientMatrixHiRes() {
   }
 
   // Update drops
-  for (int x = 0; x < 30; x++) {
+  for (int x = 0; x < HIRES_COLS; x++) {
     drops[x] += speeds[x];
-    if (drops[x] >= 35 + random8(10)) {
+    if (drops[x] >= HIRES_ROWS + random8(10)) {
       drops[x] = 0;
       speeds[x] = random8(1, 4);
     }
-    if (drops[x] < 35) {
+    if (drops[x] < HIRES_ROWS) {
       CRGB color = ColorFromPalette(currentPalette, x * 8, 255);
       hiResBuffer[x][drops[x]] = toRGB565(color);
     }
@@ -231,8 +235,8 @@ void ambientAuroraHiRes() {
 // Hi-res Confetti - random colored pops
 void ambientConfettiHiRes() {
   // Fade (uses shared hiResBuffer)
-  for (int x = 0; x < 30; x++) {
-    for (int y = 0; y < 35; y++) {
+  for (int x = 0; x < HIRES_COLS; x++) {
+    for (int y = 0; y < HIRES_ROWS; y++) {
       uint16_t c = hiResBuffer[x][y];
       uint8_t r = ((c >> 11) & 0x1F);
       uint8_t g = ((c >> 5) & 0x3F);
@@ -246,8 +250,8 @@ void ambientConfettiHiRes() {
 
   // Add confetti
   for (int i = 0; i < 2; i++) {
-    int x = random8(30);
-    int y = random8(35);
+    int x = random8(HIRES_COLS);
+    int y = random8(HIRES_ROWS);
     CRGB color = ColorFromPalette(currentPalette, random8(64) + millis() / 50, 255);
     hiResBuffer[x][y] = toRGB565(color);
   }
@@ -270,8 +274,8 @@ void ambientCometHiRes() {
   hue++;
 
   // Fade
-  for (int x = 0; x < 30; x++) {
-    for (int y = 0; y < 35; y++) {
+  for (int x = 0; x < HIRES_COLS; x++) {
+    for (int y = 0; y < HIRES_ROWS; y++) {
       uint16_t c = hiResBuffer[x][y];
       uint8_t r = ((c >> 11) & 0x1F);
       uint8_t g = ((c >> 5) & 0x3F);
@@ -283,10 +287,10 @@ void ambientCometHiRes() {
     }
   }
 
-  // Comet position (elliptical orbit)
-  int cx = 15 + cos(angle) * 12;
-  int cy = 17 + sin(angle) * 14;
-  if (cx >= 0 && cx < 30 && cy >= 0 && cy < 35) {
+  // Comet position (elliptical orbit, scaled to grid dimensions)
+  int cx = (HIRES_COLS / 2) + (int)(cos(angle) * (HIRES_COLS * 0.4f));
+  int cy = (HIRES_ROWS / 2) + (int)(sin(angle) * (HIRES_ROWS * 0.4f));
+  if (cx >= 0 && cx < HIRES_COLS && cy >= 0 && cy < HIRES_ROWS) {
     CRGB color = ColorFromPalette(currentPalette, hue);
     hiResBuffer[cx][cy] = toRGB565(color);
   }
@@ -305,9 +309,9 @@ void ambientGalaxyHiRes() {
   static uint16_t t = 0;
   t += 4;
 
-  const float centerX = 120.0;
-  const float centerY = 140.0;
-  const float maxDist = 160.0;
+  const float centerX = LCD_WIDTH / 2.0f;
+  const float centerY = LCD_HEIGHT / 2.0f;
+  const float maxDist = (LCD_WIDTH < LCD_HEIGHT ? LCD_WIDTH : LCD_HEIGHT) * 0.65f;
 
   for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
     for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
@@ -342,8 +346,8 @@ void ambientHeartHiRes() {
   gfx->fillScreen(0x0000);  // Black background
 
   // Draw heart using parametric equation, scaled to LCD
-  const float centerX = 120;
-  const float centerY = 130;
+  const float centerX = LCD_WIDTH / 2.0f;
+  const float centerY = LCD_HEIGHT / 2.0f;
   const float scale = 7.0;
 
   for (float a = 0; a < 6.28; a += 0.02) {
@@ -368,10 +372,11 @@ void ambientDonutHiRes() {
   static uint8_t t = 0;
   t += 2;
 
-  const float centerX = 120;
-  const float centerY = 140;
-  const float innerR = 40;
-  const float outerR = 90;
+  const float centerX = LCD_WIDTH / 2.0f;
+  const float centerY = LCD_HEIGHT / 2.0f;
+  const float minDim = (LCD_WIDTH < LCD_HEIGHT ? LCD_WIDTH : LCD_HEIGHT);
+  const float innerR = minDim * 0.167f;  // ~40px on 240px min dim
+  const float outerR = minDim * 0.375f;  // ~90px on 240px min dim
 
   for (int16_t x = 0; x < LCD_WIDTH; x += 8) {
     for (int16_t y = 0; y < LCD_HEIGHT; y += 8) {
