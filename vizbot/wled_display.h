@@ -315,13 +315,17 @@ String wledHttpGet(const char* path) {
     }
   }
 
+  // Read until 100ms of silence — handles keep-alive connections that stay open
+  // after the response body is sent, without blocking for a full 2-second timeout.
   String response = "";
-  timeout = millis();
+  unsigned long lastDataMs = millis();
   while (client.connected() || client.available()) {
     if (client.available()) {
       response += (char)client.read();
+      lastDataMs = millis();
+    } else if (millis() - lastDataMs > 100) {
+      break;  // No new data for 100ms — response complete
     }
-    if (millis() - timeout > 2000) break;
   }
   client.stop();
 
@@ -524,21 +528,25 @@ void pollWledDisplay() {
       } else {
         DBGLN("WLED: restore failed");
       }
-      wledData.hasSavedState = false;
+      // Keep hasSavedState=true — WLED just resumed these exact values, so
+      // the saved state is still valid for the next say (skips inline capture).
+      // The idle poll will refresh it in the background within 1 second.
     }
   }
 
-  // ---- Periodic palette sync when idle (no bot frame active) ----
-  if (wledData.enabled && wledData.ip[0] != '\0' && sysStatus.staConnected &&
-      wledData.phase == WLED_PHASE_NONE &&
-      wledData.sendState == WLED_IDLE &&
-      millis() - wledData.lastPalPollMs >= WLED_PAL_POLL_INTERVAL_MS) {
-    wledData.lastPalPollMs = millis();
-    wledPollPalette();
+  // ---- Send DDP frame (checked before idle poll — urgent requests skip blocking HTTP) ----
+  if (wledData.sendState != WLED_FRAME_REQUESTED) {
+    // Nothing urgent — run periodic state capture so hasSavedState is ready for next say
+    if (wledData.enabled && wledData.ip[0] != '\0' && sysStatus.staConnected &&
+        wledData.phase == WLED_PHASE_NONE &&
+        millis() - wledData.lastPalPollMs >= WLED_PAL_POLL_INTERVAL_MS) {
+      wledData.lastPalPollMs = millis();
+      bool ok = wledCaptureState();  // captures palette AND full segment state
+      wledData.reachable = ok;
+      if (!ok) wledData.lastFailTime = millis();
+    }
+    return;
   }
-
-  // ---- Send DDP frame ----
-  if (wledData.sendState != WLED_FRAME_REQUESTED) return;
 
   // Consume the request
   wledData.sendState = WLED_IDLE;

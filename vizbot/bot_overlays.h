@@ -55,8 +55,9 @@ struct BotSpeechBubble {
     animPhase = 0;
   }
 
-  // Show a text bubble
-  void show(const char* msg, uint16_t durationMs = DEFAULT_DURATION) {
+  // Show a text bubble.
+  // skipWled=true when wledQueueText was already called upstream (e.g. showBotSaying pre-delay path)
+  void show(const char* msg, uint16_t durationMs = DEFAULT_DURATION, bool skipWled = false) {
     strncpy(text, msg, 31);
     text[31] = '\0';
     active = true;
@@ -66,16 +67,18 @@ struct BotSpeechBubble {
 
     // Calculate bubble dimensions based on text
     uint8_t textLen = strlen(text);
-    // Text size 1 = 6x8 per char
-    bubbleW = textLen * 6 + 20;   // 10px padding each side
+    // Text size 2 = 12x16 per char
+    bubbleW = textLen * 12 + 24;  // 12px padding each side
     if (bubbleW > OVERLAY_BUBBLE_MAX_W) bubbleW = OVERLAY_BUBBLE_MAX_W;
-    bubbleH = 20;  // 8px text + 12px padding
+    bubbleH = 30;  // 16px text + 14px padding
     bubbleX = (LCD_WIDTH - bubbleW) / 2;  // Centered
     bubbleY = OVERLAY_BUBBLE_Y;
 
     // Forward speech text to WLED display (if configured)
-    // Add POP_IN_MS offset so WLED clears as LCD bubble starts fading
-    wledQueueText(text, durationMs + POP_IN_MS);
+    // Skip when already queued upstream (showBotSaying pre-delay path)
+    if (!skipWled) {
+      wledQueueText(text, durationMs + POP_IN_MS);
+    }
   }
 
   // Show from PROGMEM string
@@ -143,16 +146,19 @@ struct BotSpeechBubble {
 
     // Draw text (only when fully visible or popping in past 50%)
     if (scale > 0.5f) {
-      gfx->setTextSize(1);
+      gfx->setTextSize(2);
       gfx->setTextColor(OVERLAY_TEXT);
 
-      // Center text in bubble (text size 1 = 6x8 per char)
+      // Center text in bubble (text size 2 = 12x16 per char)
       uint8_t textLen = strlen(text);
-      int16_t textW = textLen * 6;
+      int16_t textW = textLen * 12;
       int16_t textX = sx + (sw - textW) / 2;
-      int16_t textY = sy + (sh - 8) / 2;
+      int16_t textY = sy + (sh - 16) / 2;
 
+      // Bold: draw twice with 1px horizontal offset
       gfx->setCursor(textX, textY);
+      gfx->print(text);
+      gfx->setCursor(textX + 1, textY);
       gfx->print(text);
     }
   }
@@ -291,7 +297,7 @@ struct BotTimeOverlay {
 struct BotSpeechBubble {
   bool active;
   void init() { active = false; }
-  void show(const char* msg, uint16_t d = 5000) {}
+  void show(const char* msg, uint16_t d = 5000, bool skipWled = false) {}
   void showP(const char* p, uint16_t d = 5000) {}
   void update() {}
   void render() {}
