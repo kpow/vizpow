@@ -40,6 +40,7 @@ enum BotState : uint8_t {
 
 #define BOT_WAKE_THRESHOLD     1.8f      // Acceleration magnitude to wake from sleep
 #define BOT_FRAME_DELAY_MS     33        // ~30 FPS target
+#define WLED_SAY_PRE_DELAY_MS  50        // ms WLED gets head-start before LCD bubble appears
 
 // ============================================================================
 // Personality Presets
@@ -124,6 +125,11 @@ struct BotModeState {
   char customSaying[32];
   bool hasCustomSaying;
 
+  // Pending say: LCD bubble delayed by WLED_SAY_PRE_DELAY_MS for WLED sync
+  char pendingSayText[32];
+  uint16_t pendingSayDuration;
+  unsigned long pendingSayAt;  // millis() when LCD bubble should fire; 0 = none
+
   bool initialized;
 
   void init() {
@@ -147,6 +153,9 @@ struct BotModeState {
     shakeReacting = false;
     hasCustomSaying = false;
     customSaying[0] = '\0';
+    pendingSayText[0] = '\0';
+    pendingSayDuration = 0;
+    pendingSayAt = 0;
     initialized = true;
   }
 
@@ -226,6 +235,15 @@ struct BotModeState {
     speechBubble.show(text, durationMs);
   }
 
+  // Schedule LCD bubble after WLED pre-delay (called from showBotSaying after wledQueueText)
+  void scheduleSaying(const char* text, uint16_t durationMs) {
+    registerInteraction();
+    strncpy(pendingSayText, text, 31);
+    pendingSayText[31] = '\0';
+    pendingSayDuration = durationMs;
+    pendingSayAt = millis() + WLED_SAY_PRE_DELAY_MS;
+  }
+
   // Show a notification banner
   void showNotification(const char* text, uint16_t durationMs = 2500) {
     notification.show(text, durationMs);
@@ -303,6 +321,13 @@ void updateBotMode() {
     getRandomSayingText(SAY_IDLE, buf, sizeof(buf));
     botMode.speechBubble.show(buf, 3500);
     botMode.nextIdleSaying = now + random(p->sayMinMs, p->sayMaxMs);
+  }
+
+  // ---- Fire pending say when WLED pre-delay has elapsed ----
+  // skipWled=true: wledQueueText was already called in showBotSaying(), don't double-queue
+  if (botMode.pendingSayAt > 0 && now >= botMode.pendingSayAt) {
+    botMode.speechBubble.show(botMode.pendingSayText, botMode.pendingSayDuration, true);
+    botMode.pendingSayAt = 0;
   }
 
   // ---- Update animation systems ----
@@ -592,7 +617,10 @@ uint8_t getBotBackgroundStyle() {
 }
 
 void showBotSaying(const char* text, uint16_t durationMs) {
-  botMode.showSaying(text, durationMs);
+  // Queue WLED first — Core 0 starts capture + DDP while we wait
+  wledQueueText(text, WLED_SAY_PRE_DELAY_MS + durationMs);
+  // Schedule LCD bubble to appear after pre-delay (synchronized with WLED)
+  botMode.scheduleSaying(text, durationMs);
 }
 
 void toggleBotTimeOverlay() {
