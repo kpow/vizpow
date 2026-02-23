@@ -1,12 +1,14 @@
 # vizPow
 
-A motion-reactive display controller platform for wearable/portable/alternate displays. Supports three firmware targets:
+A motion-reactive display controller platform for wearable/portable/alternate displays. Supports three firmware targets across multiple hardware boards:
 
-- **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, and 20 facial expressions
+- **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, info mode, and 20 facial expressions
 - **vizPow** (ESP32-S3) — Full-featured LED controller with IMU, LCD display, touch control, and 4 display modes
 - **vizPow 8266** (ESP8266) — Lightweight WiFi-only port with 2 display modes (ambient + emoji)
 
-All platforms drive an 8x8 WS2812B LED matrix (64 LEDs) with a web interface for control from any phone or browser. The ESP32-S3 LCD targets also render to a 240x280 ST7789 display.
+Supported boards: Waveshare ESP32-S3-Touch-LCD-1.69, Waveshare ESP32-S3-Matrix, M5Stack Core S3, and ESP8266 (NodeMCU/Wemos D1 Mini).
+
+All platforms drive an 8x8 WS2812B LED matrix (64 LEDs) with a web interface for control from any phone or browser. LCD targets render to their full screen resolution (240x280 ST7789, 320x240 IPS on M5Stack). Each vizBot device gets a unique network identity (SSID and mDNS hostname) derived from its MAC address, with optional user-settable custom names.
 
 ## Architecture Overview
 
@@ -103,7 +105,7 @@ On subsequent boots, verified credentials auto-connect in the background. The AP
 |--------|--------|----------------|-------------|
 | **WiFi Mode** | AP + STA (dual provisioning) | AP-only | AP-only |
 | **Captive Portal** | DNS wildcard + detection endpoints | None | None |
-| **mDNS** | `vizbot.local` | None | None |
+| **mDNS** | `vizbot-xxxx.local` (per-device, user-settable) | None | None |
 | **Persistent Credentials** | NVS flash (verified flag) | Flash (SSID/pass) | None |
 | **Server** | WebServer on Core 0 FreeRTOS task | Synchronous WebServer | ESP8266WebServer |
 | **Concurrent Clients** | Non-blocking (Core 0 dedicated) | Blocking (~100ms/request) | Blocking |
@@ -116,13 +118,16 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 
 ## Features
 
-### vizBot (ESP32-S3-Touch-LCD-1.69)
+### vizBot (ESP32-S3-Touch-LCD-1.69 / M5Stack Core S3)
 - **20 Facial Expressions**: Neutral, Happy, Sad, Surprised, Sleepy, Angry, Love, Dizzy, Thinking, Excited, Mischievous, Dead, Skeptical, Worried, Confused, Proud, Shy, Annoyed, Bliss, Focused
 - **4 Personalities**: Chill, Hyper, Grumpy, Sleepy — each with distinct idle behavior and speech patterns
 - **Ambient Overlay**: Hi-res animated effects (plasma, fire, ocean, aurora, etc.) render behind the bot face
 - **Speech Bubbles**: 30+ contextual phrases, reactions, greetings
 - **Activity States**: Active -> Idle -> Sleepy -> Sleeping (interaction wakes)
+- **Info Mode**: Shake to toggle a weather dashboard with mini eyes, current conditions, and 3-day forecast bar graph
 - **Overlays**: Time (NTP-synced), weather (Open-Meteo API), notifications
+- **WLED Integration**: Forward bot speech and weather data to a WLED-controlled LED matrix via DDP protocol, with palette sync
+- **Per-Device Identity**: Each device gets a unique SSID and mDNS hostname from its eFuse MAC (e.g. `vizBot-A3F2` / `vizbot-a3f2.local`), with optional user-settable custom names
 - **Captive Portal**: Auto-opens control page on any device
 - **WiFi Provisioning**: Scan and connect to home networks from the web UI
 - **Visual Boot Sequence**: LCD shows each subsystem initializing with pass/fail indicators
@@ -130,6 +135,8 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Dual-Core Architecture**: WiFi on Core 0, rendering on Core 1 — no frame drops or connection timeouts
 - **Touch Menu**: Long-press for settings (effects, palettes, brightness, speed, hi-res toggle)
 - **Shake Reactions**: IMU-driven dizzy expression and random utterances
+- **Multi-Board Support**: Runs on Waveshare ESP32-S3-Touch-LCD-1.69, ESP32-S3-Matrix, and M5Stack Core S3 — select target in `config.h`
+- **Resolution-Independent Effects**: Hi-res ambient effects adapt to any LCD size (240x280 or 320x240)
 
 ### vizPow (ESP32-S3)
 - **4 Display Modes**: Motion-reactive, ambient, emoji, and bot companion
@@ -187,6 +194,15 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 | I2C SCL | 12 |
 | IMU INT | 10 |
 
+### M5Stack Core S3 (vizBot TARGET_CORES3)
+
+- **Board**: [M5Stack Core S3](https://docs.m5stack.com/en/core/CoreS3)
+- **MCU**: ESP32-S3 (dual-core 240MHz, WiFi, BLE, 16MB flash)
+- **Display**: 320x240 IPS LCD (ILI9342C, landscape)
+- **Touch**: FT6336 capacitive touch
+- **Sensors**: BMI270 6-axis IMU
+- **Notes**: LCD reset/backlight via AW9523 I2C expander, all managed by M5Unified library. A `DisplayProxy` wrapper provides Arduino_GFX-compatible API so all existing rendering code works unchanged.
+
 ### ESP8266 (NodeMCU/Wemos D1 Mini)
 
 - **MCU**: ESP8266 (160MHz, WiFi)
@@ -207,9 +223,9 @@ vizBot runs a visual boot sequence on the LCD, showing each subsystem initializi
 [3/9] I2C Bus .......... OK  (SDA:11 SCL:10)
 [4/9] IMU .............. OK  (QMI8658 @ 0x6B)
 [5/9] Touch ............ OK  (CST816 @ 0x15)
-[6/9] WiFi AP .......... OK  (vizBot 192.168.4.1)
+[6/9] WiFi AP .......... OK  (vizBot-A3F2 192.168.4.1)
 [7/9] DNS .............. OK  (captive portal)
-[8/9] mDNS ............. OK  (vizbot.local)
+[8/9] mDNS ............. OK  (vizbot-a3f2.local)
 [9/9] Web Server ....... OK  (port 80)
 
 All systems ready. Starting vizBot...
@@ -234,7 +250,20 @@ The vizPow ESP32-S3 firmware supports two board targets via `config.h`:
 
 ### vizBot (ESP32-S3)
 
-vizBot targets the ESP32-S3-Touch-LCD-1.69 exclusively. No board selection needed.
+vizBot supports three board targets via `config.h`:
+
+```cpp
+// Uncomment ONE of these:
+// #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
+#define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+// #define TARGET_CORES3 // M5Stack Core S3 (320x240 IPS, touch, BMI270)
+```
+
+- **TARGET_LCD**: Primary target. Waveshare ESP32-S3-Touch-LCD-1.69 with 240x280 ST7789 LCD.
+- **TARGET_LED**: LED matrix only, no LCD or touch.
+- **TARGET_CORES3**: M5Stack Core S3 with 320x240 IPS LCD. Uses M5Unified library with a DisplayProxy wrapper for API compatibility. 16MB flash — no custom partition table needed.
+
+A `layout.h` abstraction derives all UI positions from `LCD_WIDTH` and `LCD_HEIGHT` at compile time, so effects, overlays, and UI elements automatically scale to any screen size.
 
 ## Installation
 
@@ -254,7 +283,8 @@ Install via Arduino Library Manager:
 
 - **FastLED** — LED control
 - **SensorLib** by Lewis He — QMI8658 IMU driver
-- **Arduino_GFX_Library** — LCD display rendering
+- **Arduino_GFX_Library** — LCD display rendering (TARGET_LCD)
+- **M5Unified** — Hardware abstraction for M5Stack Core S3 (TARGET_CORES3 only)
 
 Built-in (no install needed):
 
@@ -268,8 +298,9 @@ Built-in (no install needed):
 1. Connect ESP32-S3 board via USB-C
 2. Select Board: `ESP32S3 Dev Module`
 3. Enable: `USB CDC On Boot -> Enabled`
-4. Select Port
-5. Upload `vizbot/vizbot.ino`
+4. For 4MB flash boards: `Tools > Partition Scheme > Custom` and select `vizbot/partitions.csv`
+5. Select Port
+6. Upload `vizbot/vizbot.ino`
 
 ### vizPow (ESP32-S3)
 
@@ -317,10 +348,10 @@ Same as vizBot above.
 
 1. Power on the device — a sparkle intro animation plays on startup (vizBot shows a visual boot sequence on the LCD)
 2. On your phone, connect to WiFi:
-   - vizBot: `vizBot` / password: `12345678` (captive portal auto-opens the control page)
+   - vizBot: `vizBot-XXXX` (unique per device, e.g. `vizBot-A3F2`) / password: `12345678` (captive portal auto-opens the control page)
    - vizPow ESP32: `VizPow` / password: `12345678`
    - vizPow 8266: `VizPow-8266` / password: `12345678`
-3. Open browser: `http://192.168.4.1` (or `http://vizbot.local` for vizBot)
+3. Open browser: `http://192.168.4.1` (or `http://vizbot-xxxx.local` for vizBot)
 
 ### Shake to Change Mode (vizPow ESP32 only)
 
@@ -449,6 +480,51 @@ The ambient overlay (style 4) renders the full hi-res ambient effects as the bac
 - **Speech Bubbles**: Contextual phrases displayed above the face
 - **Notifications**: Status banners for mode/personality changes
 
+### Info Mode (vizBot)
+
+A secondary display mode triggered by a sustained shake (~500ms). The bot face shrinks to animated mini eyes in the top-right corner while weather information fills the screen.
+
+**Weather view includes:**
+- Current temperature (large, color-coded by temperature)
+- Weather condition text and 44px icon
+- 3-day forecast bar graph with color-coded high/low temps, scaled bars, and day labels
+- Page dots for future additional views
+
+**Transitions:**
+- **Enter**: Bot shows thinking expression + "Checking weather..." → face shrinks to corner over 600ms with easing → mini eyes take over with autonomous blinking and look-around
+- **Exit**: Shake again to expand back to full bot face
+
+### WLED Integration (vizBot)
+
+vizBot can forward speech bubble text and weather data to a WLED-controlled LED matrix over WiFi, keeping a secondary display in sync with the bot's activity.
+
+**How it works:**
+- Uses **DDP (Distributed Display Protocol)** for real-time pixel control — a 10-byte header + pixel data sent over UDP
+- Bot speech text is rendered to a 32x8 pixel buffer and streamed to WLED as frames
+- Short text displays statically, long text scrolls in a single pass
+- WLED auto-enters realtime mode on DDP frames and resumes its normal effect after a 2.5s timeout
+
+**Palette sync:** vizBot polls the WLED device's current palette via HTTP and maps it to a local palette index, keeping the bot's LCD background visually consistent with the WLED display.
+
+**Weather on WLED:** During info mode, weather cards (current conditions, 3-day forecast) cycle on the WLED display with fade transitions between cards.
+
+**Configuration:** WLED IP address, enabled state, text color, and scroll speed are all configurable via the web UI and persisted to NVS. Includes 30-second retry backoff after failures.
+
+### Per-Device Network Identity (vizBot)
+
+When running multiple vizbots, each device needs a unique network identity. vizBot solves this automatically:
+
+**MAC-based fallback (default):**
+- On first boot, a 4-hex suffix is derived from the device's eFuse MAC address
+- SSID: `vizBot-A3F2`, mDNS: `vizbot-a3f2.local`
+- Saved to NVS and reused on subsequent boots
+
+**User-settable custom name:**
+- Set a friendly name via the web UI (e.g. "desk", "shelf")
+- SSID becomes `vizbot-desk`, mDNS becomes `vizbot-desk.local`
+- Clear the custom name to revert to MAC-based identity
+- Takes effect on next reboot
+
 ## API Endpoints
 
 ### Core Controls (all platforms)
@@ -486,6 +562,21 @@ The ambient overlay (style 4) renders the full hi-res ambient effects as the bac
 | `/bot/weather/config?lat=X&lon=Y` | Set weather location |
 | `/bot/state` | Full bot state (JSON) |
 
+### WLED Controls (vizBot)
+
+| Endpoint | Description |
+|----------|-------------|
+| `/wled/config` | Get WLED configuration (JSON) |
+| `/wled/config?ip=X&enabled=0\|1&r=R&g=G&b=B&speed=N` | Set WLED IP, enable/disable, text color, scroll speed |
+| `/wled/test` | Test WLED connectivity |
+
+### Device Identity (vizBot)
+
+| Endpoint | Description |
+|----------|-------------|
+| `/device/name?name=X` | Set custom device name (takes effect on reboot) |
+| `/device/name?name=` | Clear custom name (reverts to MAC-based identity) |
+
 ### WiFi Provisioning (vizBot)
 
 | Endpoint | Description |
@@ -510,6 +601,9 @@ Settings are automatically saved to NVS flash and restored on boot:
 | `autoCyc` | bool | Auto-cycle toggle |
 | `bgStyle` | uint8_t | Background style (0-4) |
 | `hiRes` | bool | Hi-res mode toggle |
+| `devName` | String | Custom device name (empty = MAC fallback) |
+| `wledIP` | String | WLED device IP address |
+| `wledOn` | bool | WLED integration enabled |
 
 WiFi credentials are stored separately in the `vizwifi` NVS namespace with a `verified` flag — only auto-connect if previously successful.
 
@@ -519,7 +613,9 @@ WiFi credentials are stored separately in the `vizwifi` NVS namespace with a `ve
 vizpow/
 ├── vizbot/                      # ESP32-S3 bot companion (dual-core architecture)
 │   ├── vizbot.ino               # Main sketch — setup(), dual-core task launch
-│   ├── config.h                 # Hardware pins, WiFi/mDNS config, board selection
+│   ├── config.h                 # Hardware pins, WiFi/mDNS config, board selection (3 targets)
+│   ├── layout.h                 # Resolution-independent UI layout (derived from LCD_WIDTH/HEIGHT)
+│   ├── device_id.h              # Per-device unique SSID/mDNS from eFuse MAC or custom name
 │   ├── system_status.h          # SystemStatus struct — tracks subsystem health
 │   ├── boot_sequence.h          # Visual boot diagnostics on LCD (9 stages)
 │   ├── task_manager.h           # FreeRTOS tasks, I2C mutex, command queue
@@ -531,10 +627,17 @@ vizpow/
 │   ├── bot_eyes.h               # Eye/pupil/brow/mouth rendering, look-around, blink
 │   ├── bot_sayings.h            # Categorized speech bubble phrase pools
 │   ├── bot_overlays.h           # Speech bubbles, time, weather, notification overlays
+│   ├── info_mode.h              # Info mode — weather dashboard with mini eyes
+│   ├── weather_data.h           # Open-Meteo API client, geocoding, forecast parsing
+│   ├── weather_icons.h          # Weather condition icons (44px sprites)
+│   ├── wled_display.h           # WLED integration — DDP pixel control, state management
+│   ├── wled_font.h              # 5x7 pixel font for WLED text rendering
+│   ├── wled_weather_view.h      # Weather card cycling on WLED display
 │   ├── touch_control.h          # Touch menu gestures and UI (shared I2C mutex)
-│   ├── effects_ambient.h        # 13 ambient effects (bot background overlay)
+│   ├── effects_ambient.h        # 13 ambient effects (resolution-independent hi-res variants)
 │   ├── palettes.h               # 15 color palette definitions
 │   ├── display_lcd.h            # LCD rendering + GFX initialization
+│   ├── partitions.csv           # Custom partition table (+2MB app space on 4MB boards)
 │   └── SensorQMI8658.hpp        # IMU driver
 ├── vizpow/                      # ESP32-S3 version (full-featured, single-threaded)
 │   ├── vizpow.ino               # Main sketch — setup(), loop(), shake detection
@@ -602,6 +705,15 @@ The boot sequence populates a `SystemStatus` struct. If a subsystem fails (IMU, 
 - [x] Persistent settings via NVS flash
 - [x] I2C mutex and command queue for thread safety
 - [x] mDNS (`vizbot.local`) hostname support
+- [x] WLED integration — DDP pixel control, speech forwarding, palette sync
+- [x] Info mode — weather dashboard with mini eyes and 3-day forecast
+- [x] Per-device network identity — unique SSID/mDNS from eFuse MAC
+- [x] User-settable device names via web UI
+- [x] M5Stack Core S3 support with DisplayProxy wrapper
+- [x] Resolution-independent hi-res effects (scales to any LCD size)
+- [x] Custom partition table — +2MB app space on 4MB flash boards
+- [x] WLED weather view cycling with fade transitions
+- [x] WLED palette sync — harmonize bot LCD background with LED matrix
 - [ ] Bluetooth Low Energy control
 - [ ] Custom effect creator
 - [ ] Sound reactivity (external mic)
