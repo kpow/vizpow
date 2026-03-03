@@ -478,10 +478,11 @@ void renderBotMode() {
   } else if (botBackgroundStyle == 4) {
     // Ambient effect as background — face renders on top
     #if defined(HIRES_ENABLED)
-    if (!hiResMode) {
-      gfx->fillScreen(BOT_COLOR_BG);  // Clear first for pixel mode (grid doesn't cover full screen)
-    }
+    if (!hiResMode)
     #endif
+    {
+      gfx->fillScreen(BOT_COLOR_BG);  // Clear first — pixel grid doesn't cover full screen
+    }
     renderBotAmbientBackground();
     bgColor = 0x0000;  // Face erase uses black (though prevFrame is invalidated)
   }
