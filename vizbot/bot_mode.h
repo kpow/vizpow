@@ -421,15 +421,21 @@ void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
 
-  // ---- Initialize canvas on first use ----
+  // ---- Canvas management ----
   #ifndef TARGET_CORES3
+  // Claim pre-allocated canvas (static BSS framebuffer — zero heap cost)
   if (botCanvas == nullptr) {
-    gfxReal = gfx;  // Save the real display pointer
-    botCanvas = new Arduino_Canvas(LCD_WIDTH, LCD_HEIGHT, gfxReal);
-    botCanvas->begin();
+    if (gfxReal == nullptr) gfxReal = gfx;
+    extern Arduino_Canvas* _lcd_prealloc_canvas;
+    if (_lcd_prealloc_canvas != nullptr) {
+      botCanvas = _lcd_prealloc_canvas;
+      _lcd_prealloc_canvas = nullptr;
+      DBGLN("Bot: canvas claimed (static BSS)");
+    }
   }
-  // Swap gfx to canvas — all drawing calls now go to offscreen buffer
-  gfx = botCanvas;
+  if (botCanvas != nullptr) {
+    gfx = botCanvas;
+  }
   #else
   // Core S3: use LGFX_Sprite canvas inside DisplayProxy for zero-flicker rendering
   gfx->beginCanvas();
@@ -519,9 +525,10 @@ void renderBotMode() {
   botMode.timeOverlay.render();
   // ---- Flush canvas to screen in one atomic transfer — zero flicker ----
   #ifndef TARGET_CORES3
-  botCanvas->flush();
-  // Restore real display pointer
-  gfx = gfxReal;
+  if (botCanvas != nullptr) {
+    botCanvas->flush();
+    gfx = gfxReal;
+  }
   #else
   // Core S3: push LGFX_Sprite to M5.Display atomically, then restore direct mode
   gfx->flushCanvas();

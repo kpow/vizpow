@@ -246,8 +246,21 @@ uint8_t readSaying(const char* progmemPtr, char* buffer, uint8_t bufSize) {
   return strlen(buffer);
 }
 
+// Forward declaration for cloud saying lookup (defined in content_cache.h)
+#ifdef CLOUD_ENABLED
+#include "system_status.h"
+extern bool getCloudSaying(SayingCategory category, char* buffer, uint8_t bufSize);
+#endif
+
 // Convenience: get a random saying as a RAM string
+// Cloud sayings override PROGMEM when available
 uint8_t getRandomSayingText(SayingCategory category, char* buffer, uint8_t bufSize) {
+  #ifdef CLOUD_ENABLED
+  if (sysStatus.littlefsReady && getCloudSaying(category, buffer, bufSize)) {
+    return strlen(buffer);
+  }
+  #endif
+  // Fall back to compiled-in PROGMEM sayings
   const char* ptr = getRandomSaying(category);
   return readSaying(ptr, buffer, bufSize);
 }

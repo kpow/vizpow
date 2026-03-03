@@ -40,6 +40,11 @@
 #include "info_mode.h"
 #include "wled_display.h"
 #include "wled_weather_view.h"
+#ifdef CLOUD_ENABLED
+#include <ArduinoJson.h>
+#include "content_cache.h"
+#include "cloud_client.h"
+#endif
 #include "web_server.h"
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
@@ -242,6 +247,28 @@ void setup() {
   DBGLN("\n=== vizBot starting ===");
   initDeviceID();   // Compute unique apSSID / mdnsHostname from eFuse MAC
 
+  // Memory baseline — logged early before any allocations fragment the heap
+  DBG("Internal heap: ");
+  DBG(ESP.getFreeHeap() / 1024);
+  DBG("KB free, largest block=");
+  DBG(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
+  DBGLN("KB");
+
+  // PSRAM detection — needed to decide canvas strategy (16-bit PSRAM vs 8-bit internal)
+  if (psramFound()) {
+    sysStatus.psramAvailable = true;
+    sysStatus.psramSizeKB = ESP.getPsramSize() / 1024;
+    DBG("PSRAM: ");
+    DBG(sysStatus.psramSizeKB);
+    DBG("KB total, ");
+    DBG(ESP.getFreePsram() / 1024);
+    DBGLN("KB free");
+  } else {
+    sysStatus.psramAvailable = false;
+    sysStatus.psramSizeKB = 0;
+    DBGLN("PSRAM: not found");
+  }
+
   // Core S3: M5Unified must init first — it sets up AW9523 expander,
   // AXP2101 PMU, ILI9342C display, BMI270 IMU, and capacitive touch.
   #ifdef TARGET_CORES3
@@ -279,6 +306,24 @@ void setup() {
   // Apply saved background style
   setBotBackgroundStyle(botBackgroundStyle);
 
+  #ifdef CLOUD_ENABLED
+  // Cloud sync — canvas is already pre-allocated in initLCD() (before WiFi),
+  // so the heap has room for mbedtls TLS buffers (16KB each).
+  if (sysStatus.staConnected && sysStatus.littlefsReady) {
+    DBG("Cloud: heap=");
+    DBG(ESP.getFreeHeap() / 1024);
+    DBG("KB, largest=");
+    DBG(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
+    DBGLN("KB");
+
+    if (!cloudMeta.registered) {
+      sysStatus.cloudRegistered = cloudRegister();
+    } else {
+      cloudSync();
+    }
+  }
+  #endif
+
   // Enter bot mode
   enterBotMode();
 
@@ -286,6 +331,13 @@ void setup() {
   if (wifiEnabled) {
     startWifiTask();
   }
+
+  #ifdef CLOUD_ENABLED
+  // Start cloud sync task on Core 0 (independent of WiFi server task)
+  if (sysStatus.littlefsReady) {
+    startCloudTask();
+  }
+  #endif
 }
 
 void loop() {

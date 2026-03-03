@@ -532,8 +532,13 @@ void renderInfoMode() {
   #ifndef TARGET_CORES3
   if (botCanvas == nullptr) {
     gfxReal = gfx;
-    botCanvas = new Arduino_Canvas(LCD_WIDTH, LCD_HEIGHT, gfxReal);
-    botCanvas->begin();
+    extern Arduino_Canvas* _lcd_prealloc_canvas;
+    if (_lcd_prealloc_canvas != nullptr) {
+      botCanvas = _lcd_prealloc_canvas;
+      _lcd_prealloc_canvas = nullptr;  // Claimed — don't double-free
+    } else {
+      botCanvas = createPsramAwareCanvas(LCD_WIDTH, LCD_HEIGHT, gfxReal);
+    }
   }
   gfx = botCanvas;
   #else

@@ -62,6 +62,7 @@ enum CommandType : uint8_t {
   CMD_SET_AUTOCYCLE,
   CMD_SET_HIRES_MODE,
   CMD_TOGGLE_INFO_MODE,
+  CMD_SET_PERSONALITY,
 };
 
 // 32-byte command payload — fits all command types
@@ -167,6 +168,13 @@ void cmdToggleInfoMode() {
   pushCommand(cmd);
 }
 
+void cmdSetPersonality(uint8_t val) {
+  Command cmd;
+  cmd.type = CMD_SET_PERSONALITY;
+  cmd.u8val = val;
+  pushCommand(cmd);
+}
+
 // ============================================================================
 // Drain Queue — called once per frame from the main loop
 // ============================================================================
@@ -175,6 +183,7 @@ extern void setBotExpression(uint8_t index);
 extern void setBotFaceColor(uint16_t color);
 extern void setBotBackgroundStyle(uint8_t style);
 extern void showBotSaying(const char* text, uint16_t durationMs);
+extern void setBotPersonality(uint8_t index);
 extern void toggleBotTimeOverlay();
 extern bool isBotTimeOverlayEnabled();
 extern uint8_t brightness;
@@ -233,6 +242,9 @@ void drainCommandQueue() {
         }
         break;
       }
+      case CMD_SET_PERSONALITY:
+        setBotPersonality(cmd.u8val);
+        break;
     }
   }
 }
@@ -258,7 +270,7 @@ extern void pollWledDisplay();
 // Defined in weather_data.h — checks fetchRequested flag and fetches if needed.
 extern void pollWeatherFetch();
 
-static TaskHandle_t wifiTaskHandle = nullptr;
+TaskHandle_t wifiTaskHandle = nullptr;
 
 void wifiServerTask(void* param) {
   for (;;) {

@@ -6,8 +6,8 @@
 // ============================================================================
 // Uncomment ONE of these:
 // #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-#define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
-// #define TARGET_CORES3 // M5Stack Core S3 (320x240 IPS, touch, BMI270)
+// #define TARGET_LCD    // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+#define TARGET_CORES3    // M5Stack Core S3 (320x240 IPS, touch, BMI270)
 
 // ============================================================================
 // Auto-configuration based on target
@@ -149,6 +149,25 @@
 #define WEATHER_REFRESH_MS          600000 // 10 minutes between weather API calls
 #define WEATHER_LAT_DEFAULT         "37.54"
 #define WEATHER_LON_DEFAULT         "-77.43"
+
+// ============================================================================
+// Cloud Integration (vizCloud)
+// ============================================================================
+// Cloud integration — pinned CA cert (no esp_crt_bundle dependency)
+#if defined(TARGET_CORES3) || defined(TARGET_LCD)
+  #define CLOUD_ENABLED
+#endif
+#ifdef CLOUD_ENABLED
+  #define CLOUD_SERVER_URL       "https://vizcloud-raxo5.ondigitalocean.app"
+  #define CLOUD_BOT_SECRET       "349baac1c179460b0ea78ca572bcc7a1187bcab891b71b47c28dce5dae5c5103"
+  #define CLOUD_POLL_DEFAULT     60
+  #define CLOUD_CONNECT_TIMEOUT  5000
+  #define CLOUD_RESPONSE_TIMEOUT 10000
+  #define CLOUD_BOOT_TIMEOUT     5000
+  #define CLOUD_TASK_STACK       8192
+  #define CLOUD_NVS_NAMESPACE    "vizcloud"
+  #define FIRMWARE_VERSION       "2.0.0"
+#endif
 
 // Debug serial output (comment out to save ~700 bytes of flash)
 #define DEBUG_SERIAL
