@@ -22,7 +22,7 @@
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
 
 // External references
-extern Arduino_GFX *gfx;
+extern GfxDevice *gfx;
 extern float accelX, accelY, accelZ;
 extern bool menuVisible;
 
@@ -415,33 +415,14 @@ void renderBotAmbientBackground() {
 // then flush the whole buffer to the display in one atomic SPI transfer.
 // This is the standard double-buffer / sprite technique for TFT displays.
 
-Arduino_Canvas *botCanvas = nullptr;
-Arduino_GFX *gfxReal = nullptr;   // The actual hardware display (unused on Core S3)
 static bool botFirstFrame = true;
 
 void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
 
-  // ---- Canvas management ----
-  #ifndef TARGET_CORES3
-  // Claim pre-allocated canvas (static BSS framebuffer — zero heap cost)
-  if (botCanvas == nullptr) {
-    if (gfxReal == nullptr) gfxReal = gfx;
-    extern Arduino_Canvas* _lcd_prealloc_canvas;
-    if (_lcd_prealloc_canvas != nullptr) {
-      botCanvas = _lcd_prealloc_canvas;
-      _lcd_prealloc_canvas = nullptr;
-      DBGLN("Bot: canvas claimed (static BSS)");
-    }
-  }
-  if (botCanvas != nullptr) {
-    gfx = botCanvas;
-  }
-  #else
-  // Core S3: use LGFX_Sprite canvas inside DisplayProxy for zero-flicker rendering
+  // ---- Canvas management (both targets use DisplayProxy with LGFX_Sprite) ----
   gfx->beginCanvas();
-  #endif
 
   // ---- Clear canvas with background ----
   uint16_t bgColor = BOT_COLOR_BG;
@@ -527,15 +508,7 @@ void renderBotMode() {
   botMode.notification.render();
   botMode.timeOverlay.render();
   // ---- Flush canvas to screen in one atomic transfer — zero flicker ----
-  #ifndef TARGET_CORES3
-  if (botCanvas != nullptr) {
-    botCanvas->flush();
-    gfx = gfxReal;
-  }
-  #else
-  // Core S3: push LGFX_Sprite to M5.Display atomically, then restore direct mode
   gfx->flushCanvas();
-  #endif
 }
 
 // ============================================================================
@@ -566,27 +539,11 @@ void enterBotMode() {
     botMode.speechBubble.show(buf, 2000);
   }
 
-  // Clear the actual screen (use real display, not canvas)
-  #ifndef TARGET_CORES3
-  Arduino_GFX *screen = (gfxReal != nullptr) ? gfxReal : gfx;
-  if (screen != nullptr) {
-    screen->fillScreen(BOT_COLOR_BG);
-  }
-  #else
   gfx->fillScreen(BOT_COLOR_BG);
-  #endif
 }
 
 void exitBotMode() {
-  // Restore gfx to real display when leaving bot mode
-  #ifndef TARGET_CORES3
-  if (gfxReal != nullptr) {
-    gfx = gfxReal;
-  }
-  #endif
-  if (gfx != nullptr) {
-    gfx->fillScreen(BOT_COLOR_BG);
-  }
+  gfx->fillScreen(BOT_COLOR_BG);
 }
 
 // ============================================================================
