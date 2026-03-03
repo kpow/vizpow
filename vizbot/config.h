@@ -34,6 +34,7 @@
   // HIRES_ENABLED removed — saves 3.2KB BSS for TLS heap headroom
   // Hi-res ambient effects remain available on CoreS3 (PSRAM)
   // Full power profile for USB-powered LCD board
+  #define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Full TX — USB powered, needs range
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
@@ -44,6 +45,7 @@
   #define HIRES_ENABLED  // Hi-res ambient for bot background overlay
   #define TOUCH_ENABLED
   // Full power profile for USB-powered Core S3
+  #define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Full TX — USB powered, needs range
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
@@ -162,8 +164,8 @@
   #define CLOUD_SERVER_URL       "https://vizcloud-raxo5.ondigitalocean.app"
   #define CLOUD_BOT_SECRET       "349baac1c179460b0ea78ca572bcc7a1187bcab891b71b47c28dce5dae5c5103"
   #define CLOUD_POLL_DEFAULT     60
-  #define CLOUD_CONNECT_TIMEOUT  5000
-  #define CLOUD_RESPONSE_TIMEOUT 10000
+  #define CLOUD_CONNECT_TIMEOUT  10000
+  #define CLOUD_RESPONSE_TIMEOUT 15000
   #define CLOUD_BOOT_TIMEOUT     5000
   #define CLOUD_NVS_NAMESPACE    "vizcloud"
   #define FIRMWARE_VERSION       "2.0.0"

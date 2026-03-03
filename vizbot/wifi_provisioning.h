@@ -199,7 +199,7 @@ void doWifiConnectBlocking() {
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);       // Scan ALL channels
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);   // Pick strongest signal
   WiFi.setSleep(false);                             // Disable modem sleep
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);             // Full TX power for router range
+  WiFi.setTxPower(WIFI_TX_POWER);             // Full TX power for router range
   WiFi.setAutoReconnect(false);                     // We handle retries ourselves
 
   WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
@@ -255,7 +255,7 @@ void doWifiConnectBlocking() {
     delay(100);
     WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
     WiFi.setSleep(false);
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    WiFi.setTxPower(WIFI_TX_POWER);
     clearWifiCredentials();
     wifiProv.state = PROV_FAILED;
     sysStatus.staConnected = false;
@@ -277,6 +277,9 @@ void pollWifiApLinger() {
     stopDNS();
     sysStatus.dnsReady = false;
     WiFi.softAPdisconnect(true);
+
+    // Re-enforce TX power after mode change (ESP-IDF may reset on mode switch)
+    WiFi.setTxPower(WIFI_TX_POWER);
 
     // mDNS stays running on STA interface
     wifiProv.state = PROV_STA_ACTIVE;
@@ -318,7 +321,7 @@ bool bootAttemptSTA() {
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);       // Scan ALL channels, not just first match
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);   // Pick strongest signal
   WiFi.setSleep(false);                             // Disable modem sleep
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);             // Full TX power for router range
+  WiFi.setTxPower(WIFI_TX_POWER);             // Full TX power for router range
   WiFi.setAutoReconnect(false);                     // We handle retries ourselves
 
   WiFi.begin(ssid, pass);
@@ -358,7 +361,7 @@ bool bootAttemptSTA() {
   delay(100);
   WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  WiFi.setTxPower(WIFI_TX_POWER);
   sysStatus.apIP = WiFi.softAPIP();
 
   return false;
@@ -380,7 +383,7 @@ void resetWifiProvisioning() {
     delay(100);
     WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
     WiFi.setSleep(false);
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    WiFi.setTxPower(WIFI_TX_POWER);
 
     // Restart captive portal DNS
     startDNS();

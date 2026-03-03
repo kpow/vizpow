@@ -192,7 +192,7 @@ void startWifiAP() {
   DBGLN(apStarted ? "YES" : "NO");
 
   WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  WiFi.setTxPower(WIFI_TX_POWER);
 
   // Wait for AP to actually start
   uint8_t retries = 0;
@@ -306,23 +306,9 @@ void setup() {
   // Apply saved background style
   setBotBackgroundStyle(botBackgroundStyle);
 
-  #ifdef CLOUD_ENABLED
-  // Cloud sync — canvas is already pre-allocated in initLCD() (before WiFi),
-  // so the heap has room for mbedtls TLS buffers (16KB each).
-  if (sysStatus.staConnected && sysStatus.littlefsReady) {
-    DBG("Cloud: heap=");
-    DBG(ESP.getFreeHeap() / 1024);
-    DBG("KB, largest=");
-    DBG(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
-    DBGLN("KB");
-
-    if (!cloudMeta.registered) {
-      sysStatus.cloudRegistered = cloudRegister();
-    } else {
-      cloudSync();
-    }
-  }
-  #endif
+  // Cloud sync runs non-blocking via pollCloudSync() in the WiFi task.
+  // No boot-time TLS — avoids blocking setup() for 10-14s on DNS/connect timeout
+  // when WiFi signal is marginal. First sync happens ~2s after WiFi task starts.
 
   // Enter bot mode
   enterBotMode();
