@@ -94,7 +94,7 @@
 
 // Effect counts
 #define NUM_MOTION_EFFECTS 7
-#define NUM_AMBIENT_EFFECTS 13
+#define NUM_AMBIENT_EFFECTS 11
 #define NUM_PALETTES 15
 
 // Emoji settings

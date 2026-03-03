@@ -51,6 +51,7 @@ extern void cmdSetExpression(uint8_t val);
 extern void cmdSayText(const char* text, uint16_t durationMs);
 extern void cmdSetBgStyle(uint8_t val);
 extern void cmdSetPersonality(uint8_t val);
+extern void cmdSetAmbientEffect(uint8_t val);
 
 // Forward declaration from bot_mode.h
 extern uint8_t getBotPersonality();
@@ -382,6 +383,12 @@ static void dispatchCloudCommand(const char* type, JsonObject& payload) {
     uint8_t val = payload["value"] | 0;
     cmdSetBgStyle(val);
     DBG("Cloud cmd: background=");
+    DBGLN(val);
+
+  } else if (strcmp(type, "ambient_effect") == 0) {
+    uint8_t val = payload["value"] | 0;
+    cmdSetAmbientEffect(val);
+    DBG("Cloud cmd: ambient_effect=");
     DBGLN(val);
 
   } else if (strcmp(type, "reboot") == 0) {

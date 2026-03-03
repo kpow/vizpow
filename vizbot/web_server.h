@@ -54,6 +54,10 @@ const char webpage[] PROGMEM = R"rawliteral(
     <div class="grid4" id="botColors"></div>
     <h2 style="margin-top:15px">Background</h2>
     <div class="grid" id="botBgStyles"></div>
+    <div id="ambientSection" style="display:none;margin-top:15px">
+      <h2>Ambient Animation</h2>
+      <div class="grid" id="ambientEffects"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -145,7 +149,9 @@ const char webpage[] PROGMEM = R"rawliteral(
     const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];
     const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
     const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
+    const ambientNames = ["Plasma","Rainbow","Fire","Ocean","Matrix","Lava","Aurora","Confetti","Galaxy","Heart","Donut"];
     let curBgStyle = 4;
+    let curAmbient = 0;
     let wifiSelectedSSID = '';
     let wifiPollTimer = null;
 
@@ -158,6 +164,11 @@ const char webpage[] PROGMEM = R"rawliteral(
       ).join('');
       document.getElementById('botBgStyles').innerHTML = botBgStyles.map(s =>
         `<button class="${curBgStyle === s.v ? 'active' : ''}" onclick="setBotBgStyle(${s.v})">${s.n}</button>`
+      ).join('');
+      const ambSec = document.getElementById('ambientSection');
+      ambSec.style.display = curBgStyle === 4 ? 'block' : 'none';
+      document.getElementById('ambientEffects').innerHTML = ambientNames.map((name, i) =>
+        `<button class="${curAmbient === i ? 'active' : ''}" onclick="setAmbient(${i})">${name}</button>`
       ).join('');
     }
 
@@ -206,6 +217,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     }
     function setBotColor(i) { api('/bot/background?v=' + i); }
     function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
+    function setAmbient(i) { curAmbient = i; render(); api('/bot/ambient?v=' + i); }
 
     document.getElementById('brightness').oninput = function() {
       document.getElementById('brightnessVal').textContent = this.value;
@@ -225,6 +237,10 @@ const char webpage[] PROGMEM = R"rawliteral(
         if (state.hiRes !== undefined) {
           hiResOn = state.hiRes;
           document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
+        }
+        if (state.ambientEffect !== undefined) {
+          curAmbient = state.ambientEffect;
+          render();
         }
         if (state.infoActive !== undefined) {
           infoOn = state.infoActive;
@@ -433,6 +449,7 @@ void handleState() {
                 ",\"autoCycle\":" + (autoCycle ? "true" : "false") +
                 ",\"timeOverlay\":" + (isBotTimeOverlayEnabled() ? "true" : "false") +
                 ",\"hiRes\":" + (hiResMode ? "true" : "false") +
+                ",\"ambientEffect\":" + String(effectIndex) +
                 ",\"sys\":{" +
                   "\"lcd\":" + (sysStatus.lcdReady ? "true" : "false") +
                   ",\"leds\":" + (sysStatus.ledsReady ? "true" : "false") +
@@ -480,6 +497,7 @@ extern void cmdSetBgStyle(uint8_t val);
 extern void cmdSayText(const char* text, uint16_t durationMs);
 extern void cmdSetTimeOverlay(bool enabled);
 extern void cmdToggleTimeOverlay();
+extern void cmdSetAmbientEffect(uint8_t val);
 
 void handleBrightness() {
   if (server.hasArg("v")) {
@@ -539,6 +557,14 @@ void handleBotBackground() {
   if (server.hasArg("style")) {
     uint8_t style = constrain(server.arg("style").toInt(), 0, 4);
     cmdSetBgStyle(style);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotAmbient() {
+  if (server.hasArg("v")) {
+    uint8_t val = constrain(server.arg("v").toInt(), 0, NUM_AMBIENT_EFFECTS - 1);
+    cmdSetAmbientEffect(val);
   }
   server.send(200, "text/plain", "OK");
 }
@@ -803,6 +829,7 @@ void setupWebServer() {
   server.on("/bot/time", handleBotTime);
   server.on("/bot/hires", handleBotHiRes);
   server.on("/bot/background", handleBotBackground);
+  server.on("/bot/ambient", handleBotAmbient);
 
   // Info mode endpoints
   server.on("/info/toggle", handleInfoToggle);

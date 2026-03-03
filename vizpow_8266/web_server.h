@@ -209,7 +209,7 @@ const char webpage[] PROGMEM = R"rawliteral(
   <div class="status">Connected to VizPow-8266</div>
 
   <script>
-    const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Sparkle", "Matrix", "Lava", "Aurora", "Confetti", "Comet", "Galaxy", "Heart", "Donut"];
+    const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Matrix", "Lava", "Aurora", "Confetti", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
 
     let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };

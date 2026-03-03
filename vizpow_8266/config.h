@@ -23,7 +23,7 @@
 #define MODE_EMOJI 1
 
 // Effect counts
-#define NUM_AMBIENT_EFFECTS 13
+#define NUM_AMBIENT_EFFECTS 11
 #define NUM_PALETTES 15
 
 // Emoji settings

@@ -109,42 +109,6 @@ void ambientOceanHiRes() {
   hiResRenderedThisFrame = true;
 }
 
-// Hi-res Sparkle - random bright spots with fade
-void ambientSparkleHiRes() {
-  // Uses shared hiResBuffer
-
-  // Fade existing
-  for (int x = 0; x < 30; x++) {
-    for (int y = 0; y < 35; y++) {
-      // Fade by reducing each channel
-      uint16_t c = hiResBuffer[x][y];
-      uint8_t r = ((c >> 11) & 0x1F);
-      uint8_t g = ((c >> 5) & 0x3F);
-      uint8_t b = (c & 0x1F);
-      if (r > 0) r--;
-      if (g > 1) g -= 2;
-      if (b > 0) b--;
-      hiResBuffer[x][y] = (r << 11) | (g << 5) | b;
-    }
-  }
-
-  // Add new sparkles
-  for (int i = 0; i < 3; i++) {
-    int x = random8(30);
-    int y = random8(35);
-    CRGB color = ColorFromPalette(currentPalette, random8(), 255);
-    hiResBuffer[x][y] = toRGB565(color);
-  }
-
-  // Render
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
-      gfx->fillRect(x, y, 8, 8, hiResBuffer[x / 8][y / 8]);
-    }
-  }
-  hiResRenderedThisFrame = true;
-}
-
 // Hi-res Matrix - falling code rain
 void ambientMatrixHiRes() {
   static uint8_t drops[30];      // Drop Y positions
@@ -258,45 +222,6 @@ void ambientConfettiHiRes() {
   hiResRenderedThisFrame = true;
 }
 
-// Hi-res Comet - orbiting ball with trail
-void ambientCometHiRes() {
-  static float angle = 0;
-  static uint8_t hue = 0;
-
-  angle += 0.08;
-  hue++;
-
-  // Fade
-  for (int x = 0; x < 30; x++) {
-    for (int y = 0; y < 35; y++) {
-      uint16_t c = hiResBuffer[x][y];
-      uint8_t r = ((c >> 11) & 0x1F);
-      uint8_t g = ((c >> 5) & 0x3F);
-      uint8_t b = (c & 0x1F);
-      if (r > 0) r--;
-      if (g > 1) g -= 2;
-      if (b > 0) b--;
-      hiResBuffer[x][y] = (r << 11) | (g << 5) | b;
-    }
-  }
-
-  // Comet position (elliptical orbit)
-  int cx = 15 + cos(angle) * 12;
-  int cy = 17 + sin(angle) * 14;
-  if (cx >= 0 && cx < 30 && cy >= 0 && cy < 35) {
-    CRGB color = ColorFromPalette(currentPalette, hue);
-    hiResBuffer[cx][cy] = toRGB565(color);
-  }
-
-  // Render
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
-      gfx->fillRect(x, y, 8, 8, hiResBuffer[x / 8][y / 8]);
-    }
-  }
-  hiResRenderedThisFrame = true;
-}
-
 // Hi-res Galaxy - spinning spiral
 void ambientGalaxyHiRes() {
   static uint16_t t = 0;
@@ -360,33 +285,22 @@ void ambientHeartHiRes() {
   hiResRenderedThisFrame = true;
 }
 
-// Hi-res Donut - spinning ring with gradient
+// Hi-res Donut — pixel-only effect, pick a random hi-res effect instead
 void ambientDonutHiRes() {
-  static uint8_t t = 0;
-  t += 2;
-
-  const float centerX = 120;
-  const float centerY = 140;
-  const float innerR = 40;
-  const float outerR = 90;
-
-  for (int16_t x = 0; x < 240; x += 8) {
-    for (int16_t y = 0; y < 280; y += 8) {
-      float dx = x - centerX;
-      float dy = y - centerY;
-      float dist = sqrt(dx * dx + dy * dy);
-
-      if (dist >= innerR && dist <= outerR) {
-        float angle = atan2(dy, dx);
-        uint8_t hue = (uint8_t)((angle * 40.0) + t);
-        CRGB color = ColorFromPalette(currentPalette, hue);
-        gfx->fillRect(x, y, 8, 8, toRGB565(color));
-      } else {
-        gfx->fillRect(x, y, 8, 8, 0x0000);
-      }
-    }
+  static uint8_t pick = 255;
+  if (pick == 255) pick = random8(10);
+  switch (pick) {
+    case 0: ambientPlasmaHiRes(); break;
+    case 1: ambientRainbowHiRes(); break;
+    case 2: ambientFireHiRes(); break;
+    case 3: ambientOceanHiRes(); break;
+    case 4: ambientMatrixHiRes(); break;
+    case 5: ambientLavaHiRes(); break;
+    case 6: ambientAuroraHiRes(); break;
+    case 7: ambientConfettiHiRes(); break;
+    case 8: ambientGalaxyHiRes(); break;
+    case 9: ambientHeartHiRes(); break;
   }
-  hiResRenderedThisFrame = true;
 }
 
 #endif // HIRES_ENABLED
@@ -452,13 +366,6 @@ void ambientOcean() {
   }
 }
 
-void ambientSparkle() {
-  fadeToBlackBy(leds, NUM_LEDS, 20);
-  int pos = random16(NUM_LEDS);
-  leds[pos] = ColorFromPalette(currentPalette, random8(), 255);
-}
-
-
 void ambientMatrix() {
   static uint8_t drops[MATRIX_WIDTH];
   static bool init = false;
@@ -509,20 +416,6 @@ void ambientConfetti() {
   fadeToBlackBy(leds, NUM_LEDS, 10);
   int pos = random16(NUM_LEDS);
   leds[pos] += ColorFromPalette(currentPalette, random8(64) + millis() / 50, 255);
-}
-
-void ambientComet() {
-  static uint8_t pos = 0;
-  static uint8_t hue = 0;
-
-  fadeToBlackBy(leds, NUM_LEDS, 40);
-
-  EVERY_N_MILLISECONDS(50) {
-    pos = (pos + 1) % NUM_LEDS;
-    hue++;
-  }
-
-  leds[pos] = ColorFromPalette(currentPalette, hue);
 }
 
 void ambientGalaxy() {
@@ -607,16 +500,16 @@ void ambientDonut() {
 typedef void (*AmbientFunc)();
 
 const AmbientFunc ambientLedFuncs[NUM_AMBIENT_EFFECTS] = {
-  ambientPlasma, ambientRainbow, ambientFire, ambientOcean, ambientSparkle,
-  ambientMatrix, ambientLava, ambientAurora, ambientConfetti, ambientComet,
+  ambientPlasma, ambientRainbow, ambientFire, ambientOcean,
+  ambientMatrix, ambientLava, ambientAurora, ambientConfetti,
   ambientGalaxy, ambientHeart, ambientDonut
 };
 
 #if defined(HIRES_ENABLED)
 const AmbientFunc ambientHiResFuncs[NUM_AMBIENT_EFFECTS] = {
   ambientPlasmaHiRes, ambientRainbowHiRes, ambientFireHiRes, ambientOceanHiRes,
-  ambientSparkleHiRes, ambientMatrixHiRes, ambientLavaHiRes, ambientAuroraHiRes,
-  ambientConfettiHiRes, ambientCometHiRes, ambientGalaxyHiRes, ambientHeartHiRes,
+  ambientMatrixHiRes, ambientLavaHiRes, ambientAuroraHiRes,
+  ambientConfettiHiRes, ambientGalaxyHiRes, ambientHeartHiRes,
   ambientDonutHiRes
 };
 #endif

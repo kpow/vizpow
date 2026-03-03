@@ -63,6 +63,7 @@ enum CommandType : uint8_t {
   CMD_SET_HIRES_MODE,
   CMD_TOGGLE_INFO_MODE,
   CMD_SET_PERSONALITY,
+  CMD_SET_AMBIENT_EFFECT,
 };
 
 // 32-byte command payload — fits all command types
@@ -175,6 +176,13 @@ void cmdSetPersonality(uint8_t val) {
   pushCommand(cmd);
 }
 
+void cmdSetAmbientEffect(uint8_t val) {
+  Command cmd;
+  cmd.type = CMD_SET_AMBIENT_EFFECT;
+  cmd.u8val = val;
+  pushCommand(cmd);
+}
+
 // ============================================================================
 // Drain Queue — called once per frame from the main loop
 // ============================================================================
@@ -187,6 +195,7 @@ extern void setBotPersonality(uint8_t index);
 extern void toggleBotTimeOverlay();
 extern bool isBotTimeOverlayEnabled();
 extern uint8_t brightness;
+extern uint8_t effectIndex;
 extern bool autoCycle;
 extern bool hiResMode;
 extern void toggleHiResMode();
@@ -244,6 +253,10 @@ void drainCommandQueue() {
       }
       case CMD_SET_PERSONALITY:
         setBotPersonality(cmd.u8val);
+        break;
+      case CMD_SET_AMBIENT_EFFECT:
+        effectIndex = cmd.u8val % NUM_AMBIENT_EFFECTS;
+        markSettingsDirty();
         break;
     }
   }

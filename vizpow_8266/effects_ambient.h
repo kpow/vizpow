@@ -69,13 +69,6 @@ void ambientOcean() {
   }
 }
 
-void ambientSparkle() {
-  fadeToBlackBy(leds, NUM_LEDS, 20);
-  int pos = random16(NUM_LEDS);
-  leds[pos] = ColorFromPalette(currentPalette, random8(), 255);
-}
-
-
 void ambientMatrix() {
   static uint8_t drops[MATRIX_WIDTH];
   static bool init = false;
@@ -126,20 +119,6 @@ void ambientConfetti() {
   fadeToBlackBy(leds, NUM_LEDS, 10);
   int pos = random16(NUM_LEDS);
   leds[pos] += ColorFromPalette(currentPalette, random8(64) + millis() / 50, 255);
-}
-
-void ambientComet() {
-  static uint8_t pos = 0;
-  static uint8_t hue = 0;
-
-  fadeToBlackBy(leds, NUM_LEDS, 40);
-
-  EVERY_N_MILLISECONDS(50) {
-    pos = (pos + 1) % NUM_LEDS;
-    hue++;
-  }
-
-  leds[pos] = ColorFromPalette(currentPalette, hue);
 }
 
 void ambientGalaxy() {
@@ -221,22 +200,20 @@ void ambientDonut() {
 }
 
 // Run ambient effect by index
-// 13 effects: Plasma, Rainbow, Fire, Ocean, Sparkle, Matrix, Lava, Aurora, Confetti, Comet, Galaxy, Heart, Donut
+// 11 effects: Plasma, Rainbow, Fire, Ocean, Matrix, Lava, Aurora, Confetti, Galaxy, Heart, Donut
 void runAmbientEffect(uint8_t index) {
   switch (index) {
     case 0: ambientPlasma(); break;
     case 1: ambientRainbow(); break;
     case 2: ambientFire(); break;
     case 3: ambientOcean(); break;
-    case 4: ambientSparkle(); break;
-    case 5: ambientMatrix(); break;
-    case 6: ambientLava(); break;
-    case 7: ambientAurora(); break;
-    case 8: ambientConfetti(); break;
-    case 9: ambientComet(); break;
-    case 10: ambientGalaxy(); break;
-    case 11: ambientHeart(); break;
-    case 12: ambientDonut(); break;
+    case 4: ambientMatrix(); break;
+    case 5: ambientLava(); break;
+    case 6: ambientAurora(); break;
+    case 7: ambientConfetti(); break;
+    case 8: ambientGalaxy(); break;
+    case 9: ambientHeart(); break;
+    case 10: ambientDonut(); break;
   }
 }
 
