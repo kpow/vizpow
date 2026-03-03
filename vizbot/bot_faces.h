@@ -2,12 +2,13 @@
 #define BOT_FACES_H
 
 #include <Arduino.h>
+#include "tween.h"
 
 // ============================================================================
 // Bot Face Expression System
 // ============================================================================
 // Each expression is a struct of numeric parameters that define the face.
-// Transitions between expressions are done by lerping all parameters.
+// Transitions use tween-driven easing for smooth expression morphing.
 // Rendering uses TFT drawing primitives only — no sprites.
 //
 // Eye style: large white ellipses (overlapping at center), dark pupils,
@@ -372,9 +373,7 @@ struct BotFaceState {
   // Transition state
   uint8_t currentExpr;
   uint8_t targetExpr;
-  uint8_t blendT;          // 0-255 blend factor
-  unsigned long transitionStart;
-  uint16_t transitionDuration;
+  float transitionProgress; // 0.0 → 1.0 (driven by tween with easing)
   bool transitioning;
 
   // Load expression from PROGMEM
@@ -403,7 +402,7 @@ struct BotFaceState {
 
     currentExpr = index;
     targetExpr = index;
-    blendT = 255;
+    transitionProgress = 1.0f;
     transitioning = false;
   }
 
@@ -422,32 +421,32 @@ struct BotFaceState {
     // Current interpolated state becomes the "from" snapshot
     currentExpr = targetExpr;
     targetExpr = index;
-    blendT = 0;
-    transitionStart = millis();
-    transitionDuration = durationMs;
+    transitionProgress = 0.0f;
     transitioning = true;
+
+    // Drive transition via tween with easing
+    tweenManager.start(&transitionProgress, 0.0f, 1.0f, durationMs, EASE_OUT_QUAD);
   }
 
-  // Update transition (call each frame)
+  // Update transition (call each frame — tween drives transitionProgress)
   void update() {
     if (!transitioning) return;
 
-    unsigned long elapsed = millis() - transitionStart;
-    if (elapsed >= transitionDuration) {
-      // Transition complete
+    // Tween completed — snap to target expression
+    if (transitionProgress >= 1.0f) {
       loadExpression(targetExpr);
       return;
     }
 
-    // Calculate blend factor (0-255)
-    blendT = (uint8_t)((elapsed * 255UL) / transitionDuration);
+    // Convert tween-eased progress (0.0–1.0) to integer blend factor (0–255)
+    uint8_t blendT = (uint8_t)(transitionProgress * 255.0f);
 
     // Read both expressions from PROGMEM
     BotExpression from, to;
     memcpy_P(&from, &botExpressions[currentExpr], sizeof(BotExpression));
     memcpy_P(&to, &botExpressions[targetExpr], sizeof(BotExpression));
 
-    // Lerp all numeric parameters
+    // Lerp all numeric parameters using eased blend factor
     eyeWhiteW = lerpI16(from.eyeWhiteW, to.eyeWhiteW, blendT);
     eyeWhiteH = lerpI16(from.eyeWhiteH, to.eyeWhiteH, blendT);
     eyeSpacing = lerpI16(from.eyeSpacing, to.eyeSpacing, blendT);
@@ -476,6 +475,7 @@ struct BotFaceState {
     dynamicPupilX = 0;
     dynamicPupilY = 0;
     blinkAmount = 0.0f;
+    transitionProgress = 1.0f;
     transitioning = false;
     loadExpression(EXPR_NEUTRAL);
   }

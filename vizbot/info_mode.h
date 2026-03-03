@@ -2,9 +2,6 @@
 #define INFO_MODE_H
 
 #include <Arduino.h>
-#ifndef TARGET_CORES3
-#include <Arduino_GFX_Library.h>
-#endif
 #include "config.h"
 #include "layout.h"
 #include "bot_faces.h"
@@ -26,9 +23,7 @@
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
 
 // External references
-extern Arduino_GFX *gfx;
-extern Arduino_Canvas *botCanvas;
-extern Arduino_GFX *gfxReal;
+extern GfxDevice *gfx;
 extern BotModeState botMode;
 extern uint16_t botFaceColor;
 extern bool menuVisible;
@@ -518,22 +513,8 @@ void renderInfoMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
 
-  // Initialize canvas / begin double-buffered frame
-  #ifndef TARGET_CORES3
-  if (botCanvas == nullptr) {
-    gfxReal = gfx;
-    extern Arduino_Canvas* _lcd_prealloc_canvas;
-    if (_lcd_prealloc_canvas != nullptr) {
-      botCanvas = _lcd_prealloc_canvas;
-      _lcd_prealloc_canvas = nullptr;  // Claimed — don't double-free
-    } else {
-      botCanvas = createPsramAwareCanvas(LCD_WIDTH, LCD_HEIGHT, gfxReal);
-    }
-  }
-  gfx = botCanvas;
-  #else
+  // Begin double-buffered frame (both targets use DisplayProxy with LGFX_Sprite)
   gfx->beginCanvas();
-  #endif
 
   // Clear canvas
   gfx->fillScreen(BOT_COLOR_BG);
@@ -581,12 +562,7 @@ void renderInfoMode() {
   }
 
   // Flush canvas to screen atomically
-  #ifndef TARGET_CORES3
-  botCanvas->flush();
-  gfx = gfxReal;
-  #else
   gfx->flushCanvas();
-  #endif
 }
 
 // ============================================================================

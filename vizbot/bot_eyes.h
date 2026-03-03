@@ -2,9 +2,6 @@
 #define BOT_EYES_H
 
 #include <Arduino.h>
-#ifndef TARGET_CORES3
-#include <Arduino_GFX_Library.h>
-#endif
 #include "config.h"
 #include "bot_faces.h"
 
@@ -20,7 +17,7 @@
 // ============================================================================
 
 // External GFX object from display_lcd.h
-extern Arduino_GFX *gfx;
+extern GfxDevice *gfx;
 
 // External IMU data from vizpow.ino
 extern float accelX, accelY, accelZ;
@@ -127,11 +124,8 @@ struct BotBlinkState {
 // ============================================================================
 
 struct BotLookAround {
-  int16_t currentX, currentY;
-  int16_t targetX, targetY;
-  unsigned long moveStartTime;
+  float currentX, currentY;    // Tween-driven position
   unsigned long nextMoveTime;
-  uint16_t moveDuration;
 
   static const uint16_t LOOK_MIN_INTERVAL = 800;
   static const uint16_t LOOK_MAX_INTERVAL = 2500;
@@ -140,50 +134,32 @@ struct BotLookAround {
   static const uint16_t MOVE_DURATION_MAX = 500;
 
   void init() {
-    currentX = currentY = 0;
-    targetX = targetY = 0;
+    currentX = currentY = 0.0f;
     nextMoveTime = millis() + random(1000, 3000);  // Short initial delay
-    moveDuration = 400;
-    moveStartTime = 0;
   }
 
   void update(int16_t &outX, int16_t &outY) {
     unsigned long now = millis();
 
-    if (now >= nextMoveTime && moveStartTime == 0) {
-      // Start a new look
-      targetX = random(-LOOK_MAX_OFFSET, LOOK_MAX_OFFSET + 1);
-      targetY = random(-LOOK_MAX_OFFSET / 2, LOOK_MAX_OFFSET / 2 + 1);
+    // Only start a new move when no tween is active on our position
+    if (now >= nextMoveTime && !tweenManager.isActive(&currentX)) {
+      float tx = (float)random(-LOOK_MAX_OFFSET, LOOK_MAX_OFFSET + 1);
+      float ty = (float)random(-LOOK_MAX_OFFSET / 2, LOOK_MAX_OFFSET / 2 + 1);
 
       // 15% chance to return to center
       if (random(100) < 15) {
-        targetX = 0;
-        targetY = 0;
+        tx = 0.0f;
+        ty = 0.0f;
       }
 
-      moveDuration = random(MOVE_DURATION_MIN, MOVE_DURATION_MAX);
-      moveStartTime = now;
+      uint16_t dur = random(MOVE_DURATION_MIN, MOVE_DURATION_MAX);
+      tweenManager.startTo(&currentX, tx, dur, EASE_IN_OUT_QUAD);
+      tweenManager.startTo(&currentY, ty, dur, EASE_IN_OUT_QUAD);
+      nextMoveTime = now + dur + random(LOOK_MIN_INTERVAL, LOOK_MAX_INTERVAL);
     }
 
-    if (moveStartTime > 0) {
-      unsigned long elapsed = now - moveStartTime;
-      if (elapsed >= moveDuration) {
-        // Move complete
-        currentX = targetX;
-        currentY = targetY;
-        moveStartTime = 0;
-        nextMoveTime = now + random(LOOK_MIN_INTERVAL, LOOK_MAX_INTERVAL);
-      } else {
-        // Ease-in-out interpolation
-        float t = (float)elapsed / moveDuration;
-        t = t * t * (3.0f - 2.0f * t);  // Smoothstep
-        currentX = (int16_t)(currentX + (targetX - currentX) * t);
-        currentY = (int16_t)(currentY + (targetY - currentY) * t);
-      }
-    }
-
-    outX = currentX;
-    outY = currentY;
+    outX = (int16_t)currentX;
+    outY = (int16_t)currentY;
   }
 };
 

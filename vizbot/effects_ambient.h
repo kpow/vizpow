@@ -11,10 +11,7 @@ extern CRGBPalette16 currentPalette;
 
 // Hi-res mode support for LCD display
 #if defined(HIRES_ENABLED)
-#ifndef TARGET_CORES3
-#include <Arduino_GFX_Library.h>
-#endif
-extern Arduino_GFX *gfx;
+extern GfxDevice *gfx;
 extern bool hiResMode;
 extern bool hiResRenderedThisFrame;
 #if defined(TOUCH_ENABLED)

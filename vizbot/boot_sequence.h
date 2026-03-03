@@ -22,9 +22,7 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
 
-#ifndef TARGET_CORES3
-#include <Arduino_GFX_Library.h>
-#else
+#ifdef TARGET_CORES3
 #include <M5Unified.h>
 #endif
 
@@ -50,12 +48,7 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 // ============================================================================
 
 // External GFX pointer (initialized in display_lcd.h before boot runs)
-#ifdef TARGET_CORES3
-struct DisplayProxy;
-extern DisplayProxy *gfx;
-#else
-extern Arduino_GFX *gfx;
-#endif
+extern GfxDevice *gfx;
 
 static uint8_t bootStageIndex = 0;
 #ifdef CLOUD_ENABLED

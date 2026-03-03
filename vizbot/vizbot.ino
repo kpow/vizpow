@@ -35,6 +35,7 @@
 #include "device_id.h"  // Per-device unique SSID + mDNS hostname (from eFuse MAC)
 #include "palettes.h"
 #include "display_lcd.h"    // Must come before any file that calls gfx->methods() (defines DisplayProxy)
+#include "tween.h"          // Tween animation system (must come before bot_mode.h)
 #include "effects_ambient.h"
 #include "bot_mode.h"
 #include "info_mode.h"
@@ -67,7 +68,7 @@ bool wifiEnabled = false;
 uint8_t effectIndex = 0;
 uint8_t paletteIndex = 0;
 uint8_t brightness = DEFAULT_BRIGHTNESS;
-uint8_t lcdBrightness = 200;
+uint8_t lcdBrightness = 255;
 uint8_t speed = 20;
 bool autoCycle = true;
 uint8_t currentMode = MODE_BOT;
@@ -299,6 +300,9 @@ void setup() {
   // Set palette from saved index
   currentPalette = palettes[paletteIndex % NUM_PALETTES];
 
+  // Initialize tween animation system
+  tweenManager.init();
+
   // Initialize shuffle bags (ambient effects cycle as bot background)
   resetEffectShuffle();
   resetPaletteShuffle();
@@ -400,6 +404,9 @@ void loop() {
       }
     }
   }
+
+  // Advance all active tweens (before rendering so values are current)
+  tweenManager.update();
 
   // Apply queued commands from WiFi/touch before rendering
   drainCommandQueue();
