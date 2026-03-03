@@ -10,8 +10,6 @@
 
 #ifdef TARGET_CORES3
 #include <M5Unified.h>
-#else
-#include <Arduino_GFX_Library.h>
 #endif
 
 // LCD dimensions (must match display_lcd.h)
@@ -55,14 +53,8 @@ extern CRGB leds[];
 extern void resetEffectShuffle();
 extern CRGBPalette16 palettes[];
 
-// External GFX object from display_lcd.h
-// Type differs per target: DisplayProxy* for Core S3, Arduino_GFX* otherwise
-#ifdef TARGET_CORES3
-struct DisplayProxy;  // forward declaration (defined in display_lcd.h)
-extern DisplayProxy *gfx;
-#else
-extern Arduino_GFX *gfx;
-#endif
+// External GFX object from display_lcd.h (DisplayProxy* on all LCD targets)
+extern GfxDevice *gfx;
 
 // Hi-res mode support
 #if defined(HIRES_ENABLED)

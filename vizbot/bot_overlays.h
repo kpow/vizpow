@@ -2,9 +2,6 @@
 #define BOT_OVERLAYS_H
 
 #include <Arduino.h>
-#ifndef TARGET_CORES3
-#include <Arduino_GFX_Library.h>
-#endif
 #include "config.h"
 #include "layout.h"
 
@@ -18,7 +15,7 @@
 
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
 
-extern Arduino_GFX *gfx;
+extern GfxDevice *gfx;
 
 // Forward declaration for WLED integration
 extern void wledQueueText(const char* text, uint16_t durationMs);

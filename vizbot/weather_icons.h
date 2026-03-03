@@ -2,9 +2,7 @@
 #define WEATHER_ICONS_H
 
 #include <Arduino.h>
-#ifndef TARGET_CORES3
-#include <Arduino_GFX_Library.h>
-#endif
+#include "config.h"
 
 // ============================================================================
 // Procedural Weather Icons — drawn with TFT primitives
@@ -13,7 +11,7 @@
 // Each icon is drawn centered at (cx, cy) with a given size.
 // ============================================================================
 
-extern Arduino_GFX *gfx;
+extern GfxDevice *gfx;
 
 // Colors (RGB565)
 #define ICON_SUN_YELLOW   0xFFE0  // Bright yellow

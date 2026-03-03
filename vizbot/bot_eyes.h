@@ -2,9 +2,6 @@
 #define BOT_EYES_H
 
 #include <Arduino.h>
-#ifndef TARGET_CORES3
-#include <Arduino_GFX_Library.h>
-#endif
 #include "config.h"
 #include "bot_faces.h"
 
@@ -20,7 +17,7 @@
 // ============================================================================
 
 // External GFX object from display_lcd.h
-extern Arduino_GFX *gfx;
+extern GfxDevice *gfx;
 
 // External IMU data from vizpow.ino
 extern float accelX, accelY, accelZ;
