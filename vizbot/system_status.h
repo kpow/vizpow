@@ -22,6 +22,9 @@ struct SystemStatus {
   bool staConnected;     // STA connected to external network
   bool littlefsReady;    // LittleFS mounted successfully
   bool cloudRegistered;  // Registered with vizCloud
+  bool speakerReady;     // Core S3 speaker initialized
+  bool micReady;         // Core S3 microphone initialized
+  bool proxLightReady;   // Core S3 proximity/light sensor initialized
   bool psramAvailable;   // PSRAM detected at boot
   uint32_t psramSizeKB;  // Total PSRAM in KB (0 if not available)
   IPAddress apIP;

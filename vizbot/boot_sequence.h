@@ -17,13 +17,14 @@
 #endif
 
 // Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
+SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
 
 #ifdef TARGET_CORES3
 #include <M5Unified.h>
+#include "bot_sounds.h"
 #endif
 
 // ============================================================================
@@ -51,7 +52,11 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 extern GfxDevice *gfx;
 
 static uint8_t bootStageIndex = 0;
-#ifdef CLOUD_ENABLED
+#if defined(TARGET_CORES3) && defined(CLOUD_ENABLED)
+static const uint8_t BOOT_TOTAL_STAGES = 12;
+#elif defined(TARGET_CORES3)
+static const uint8_t BOOT_TOTAL_STAGES = 10;
+#elif defined(CLOUD_ENABLED)
 static const uint8_t BOOT_TOTAL_STAGES = 11;
 #else
 static const uint8_t BOOT_TOTAL_STAGES = 9;
@@ -422,7 +427,21 @@ void runBootSequence() {
   #endif
   delay(80);
 
-  // --- Stage 6: WiFi STA (hardcoded — runs FIRST, STA-only like POC) ---
+  // --- Stage 6 (Core S3 only): Sensors — Speaker, Mic, Proximity/Light ---
+  #ifdef TARGET_CORES3
+  {
+    bootDrawStage("Sensors");
+    // Speaker init
+    botSounds.init();
+    sysStatus.speakerReady = true;
+    // Mic and proximity initialized in later commits
+    char detail[32] = "Spkr OK";
+    bootDrawResult(true, detail);
+    delay(80);
+  }
+  #endif
+
+  // --- WiFi STA (hardcoded — runs FIRST, STA-only like POC) ---
   bootDrawStage("WiFi STA");
   ok = bootAttemptSTA();
   if (ok) {
