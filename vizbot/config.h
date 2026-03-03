@@ -41,10 +41,10 @@
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
   #define INTRO_SPARKLE_BRIGHTNESS 255
-  // LovyanGFX — LGFX class defined in display_lcd.h, forward-declared here
-  // so headers can use 'extern GfxDevice *gfx;'
-  class LGFX;
-  typedef LGFX GfxDevice;
+  // LovyanGFX — DisplayProxy wraps LGFX + LGFX_Sprite for unified API.
+  // Same pattern as TARGET_CORES3 — both targets use beginCanvas()/flushCanvas().
+  struct DisplayProxy;
+  typedef DisplayProxy GfxDevice;
 #elif defined(TARGET_CORES3)
   #define BOARD_M5CORES3
   #define DISPLAY_LCD_ONLY
