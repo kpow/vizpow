@@ -31,8 +31,7 @@
 #elif defined(TARGET_LCD)
   #define BOARD_ESP32S3_TOUCH_LCD
   #define DISPLAY_LCD_ONLY
-  // HIRES_ENABLED removed — saves 3.2KB BSS for TLS heap headroom
-  // Hi-res ambient effects remain available on CoreS3 (PSRAM)
+  #define HIRES_ENABLED  // Hi-res ambient effects (PSRAM provides heap headroom)
   // Full power profile for USB-powered LCD board
   #define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Full TX — USB powered, needs range
   #define OVERLAY_BUBBLE_Y 192              // Closer to mouth (default LCD_HEIGHT-58=222)

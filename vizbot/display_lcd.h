@@ -280,13 +280,19 @@ void initLCD() {
 
   DBGLN("LCD initialized (ST7789)");
 
-  // Canvas uses the static BSS framebuffer — zero heap cost for the 134KB buffer.
-  // This leaves the heap with ~100KB+ more contiguous space for WiFi + TLS.
-  _lcd_prealloc_canvas = new ManagedCanvas(LCD_WIDTH, LCD_HEIGHT, gfx, _lcd_static_fb);
-  _lcd_prealloc_canvas->begin();
-  DBG("Canvas: static BSS framebuffer ");
-  DBG(sizeof(_lcd_static_fb) / 1024);
-  DBGLN("KB");
+  // Try PSRAM canvas first (134KB → PSRAM, frees internal heap for TLS)
+  if (psramFound()) {
+    _lcd_prealloc_canvas = createPsramAwareCanvas(LCD_WIDTH, LCD_HEIGHT, gfx);
+  }
+
+  // Fallback: static BSS framebuffer (no PSRAM or allocation failed)
+  if (_lcd_prealloc_canvas == nullptr) {
+    _lcd_prealloc_canvas = new ManagedCanvas(LCD_WIDTH, LCD_HEIGHT, gfx, _lcd_static_fb);
+    _lcd_prealloc_canvas->begin();
+    DBG("Canvas: static BSS framebuffer ");
+    DBG(sizeof(_lcd_static_fb) / 1024);
+    DBGLN("KB");
+  }
 }
 
 #endif // TARGET_CORES3
