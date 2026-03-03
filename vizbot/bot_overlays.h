@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include "layout.h"
+#include "tween.h"
 
 // ============================================================================
 // Bot Overlays — Speech Bubbles, Notifications, Time Display
@@ -34,9 +35,8 @@ extern void wledQueueText(const char* text, uint16_t durationMs);
 struct BotSpeechBubble {
   char text[MAX_SAY_LEN];      // Current text content
   bool active;                 // Whether bubble is showing
-  unsigned long showTime;      // When the bubble appeared
-  uint16_t duration;           // How long to show (ms)
-  uint8_t animPhase;           // 0=pop-in, 1=visible, 2=fade-out
+  unsigned long fadeOutTime;   // When to start fade-out (0 = not scheduled)
+  float scale;                 // Tween-driven: 0→1 pop-in, 1→0 fade-out
 
   // Word-wrap state
   uint8_t numLines;            // 1-3
@@ -54,7 +54,8 @@ struct BotSpeechBubble {
     active = false;
     text[0] = '\0';
     numLines = 0;
-    animPhase = 0;
+    scale = 0.0f;
+    fadeOutTime = 0;
   }
 
   // Word-wrap text into lines[] for multi-line rendering
@@ -107,9 +108,11 @@ struct BotSpeechBubble {
     strncpy(text, msg, MAX_SAY_LEN - 1);
     text[MAX_SAY_LEN - 1] = '\0';
     active = true;
-    showTime = millis();
-    duration = durationMs;
-    animPhase = 0;
+    scale = 0.0f;
+    fadeOutTime = millis() + POP_IN_MS + durationMs;
+
+    // Pop-in: scale 0→1 with overshoot easing
+    tweenManager.start(&scale, 0.0f, 1.0f, POP_IN_MS, EASE_OUT_BACK);
 
     // Word-wrap into lines
     wrapText();
@@ -141,47 +144,33 @@ struct BotSpeechBubble {
     show(buf, durationMs);
   }
 
-  // Update animation state
+  // Update animation state (tweens drive scale automatically)
   void update() {
     if (!active) return;
 
-    unsigned long elapsed = millis() - showTime;
+    // Start fade-out when duration expires
+    if (fadeOutTime > 0 && millis() >= fadeOutTime) {
+      tweenManager.start(&scale, scale, 0.0f, FADE_OUT_MS, EASE_IN_QUAD);
+      fadeOutTime = 0;  // Only trigger once
+    }
 
-    if (elapsed < POP_IN_MS) {
-      animPhase = 0;  // Pop-in
-    } else if (elapsed < POP_IN_MS + duration) {
-      animPhase = 1;  // Visible
-    } else if (elapsed < POP_IN_MS + duration + FADE_OUT_MS) {
-      animPhase = 2;  // Fade-out
-    } else {
-      active = false;  // Done
+    // Deactivate when fully faded out (and fade-out already started)
+    if (fadeOutTime == 0 && scale <= 0.01f && !tweenManager.isActive(&scale)) {
+      active = false;
     }
   }
 
-  // Render the bubble
+  // Render the bubble (scale is driven by tween system)
   void render() {
     if (!active || gfx == nullptr) return;
 
-    float scale = 1.0f;
-
-    if (animPhase == 0) {
-      // Pop-in: scale from 0 to 1
-      unsigned long elapsed = millis() - showTime;
-      float t = (float)elapsed / POP_IN_MS;
-      // Overshoot ease: goes to 1.1 then settles to 1.0
-      scale = t * (2.0f - t) * 1.05f;
-      if (scale > 1.05f) scale = 1.05f;
-    } else if (animPhase == 2) {
-      // Fade-out: scale from 1 to 0
-      unsigned long elapsed = millis() - showTime - POP_IN_MS - duration;
-      float t = (float)elapsed / FADE_OUT_MS;
-      scale = 1.0f - t;
-      if (scale < 0.0f) scale = 0.0f;
-    }
+    float s = scale;
+    if (s < 0.0f) s = 0.0f;
+    if (s > 1.1f) s = 1.1f;  // Allow slight overshoot from EASE_OUT_BACK
 
     // Calculate scaled dimensions
-    int16_t sw = (int16_t)(bubbleW * scale);
-    int16_t sh = (int16_t)(bubbleH * scale);
+    int16_t sw = (int16_t)(bubbleW * s);
+    int16_t sh = (int16_t)(bubbleH * s);
     int16_t sx = bubbleX + (bubbleW - sw) / 2;
     int16_t sy = bubbleY + (bubbleH - sh) / 2;
 
@@ -197,7 +186,7 @@ struct BotSpeechBubble {
     gfx->fillTriangle(triCX - 5, sy, triCX + 5, sy, triCX, triTop, OVERLAY_BG);
 
     // Draw text (only when fully visible or popping in past 50%)
-    if (scale > 0.5f) {
+    if (s > 0.5f) {
       gfx->setTextSize(2);
       gfx->setTextColor(OVERLAY_TEXT);
 
@@ -227,38 +216,41 @@ struct BotSpeechBubble {
 struct BotNotification {
   char text[32];
   bool active;
-  unsigned long showTime;
-  uint16_t duration;
-  uint8_t animPhase;           // 0=slide-in, 1=visible, 2=slide-out
+  unsigned long slideOutTime;   // When to start slide-out (0 = not scheduled)
+  float slideY;                 // Tween-driven: banner Y offset (0 = visible, -24 = hidden)
 
   static const uint16_t SLIDE_MS = 200;
   static const uint16_t DEFAULT_DURATION = 2500;
+  static const int16_t BANNER_H = 24;
 
   void init() {
     active = false;
     text[0] = '\0';
+    slideY = (float)-BANNER_H;
   }
 
   void show(const char* msg, uint16_t durationMs = DEFAULT_DURATION) {
     strncpy(text, msg, 31);
     text[31] = '\0';
     active = true;
-    showTime = millis();
-    duration = durationMs;
-    animPhase = 0;
+    slideY = (float)-BANNER_H;
+    slideOutTime = millis() + SLIDE_MS + durationMs;
+
+    // Slide in: Y from -24 (hidden) to 0 (visible)
+    tweenManager.start(&slideY, (float)-BANNER_H, 0.0f, SLIDE_MS, EASE_OUT_QUAD);
   }
 
   void update() {
     if (!active) return;
 
-    unsigned long elapsed = millis() - showTime;
-    if (elapsed < SLIDE_MS) {
-      animPhase = 0;
-    } else if (elapsed < SLIDE_MS + duration) {
-      animPhase = 1;
-    } else if (elapsed < SLIDE_MS + duration + SLIDE_MS) {
-      animPhase = 2;
-    } else {
+    // Start slide-out when duration expires
+    if (slideOutTime > 0 && millis() >= slideOutTime) {
+      tweenManager.start(&slideY, slideY, (float)-BANNER_H, SLIDE_MS, EASE_IN_QUAD);
+      slideOutTime = 0;
+    }
+
+    // Deactivate when fully slid out
+    if (slideOutTime == 0 && slideY <= (float)(-BANNER_H + 1) && !tweenManager.isActive(&slideY)) {
       active = false;
     }
   }
@@ -266,30 +258,16 @@ struct BotNotification {
   void render() {
     if (!active || gfx == nullptr) return;
 
-    // Banner: full width, at top of screen
-    int16_t bannerH = 24;
-    int16_t bannerY = 0;
-
-    if (animPhase == 0) {
-      // Slide in from top
-      unsigned long elapsed = millis() - showTime;
-      float t = (float)elapsed / SLIDE_MS;
-      bannerY = (int16_t)(-bannerH + bannerH * t);
-    } else if (animPhase == 2) {
-      // Slide out to top
-      unsigned long elapsed = millis() - showTime - SLIDE_MS - duration;
-      float t = (float)elapsed / SLIDE_MS;
-      bannerY = (int16_t)(-bannerH * t);
-    }
+    int16_t bannerY = (int16_t)slideY;
 
     // Draw banner
-    gfx->fillRect(0, bannerY, LCD_WIDTH, bannerH, NOTIFY_BG);
+    gfx->fillRect(0, bannerY, LCD_WIDTH, BANNER_H, NOTIFY_BG);
 
     // Draw text centered
     uint8_t textLen = strlen(text);
     int16_t textW = textLen * 6;
     int16_t textX = (LCD_WIDTH - textW) / 2;
-    int16_t textY = bannerY + (bannerH - 8) / 2;
+    int16_t textY = bannerY + (BANNER_H - 8) / 2;
 
     gfx->setTextSize(1);
     gfx->setTextColor(NOTIFY_TEXT);
