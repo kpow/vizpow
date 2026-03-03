@@ -28,6 +28,8 @@
   #define INTRO_DURATION_MS 1000
   #define INTRO_FADE_RATE 40
   #define INTRO_SPARKLE_BRIGHTNESS 180
+  // No LCD — GfxDevice is a stub (declared but never used)
+  typedef void GfxDevice;
 #elif defined(TARGET_LCD)
   #define BOARD_ESP32S3_TOUCH_LCD
   #define DISPLAY_LCD_ONLY
@@ -39,6 +41,10 @@
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
   #define INTRO_SPARKLE_BRIGHTNESS 255
+  // LovyanGFX — LGFX class defined in display_lcd.h, forward-declared here
+  // so headers can use 'extern GfxDevice *gfx;'
+  class LGFX;
+  typedef LGFX GfxDevice;
 #elif defined(TARGET_CORES3)
   #define BOARD_M5CORES3
   #define DISPLAY_LCD_ONLY
@@ -50,11 +56,10 @@
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
   #define INTRO_SPARKLE_BRIGHTNESS 255
-  // Type aliases: let existing 'extern Arduino_GFX *gfx' and 'Arduino_Canvas *botCanvas'
-  // declarations resolve to DisplayProxy* without including Arduino_GFX_Library.h
+  // M5Unified uses LovyanGFX internally — DisplayProxy wraps it for unified API.
+  // Forward-declared here so headers can use 'extern GfxDevice *gfx;'
   struct DisplayProxy;
-  #define Arduino_GFX    DisplayProxy
-  #define Arduino_Canvas DisplayProxy
+  typedef DisplayProxy GfxDevice;
 #else
   #error "Please define TARGET_LED, TARGET_LCD, or TARGET_CORES3"
 #endif
