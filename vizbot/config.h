@@ -35,6 +35,7 @@
   // Hi-res ambient effects remain available on CoreS3 (PSRAM)
   // Full power profile for USB-powered LCD board
   #define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Full TX — USB powered, needs range
+  #define OVERLAY_BUBBLE_Y 192              // Closer to mouth (default LCD_HEIGHT-58=222)
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20

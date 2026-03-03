@@ -28,7 +28,9 @@
 #define BOOT_STATUS_X      (LCD_WIDTH - 40)   // Right-aligned; was hardcoded 200 for 240px
 
 // ---- Speech Bubble (bot_overlays.h) ------------------------------------
-#define OVERLAY_BUBBLE_Y      (LCD_HEIGHT - 58)   // Near bottom; was hardcoded 220 for 280px
+#ifndef OVERLAY_BUBBLE_Y
+  #define OVERLAY_BUBBLE_Y    (LCD_HEIGHT - 58)   // Near bottom; was hardcoded 220 for 280px
+#endif
 #define OVERLAY_BUBBLE_MAX_W  (LCD_WIDTH - 6)     // 3px margin each side; was hardcoded 234
 
 // ---- Sleeping Zzz Animation (relative to BOT_FACE_CX/CY) ---------------
