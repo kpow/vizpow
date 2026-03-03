@@ -304,8 +304,8 @@ bool bootStageWiFi() {
     // Must be called AFTER softAP — disables radio power saving so beacons keep going
     WiFi.setSleep(false);
 
-    // Set TX power explicitly — some ESP32-S3 boards default too low to broadcast
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    // Set TX power from config — full power for USB boards, reduced for battery LED
+    WiFi.setTxPower(WIFI_TX_POWER);
 
     // Wait for AP to actually start beaconing (IP becomes valid)
     uint8_t retries = 0;
@@ -324,7 +324,9 @@ bool bootStageWiFi() {
     DBGLN(sysStatus.apIP);
     DBG("WiFi AP MAC: ");
     DBGLN(WiFi.softAPmacAddress());
-    DBG("TX Power: 8.5dBm, retries: ");
+    DBG("TX Power: ");
+    DBG(WiFi.getTxPower());
+    DBG("dBm*4, retries: ");
     DBGLN(retries);
   }
 

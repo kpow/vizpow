@@ -148,7 +148,7 @@ void loadWledSettings() {
 
   prefs.end();
 
-  wledData.reachable     = false;  // defer first poll — preserves heap for TLS
+  wledData.reachable     = true;   // assume reachable until proven otherwise
   wledData.sendState     = WLED_IDLE;
   wledData.hasSavedState = false;
   wledData.restoreAtMs   = 0;

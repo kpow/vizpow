@@ -547,9 +547,16 @@ bool cloudSync() {
     DBG(" (");
     DBG(response);  // error string when code < 0
     DBGLN(")");
-    // Exponential backoff
-    if (cloudBackoffSec == 0) cloudBackoffSec = 10;
-    else cloudBackoffSec = min(cloudBackoffSec * 2, (uint32_t)300);
+    // Network errors (DNS fail, connect timeout) get short retry — transient issues.
+    // Server errors (5xx) get exponential backoff — server might be down.
+    if (code < 0) {
+      // Network/DNS/connect error — retry in 30s, no escalation
+      cloudBackoffSec = 30;
+    } else {
+      // Server error — exponential backoff
+      if (cloudBackoffSec == 0) cloudBackoffSec = 10;
+      else cloudBackoffSec = min(cloudBackoffSec * 2, (uint32_t)300);
+    }
     cloudState = CLOUD_REGISTERED;
     return false;
   }
