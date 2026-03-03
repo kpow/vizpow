@@ -35,11 +35,15 @@ extern void wledQueueText(const char* text, uint16_t durationMs);
 // ============================================================================
 
 struct BotSpeechBubble {
-  char text[32];               // Current text content
+  char text[MAX_SAY_LEN];      // Current text content
   bool active;                 // Whether bubble is showing
   unsigned long showTime;      // When the bubble appeared
   uint16_t duration;           // How long to show (ms)
   uint8_t animPhase;           // 0=pop-in, 1=visible, 2=fade-out
+
+  // Word-wrap state
+  uint8_t numLines;            // 1-3
+  char lines[3][20];           // Wrapped line buffers (17 chars + null + margin)
 
   // Animation timing
   static const uint16_t POP_IN_MS = 150;
@@ -52,25 +56,76 @@ struct BotSpeechBubble {
   void init() {
     active = false;
     text[0] = '\0';
+    numLines = 0;
     animPhase = 0;
+  }
+
+  // Word-wrap text into lines[] for multi-line rendering
+  void wrapText() {
+    uint8_t maxChars = (OVERLAY_BUBBLE_MAX_W - 24) / 12;  // 17 for 240px LCD
+    numLines = 0;
+
+    uint8_t textLen = strlen(text);
+    if (textLen <= maxChars) {
+      strncpy(lines[0], text, 19); lines[0][19] = '\0';
+      numLines = 1;
+      return;
+    }
+
+    // Greedy word-wrap
+    const char* p = text;
+    while (*p && numLines < 3) {
+      uint8_t lineLen = 0;
+      const char* lastSpace = nullptr;
+      const char* scan = p;
+
+      while (*scan && lineLen < maxChars) {
+        if (*scan == ' ') lastSpace = scan;
+        lineLen++; scan++;
+      }
+
+      // If remaining text fits, take it all
+      if (!*scan) {
+        strncpy(lines[numLines], p, 19);
+        lines[numLines][19] = '\0';
+        numLines++;
+        break;
+      }
+
+      // Break at last space, or force-break if no space
+      uint8_t take = lastSpace ? (uint8_t)(lastSpace - p) : maxChars;
+      if (take > 19) take = 19;
+      memcpy(lines[numLines], p, take);
+      lines[numLines][take] = '\0';
+      numLines++;
+      p += take;
+      if (*p == ' ') p++;  // skip the space
+    }
+    if (numLines == 0) numLines = 1;  // safety
   }
 
   // Show a text bubble.
   // skipWled=true when wledQueueText was already called upstream (e.g. showBotSaying pre-delay path)
   void show(const char* msg, uint16_t durationMs = DEFAULT_DURATION, bool skipWled = false) {
-    strncpy(text, msg, 31);
-    text[31] = '\0';
+    strncpy(text, msg, MAX_SAY_LEN - 1);
+    text[MAX_SAY_LEN - 1] = '\0';
     active = true;
     showTime = millis();
     duration = durationMs;
     animPhase = 0;
 
-    // Calculate bubble dimensions based on text
-    uint8_t textLen = strlen(text);
-    // Text size 2 = 12x16 per char
-    bubbleW = textLen * 12 + 24;  // 12px padding each side
+    // Word-wrap into lines
+    wrapText();
+
+    // Bubble width based on longest wrapped line
+    uint8_t maxLineLen = 0;
+    for (uint8_t i = 0; i < numLines; i++) {
+      uint8_t len = strlen(lines[i]);
+      if (len > maxLineLen) maxLineLen = len;
+    }
+    bubbleW = maxLineLen * 12 + 24;  // 12px padding each side
     if (bubbleW > OVERLAY_BUBBLE_MAX_W) bubbleW = OVERLAY_BUBBLE_MAX_W;
-    bubbleH = 30;  // 16px text + 14px padding
+    bubbleH = numLines * 16 + 14;  // 16px per line + 14px padding
     bubbleX = (LCD_WIDTH - bubbleW) / 2;  // Centered
     bubbleY = OVERLAY_BUBBLE_Y;
 
@@ -83,9 +138,9 @@ struct BotSpeechBubble {
 
   // Show from PROGMEM string
   void showP(const char* progmemStr, uint16_t durationMs = DEFAULT_DURATION) {
-    char buf[32];
-    strncpy_P(buf, progmemStr, 31);
-    buf[31] = '\0';
+    char buf[MAX_SAY_LEN];
+    strncpy_P(buf, progmemStr, MAX_SAY_LEN - 1);
+    buf[MAX_SAY_LEN - 1] = '\0';
     show(buf, durationMs);
   }
 
@@ -149,17 +204,21 @@ struct BotSpeechBubble {
       gfx->setTextSize(2);
       gfx->setTextColor(OVERLAY_TEXT);
 
-      // Center text in bubble (text size 2 = 12x16 per char)
-      uint8_t textLen = strlen(text);
-      int16_t textW = textLen * 12;
-      int16_t textX = sx + (sw - textW) / 2;
-      int16_t textY = sy + (sh - 16) / 2;
+      int16_t totalTextH = numLines * 16;
+      int16_t startY = sy + (sh - totalTextH) / 2;
 
-      // Bold: draw twice with 1px horizontal offset
-      gfx->setCursor(textX, textY);
-      gfx->print(text);
-      gfx->setCursor(textX + 1, textY);
-      gfx->print(text);
+      for (uint8_t i = 0; i < numLines; i++) {
+        uint8_t lineLen = strlen(lines[i]);
+        int16_t textW = lineLen * 12;
+        int16_t textX = sx + (sw - textW) / 2;  // center each line
+        int16_t textY = startY + i * 16;
+
+        // Bold: draw twice with 1px horizontal offset
+        gfx->setCursor(textX, textY);
+        gfx->print(lines[i]);
+        gfx->setCursor(textX + 1, textY);
+        gfx->print(lines[i]);
+      }
     }
   }
 };

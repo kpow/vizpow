@@ -35,14 +35,14 @@ p/SgguMh1YQdc4acLa/KNJvxn7kjNuK8YAOdgLOaVsjh4rsUecrNIdSUtUlD
 // ============================================================================
 // Cloud Client — vizCloud HTTPS Communication
 // ============================================================================
-// Runs as a FreeRTOS task on Core 0. Handles bot registration, periodic sync,
-// command dispatch, and content updates.
+// Runs cooperatively inside wifiServerTask on Core 0 via pollCloudSync().
+// Handles bot registration, periodic sync, command dispatch, and content updates.
 //
 // Thread safety:
 // - Pushes commands via FreeRTOS queue (cross-core safe)
-// - CloudMeta written only by this task (Core 0)
+// - CloudMeta written only on Core 0 (wifi task)
 // - LittleFS writes guarded by contentUpdateInProgress flag
-// - WiFiClientSecure only used by this task
+// - TLS naturally serialized with WLED HTTP — prevents heap fragmentation
 // ============================================================================
 
 // Forward declarations from task_manager.h
@@ -73,7 +73,6 @@ enum CloudState : uint8_t {
 };
 
 static volatile CloudState cloudState = CLOUD_IDLE;
-static TaskHandle_t cloudTaskHandle = nullptr;
 
 // Command ack ring buffer
 #define CLOUD_ACK_SLOTS 8
@@ -84,6 +83,7 @@ static uint8_t ackCount = 0;
 // Backoff state
 static uint32_t cloudBackoffSec = 0;
 static unsigned long lastSyncAttempt = 0;
+static unsigned long cloudNextPollMs = 0;
 
 
 // ============================================================================
@@ -216,12 +216,12 @@ static String buildSyncBody() {
 // Large responses (>2KB) are streamed to a LittleFS temp file so we never
 // need to grow a String while TLS buffers are consuming most of the heap.
 // After the TLS connection closes (~32KB freed), we read the file back.
-static int cloudPost(const String& url, const String& body, String& response) {
+static int cloudPost(const char* url, const String& body, String& response) {
   esp_http_client_config_t config = {};
-  config.url = url.c_str();
+  config.url = url;
   config.method = HTTP_METHOD_POST;
-  config.buffer_size = 2048;
-  config.buffer_size_tx = 1024;
+  config.buffer_size = 1024;      // was 2048 — cloud responses are 63-500B, saves 1KB during TLS
+  config.buffer_size_tx = 512;    // was 1024 — request headers + body fit in 512B, saves 512B
   config.cert_pem = gts_root_r4_pem;
   config.timeout_ms = CLOUD_RESPONSE_TIMEOUT;
 
@@ -412,7 +412,8 @@ bool cloudRegister() {
 
   String body = buildRegistrationBody();
   String response;
-  String url = String(CLOUD_SERVER_URL) + "/api/bots/register";
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/bots/register", CLOUD_SERVER_URL);
 
   int code = cloudPost(url, body, response);
 
@@ -479,7 +480,8 @@ bool cloudSync() {
 
   String body = buildSyncBody();
   String response;
-  String url = String(CLOUD_SERVER_URL) + "/api/bots/" + String(cloudMeta.botId) + "/sync";
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/bots/%s/sync", CLOUD_SERVER_URL, cloudMeta.botId);
 
   int code = cloudPost(url, body, response);
 
@@ -576,6 +578,9 @@ void initCloudClient() {
     }
   }
 
+  // Boot delay — let WiFi stack settle before first cloud poll
+  cloudNextPollMs = millis() + 2000;
+
   DBG("Cloud init: botId=");
   DBG(cloudMeta.botId);
   DBG(" ver=");
@@ -585,72 +590,58 @@ void initCloudClient() {
 }
 
 // ============================================================================
-// Cloud Sync Task — FreeRTOS task on Core 0
+// Cloud Poll — called from wifiServerTask loop (Core 0), non-blocking
 // ============================================================================
 
-static void cloudSyncTask(void* param) {
-  DBGLN("Cloud task started on Core 0");
+void pollCloudSync() {
+  if (cloudState == CLOUD_ERROR_AUTH) return;
+  if (!sysStatus.staConnected) return;
 
-  // Small delay to let WiFi stack settle
-  vTaskDelay(pdMS_TO_TICKS(2000));
+  unsigned long now = millis();
+  if (now < cloudNextPollMs) return;
 
-  for (;;) {
-    // Stop on auth error
-    if (cloudState == CLOUD_ERROR_AUTH) {
-      DBGLN("Cloud: auth error — task sleeping indefinitely");
-      vTaskDelay(pdMS_TO_TICKS(60000));
-      continue;
+  // Register if needed
+  if (!cloudMeta.registered || strlen(cloudMeta.botId) == 0) {
+    cloudRegister();
+    if (!cloudMeta.registered) {
+      uint32_t wait = (cloudBackoffSec > 0) ? cloudBackoffSec : 10;
+      cloudNextPollMs = now + wait * 1000;
+      return;
     }
-
-    // Need STA connection
-    if (!sysStatus.staConnected) {
-      vTaskDelay(pdMS_TO_TICKS(5000));
-      continue;
-    }
-
-    // Register if needed
-    if (!cloudMeta.registered || strlen(cloudMeta.botId) == 0) {
-      cloudRegister();
-      if (!cloudMeta.registered) {
-        uint32_t wait = (cloudBackoffSec > 0) ? cloudBackoffSec : 10;
-        vTaskDelay(pdMS_TO_TICKS(wait * 1000));
-        continue;
-      }
-    }
-
-    // Sync at poll interval
-    // Canvas framebuffer lives in static BSS (not heap), so TLS has
-    // plenty of contiguous heap for its 32KB SSL buffers — no canvas
-    // release needed, zero flicker.
-    unsigned long now = millis();
-    uint32_t interval = (cloudBackoffSec > 0)
-      ? cloudBackoffSec
-      : (uint32_t)cloudMeta.pollIntervalSec;
-
-    if (now - lastSyncAttempt >= interval * 1000) {
-      lastSyncAttempt = now;
-
-      DBG("Cloud: sync, largest block=");
-      DBGLN(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
-
-      cloudSync();
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(1000));
   }
-}
 
-void startCloudTask() {
-  xTaskCreatePinnedToCore(
-    cloudSyncTask,
-    "cloud",
-    CLOUD_TASK_STACK,
-    nullptr,
-    1,
-    &cloudTaskHandle,
-    0  // Core 0
-  );
-  DBGLN("Cloud sync task started on Core 0");
+  // Sync at poll interval
+  uint32_t interval = (cloudBackoffSec > 0)
+    ? cloudBackoffSec
+    : (uint32_t)cloudMeta.pollIntervalSec;
+
+  if (now - lastSyncAttempt >= interval * 1000) {
+    lastSyncAttempt = now;
+
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    DBG("Cloud: sync, largest block=");
+    DBG(largest);
+    DBG(" free=");
+    DBGLN(freeHeap);
+
+    DBG("Cloud: stack HWM=");
+    DBGLN(uxTaskGetStackHighWaterMark(NULL));
+
+    // Heap guard: TLS needs ~24KB contiguous (16.7KB in_buf + 4.4KB out_buf + 1.5KB HTTP + 2KB overhead)
+    // With reduced HTTP buffers (1024+512 vs 2048+1024), threshold lowered from 32768.
+    if (largest < 28672) {
+      DBG("Cloud: skip — heap too fragmented (need 28672, have ");
+      DBG(largest);
+      DBGLN(")");
+      cloudNextPollMs = now + 10000;  // retry in 10s
+      return;
+    }
+
+    cloudSync();
+  }
+
+  cloudNextPollMs = now + 1000;  // check again in 1s
 }
 
 // ============================================================================

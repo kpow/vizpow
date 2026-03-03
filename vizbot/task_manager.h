@@ -66,7 +66,7 @@ enum CommandType : uint8_t {
   CMD_SET_AMBIENT_EFFECT,
 };
 
-// 32-byte command payload — fits all command types
+// ~64-byte command payload — fits all command types including multi-word phrases
 struct Command {
   CommandType type;
   union {
@@ -74,7 +74,7 @@ struct Command {
     uint16_t u16val;
     int32_t  i32val;
     struct {
-      char text[28];
+      char text[60];
       uint16_t duration;
     } say;
   };
@@ -263,11 +263,11 @@ void drainCommandQueue() {
 }
 
 // ============================================================================
-// WiFi Server Task — runs handleClient() + DNS on Core 0
+// WiFi Server Task — unified Core 0 network loop
 // ============================================================================
-// The built-in WebServer and DNS server are synchronous, but by running
-// them in their own FreeRTOS task pinned to Core 0 (where WiFi stack
-// lives), we keep all network handling off the render core (Core 1).
+// All network operations in one cooperative loop: HTTP server, DNS, WLED,
+// weather, and cloud TLS. Single task = natural serialization — cloud TLS
+// can't overlap with WLED HTTP, preventing heap fragmentation.
 
 extern WebServer server;
 extern DNSServer dnsServer;
@@ -283,7 +283,18 @@ extern void pollWledDisplay();
 // Defined in weather_data.h — checks fetchRequested flag and fetches if needed.
 extern void pollWeatherFetch();
 
+// Defined in cloud_client.h — non-blocking cloud sync (TLS registration + polling).
+#ifdef CLOUD_ENABLED
+extern void pollCloudSync();
+#endif
+
 TaskHandle_t wifiTaskHandle = nullptr;
+
+// Static task stack — lives in BSS instead of heap, keeping the largest
+// free heap block contiguous (~33KB) so TLS can allocate its ~32KB buffers.
+// IMPORTANT: StackType_t is uint8_t on ESP-IDF, so array size = bytes directly.
+static StackType_t wifiTaskStack[8192];   // 8KB in BSS
+static StaticTask_t wifiTaskTCB;
 
 void wifiServerTask(void* param) {
   for (;;) {
@@ -291,6 +302,9 @@ void wifiServerTask(void* param) {
       pollWifiConnectTask();             // connect request + STA poll
       pollWledDisplay();                 // WLED text send + restore
       pollWeatherFetch();                // Weather API fetch (if requested)
+      #ifdef CLOUD_ENABLED
+      pollCloudSync();                   // Cloud registration + sync (TLS)
+      #endif
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP
     }
@@ -300,16 +314,17 @@ void wifiServerTask(void* param) {
 
 // Call after WiFi AP + web server are up (end of boot sequence)
 void startWifiTask() {
-  xTaskCreatePinnedToCore(
+  wifiTaskHandle = xTaskCreateStaticPinnedToCore(
     wifiServerTask,   // Task function
     "wifi_srv",        // Name
-    6144,              // Stack size (increased for WiFiClient in WLED sends)
+    8192,              // Stack depth (StackType_t = uint8_t on ESP-IDF, so bytes)
     nullptr,           // Parameter
     1,                 // Priority (low — WiFi stack is higher)
-    &wifiTaskHandle,   // Handle
+    wifiTaskStack,     // Stack buffer (BSS)
+    &wifiTaskTCB,      // TCB (BSS)
     0                  // Core 0 (protocol CPU)
   );
-  DBGLN("WiFi server task started on Core 0");
+  DBGLN("WiFi server task started on Core 0 (static 8KB)");
 }
 
 // ============================================================================

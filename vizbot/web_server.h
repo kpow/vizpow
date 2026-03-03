@@ -44,7 +44,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     <h2>Say Something</h2>
     <div style="display:flex;gap:8px">
       <input type="text" id="botSayInput" placeholder="Type a message..."
-        style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
+        style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="60">
       <button onclick="sendBotSay()" style="padding:10px 16px">Say</button>
     </div>
   </div>

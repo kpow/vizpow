@@ -332,12 +332,8 @@ void setup() {
     startWifiTask();
   }
 
-  #ifdef CLOUD_ENABLED
-  // Start cloud sync task on Core 0 (independent of WiFi server task)
-  if (sysStatus.littlefsReady) {
-    startCloudTask();
-  }
-  #endif
+  // Cloud sync now runs inside wifiServerTask via pollCloudSync() —
+  // no separate task needed. initCloudClient() already called above.
 }
 
 void loop() {
