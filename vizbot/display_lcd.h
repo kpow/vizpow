@@ -181,7 +181,7 @@ void initLCD() {
 
 // Custom LGFX class for ESP32-S3-Touch-LCD-1.69 (ST7789V2, SPI with DMA)
 class LGFX : public lgfx::LGFX_Device {
-  lgfx::Panel_ST7789  _panel_instance;
+  lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI       _bus_instance;
   lgfx::Light_PWM     _light_instance;
 
@@ -247,17 +247,19 @@ static bool _dp_canvas_failed = false;
 
 // DisplayProxy wraps LGFX + LGFX_Sprite for unified API.
 // Same pattern as TARGET_CORES3 — all code uses gfx->method() identically.
+// All color args are cast to uint16_t so LovyanGFX treats them as RGB565, not RGB888
+// (LovyanGFX interprets uint32_t > 0xFFFF as RGB888; casting fixes cyan-instead-of-white).
 struct DisplayProxy {
-  void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color)  { DP(fillRect, x, y, w, h, color); }
-  void fillScreen(uint32_t color)                                              { DP(fillScreen, color); }
-  void drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color)  { DP(drawRect, x, y, w, h, color); }
-  void drawPixel(int32_t x, int32_t y, uint32_t color)                        { DP(drawPixel, x, y, color); }
-  void drawFastHLine(int32_t x, int32_t y, int32_t w, uint32_t color)         { DP(drawFastHLine, x, y, w, color); }
-  void drawFastVLine(int32_t x, int32_t y, int32_t h, uint32_t color)         { DP(drawFastVLine, x, y, h, color); }
-  void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t color)            { DP(fillCircle, x, y, r, color); }
+  void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color)  { DP(fillRect, x, y, w, h, (uint16_t)color); }
+  void fillScreen(uint32_t color)                                              { DP(fillScreen, (uint16_t)color); }
+  void drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color)  { DP(drawRect, x, y, w, h, (uint16_t)color); }
+  void drawPixel(int32_t x, int32_t y, uint32_t color)                        { DP(drawPixel, x, y, (uint16_t)color); }
+  void drawFastHLine(int32_t x, int32_t y, int32_t w, uint32_t color)         { DP(drawFastHLine, x, y, w, (uint16_t)color); }
+  void drawFastVLine(int32_t x, int32_t y, int32_t h, uint32_t color)         { DP(drawFastVLine, x, y, h, (uint16_t)color); }
+  void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t color)            { DP(fillCircle, x, y, r, (uint16_t)color); }
   void setCursor(int32_t x, int32_t y)        { DP(setCursor, x, y); }
-  void setTextColor(uint32_t fg)              { DP(setTextColor, fg); }
-  void setTextColor(uint32_t fg, uint32_t bg) { DP(setTextColor, fg, bg); }
+  void setTextColor(uint32_t fg)              { DP(setTextColor, (uint16_t)fg); }
+  void setTextColor(uint32_t fg, uint32_t bg) { DP(setTextColor, (uint16_t)fg, (uint16_t)bg); }
   void setTextSize(float size)                { DP(setTextSize, size); }
   void print(const char* s)                   { DP(print, s); }
   void print(int v)                           { DP(print, v); }
@@ -266,11 +268,11 @@ struct DisplayProxy {
   void print(unsigned long v)                 { DP(print, v); }
   void print(IPAddress ip)                    { DP(print, ip.toString().c_str()); }
   void println(const char* s)                 { DP(println, s); }
-  void drawLine(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t color) { DP(drawLine, x0, y0, x1, y1, color); }
-  void drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t color) { DP(drawRoundRect, x, y, w, h, r, color); }
-  void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t color) { DP(fillRoundRect, x, y, w, h, r, color); }
-  void fillEllipse(int32_t x, int32_t y, int32_t rx, int32_t ry, uint32_t color) { DP(fillEllipse, x, y, rx, ry, color); }
-  void fillTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t color) { DP(fillTriangle, x0, y0, x1, y1, x2, y2, color); }
+  void drawLine(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t color) { DP(drawLine, x0, y0, x1, y1, (uint16_t)color); }
+  void drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t color) { DP(drawRoundRect, x, y, w, h, r, (uint16_t)color); }
+  void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t color) { DP(fillRoundRect, x, y, w, h, r, (uint16_t)color); }
+  void fillEllipse(int32_t x, int32_t y, int32_t rx, int32_t ry, uint32_t color) { DP(fillEllipse, x, y, rx, ry, (uint16_t)color); }
+  void fillTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t color) { DP(fillTriangle, x0, y0, x1, y1, x2, y2, (uint16_t)color); }
   void begin() {}  // no-op: initLCD() handles display init
   int16_t width()  { return (int16_t)_lcd_display.width(); }
   int16_t height() { return (int16_t)_lcd_display.height(); }

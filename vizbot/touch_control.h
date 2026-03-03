@@ -359,11 +359,7 @@ void touchBrightnessUp() {
   if (lcdBrightness < 255) {
     lcdBrightness += 25;
     if (lcdBrightness > 255) lcdBrightness = 255;
-    #ifdef TARGET_CORES3
-      M5.Display.setBrightness(lcdBrightness);
-    #else
-      analogWrite(LCD_BL, lcdBrightness);
-    #endif
+    setLCDBacklight(lcdBrightness);
     markSettingsDirty();
   }
 }
@@ -372,11 +368,7 @@ void touchBrightnessDown() {
   if (lcdBrightness > 25) {
     lcdBrightness -= 25;
     if (lcdBrightness < 25) lcdBrightness = 25;
-    #ifdef TARGET_CORES3
-      M5.Display.setBrightness(lcdBrightness);
-    #else
-      analogWrite(LCD_BL, lcdBrightness);
-    #endif
+    setLCDBacklight(lcdBrightness);
     markSettingsDirty();
   }
 }
