@@ -122,11 +122,11 @@ struct BotModeState {
   const BotPersonality* personality;
 
   // Custom saying from web
-  char customSaying[32];
+  char customSaying[MAX_SAY_LEN];
   bool hasCustomSaying;
 
   // Pending say: LCD bubble delayed by WLED_SAY_PRE_DELAY_MS for WLED sync
-  char pendingSayText[32];
+  char pendingSayText[MAX_SAY_LEN];
   uint16_t pendingSayDuration;
   unsigned long pendingSayAt;  // millis() when LCD bubble should fire; 0 = none
 
@@ -176,7 +176,7 @@ struct BotModeState {
       shakeReactEnd = millis() + 800;
 
       // Show wake-up saying
-      char buf[32];
+      char buf[MAX_SAY_LEN];
       getRandomSayingText(SAY_WAKE, buf, sizeof(buf));
       speechBubble.show(buf, 2000);
     }
@@ -198,7 +198,7 @@ struct BotModeState {
 
     // Maybe show a tap saying
     if (random(100) < personality->sayChancePercent) {
-      char buf[32];
+      char buf[MAX_SAY_LEN];
       getRandomSayingText(SAY_REACT_TAP, buf, sizeof(buf));
       speechBubble.show(buf, 2500);
     }
@@ -214,7 +214,7 @@ struct BotModeState {
     face.transitionTo(EXPR_DIZZY, 150);
 
     // Show shake saying
-    char buf[32];
+    char buf[MAX_SAY_LEN];
     getRandomSayingText(SAY_REACT_SHAKE, buf, sizeof(buf));
     speechBubble.show(buf, 2500);
 
@@ -238,8 +238,8 @@ struct BotModeState {
   // Schedule LCD bubble after WLED pre-delay (called from showBotSaying after wledQueueText)
   void scheduleSaying(const char* text, uint16_t durationMs) {
     registerInteraction();
-    strncpy(pendingSayText, text, 31);
-    pendingSayText[31] = '\0';
+    strncpy(pendingSayText, text, MAX_SAY_LEN - 1);
+    pendingSayText[MAX_SAY_LEN - 1] = '\0';
     pendingSayDuration = durationMs;
     pendingSayAt = millis() + WLED_SAY_PRE_DELAY_MS;
   }
@@ -317,7 +317,7 @@ void updateBotMode() {
   // ---- Random idle sayings (personality-driven) ----
   if ((botMode.state == BOT_ACTIVE || botMode.state == BOT_IDLE) &&
       !botMode.speechBubble.active && now >= botMode.nextIdleSaying) {
-    char buf[32];
+    char buf[MAX_SAY_LEN];
     getRandomSayingText(SAY_IDLE, buf, sizeof(buf));
     botMode.speechBubble.show(buf, 3500);
     botMode.nextIdleSaying = now + random(p->sayMinMs, p->sayMaxMs);
@@ -375,7 +375,9 @@ extern uint8_t effectIndex;
 extern CRGB leds[];
 
 // Use the function pointer tables from effects_ambient.h
+#if defined(HIRES_ENABLED)
 extern const AmbientFunc ambientHiResFuncs[];
+#endif
 extern const AmbientFunc ambientLedFuncs[];
 
 // Render ambient effect as bot background (respects hiResMode)
@@ -387,6 +389,7 @@ void renderBotAmbientBackground() {
     // Hi-res: render effect directly to LCD canvas
     ambientHiResFuncs[idx]();
   } else {
+  #endif
     // Pixel mode: run LED effect, then render leds[] as blocky background
     ambientLedFuncs[idx]();
     for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
@@ -399,9 +402,8 @@ void renderBotAmbientBackground() {
         gfx->fillRect(screenX, screenY, PIXEL_SIZE, PIXEL_SIZE, c565);
       }
     }
+  #if defined(HIRES_ENABLED)
   }
-  #else
-  ambientHiResFuncs[idx]();
   #endif
 }
 
@@ -547,7 +549,7 @@ void enterBotMode() {
     botMode.init();
 
     // Show greeting on first entry
-    char buf[32];
+    char buf[MAX_SAY_LEN];
     getRandomSayingText(SAY_GREETING, buf, sizeof(buf));
     botMode.speechBubble.show(buf, 2500);
   } else {
@@ -558,7 +560,7 @@ void enterBotMode() {
     botMode.shakeReacting = true;
     botMode.shakeReactEnd = millis() + 1500;
 
-    char buf[32];
+    char buf[MAX_SAY_LEN];
     getRandomSayingText(SAY_GREETING, buf, sizeof(buf));
     botMode.speechBubble.show(buf, 2000);
   }
@@ -645,7 +647,7 @@ void setBotPersonality(uint8_t index) {
   botMode.registerInteraction();
 
   // Show notification
-  char buf[32];
+  char buf[MAX_SAY_LEN];
   snprintf(buf, sizeof(buf), "Personality: %s", botMode.personality->name);
   botMode.showNotification(buf, 2000);
 }

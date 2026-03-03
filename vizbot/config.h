@@ -6,8 +6,8 @@
 // ============================================================================
 // Uncomment ONE of these:
 // #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-// #define TARGET_LCD    // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
-#define TARGET_CORES3    // M5Stack Core S3 (320x240 IPS, touch, BMI270)
+#define TARGET_LCD    // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+// #define TARGET_CORES3    // M5Stack Core S3 (320x240 IPS, touch, BMI270)
 
 // ============================================================================
 // Auto-configuration based on target
@@ -31,7 +31,8 @@
 #elif defined(TARGET_LCD)
   #define BOARD_ESP32S3_TOUCH_LCD
   #define DISPLAY_LCD_ONLY
-  #define HIRES_ENABLED  // Hi-res ambient for bot background overlay
+  // HIRES_ENABLED removed — saves 3.2KB BSS for TLS heap headroom
+  // Hi-res ambient effects remain available on CoreS3 (PSRAM)
   // Full power profile for USB-powered LCD board
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
@@ -132,8 +133,9 @@
 #define MODE_BOT 0
 
 // Ambient effect count (used for bot background overlay)
-#define NUM_AMBIENT_EFFECTS 13
+#define NUM_AMBIENT_EFFECTS 11
 #define NUM_PALETTES 15
+#define MAX_SAY_LEN 64  // Max characters for speech text (LCD + WLED)
 
 // Shake detection threshold (for bot reactions)
 #define SHAKE_THRESHOLD 2.0      // Acceleration magnitude to count as a shake (g)
@@ -146,7 +148,6 @@
 // Info Mode — sustained shake to toggle weather/info view
 #define SUSTAINED_SHAKE_DURATION_MS 500    // How long to shake to trigger info mode
 #define SHAKE_SUSTAIN_THRESHOLD     1.2f   // Accel magnitude for sustained shake detection
-#define WEATHER_REFRESH_MS          600000 // 10 minutes between weather API calls
 #define WEATHER_LAT_DEFAULT         "37.54"
 #define WEATHER_LON_DEFAULT         "-77.43"
 
@@ -164,7 +165,6 @@
   #define CLOUD_CONNECT_TIMEOUT  5000
   #define CLOUD_RESPONSE_TIMEOUT 10000
   #define CLOUD_BOOT_TIMEOUT     5000
-  #define CLOUD_TASK_STACK       8192
   #define CLOUD_NVS_NAMESPACE    "vizcloud"
   #define FIRMWARE_VERSION       "2.0.0"
 #endif

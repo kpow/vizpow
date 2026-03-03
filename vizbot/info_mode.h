@@ -141,9 +141,6 @@ struct InfoModeData {
   // Mini eyes
   MiniEyeState miniEyes;
 
-  // Weather refresh timer
-  unsigned long lastWeatherRequestMs;
-
   bool active;                 // Shortcut: state != INFO_INACTIVE
 
   void init() {
@@ -151,7 +148,6 @@ struct InfoModeData {
     currentPage = INFO_PAGE_WEATHER;
     active = false;
     miniEyes.init();
-    lastWeatherRequestMs = 0;
   }
 
   // Begin enter transition (called when sustained shake detected)
@@ -168,9 +164,8 @@ struct InfoModeData {
     getRandomSayingText(SAY_INFO_ENTER, buf, sizeof(buf));
     botMode.speechBubble.show(buf, INFO_PRE_TRANSITION_MS);
 
-    // Request weather data fetch
+    // Request weather data fetch (once on entry, no auto-refresh)
     requestWeatherFetch();
-    lastWeatherRequestMs = millis();
 
     miniEyes.init();
   }
@@ -215,11 +210,6 @@ struct InfoModeData {
 
       case INFO_ACTIVE:
         miniEyes.update();
-        // Auto-refresh weather
-        if (now - lastWeatherRequestMs >= WEATHER_REFRESH_MS) {
-          requestWeatherFetch();
-          lastWeatherRequestMs = now;
-        }
         break;
 
       case INFO_EXITING: {

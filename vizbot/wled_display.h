@@ -92,7 +92,13 @@ struct WledDisplayData {
   uint16_t frameDurationMs;
 
   // Text buffer for wledQueueText compatibility (Core 1 writes, Core 0 reads)
-  char textBuffer[32];
+  char textBuffer[MAX_SAY_LEN];
+
+  // Word sequence state (for multi-word phrases)
+  char words[8][12];            // Up to 8 words, 11 chars each
+  uint8_t wordCount;            // Total words in current sequence
+  uint8_t currentWord;          // Index of word being displayed
+  uint16_t perWordDurationMs;   // Hold time per word
 
   // Saved segment state for restore (Core 0 only)
   int savedFx;
@@ -142,7 +148,7 @@ void loadWledSettings() {
 
   prefs.end();
 
-  wledData.reachable     = true;
+  wledData.reachable     = false;  // defer first poll — preserves heap for TLS
   wledData.sendState     = WLED_IDLE;
   wledData.hasSavedState = false;
   wledData.restoreAtMs   = 0;
@@ -151,6 +157,8 @@ void loadWledSettings() {
   wledData.phaseEndMs    = 0;
   wledData.ddpSequence   = 0;
   wledData.pendingPalSync = -1;
+  wledData.wordCount     = 0;
+  wledData.currentWord   = 0;
 
   memset(wledData.pixelBuffer, 0, WLED_PIXEL_BYTES);
 
@@ -455,22 +463,54 @@ void wledQueueFrame(uint16_t durationMs) {
 }
 
 // Queue text for display — renders into pixel buffer, then queues DDP frame.
-// Drop-in replacement for old FX 122 path. All existing callers work unchanged.
+// Multi-word text is split into words and sequenced one at a time by pollWledDisplay().
 void wledQueueText(const char* text, uint16_t durationMs) {
   if (!wledData.enabled) return;
   if (wledData.ip[0] == '\0') return;
   if (!sysStatus.staConnected) return;
 
   // Store text for debug logging
-  strncpy(wledData.textBuffer, text, 31);
-  wledData.textBuffer[31] = '\0';
+  strncpy(wledData.textBuffer, text, MAX_SAY_LEN - 1);
+  wledData.textBuffer[MAX_SAY_LEN - 1] = '\0';
 
-  // Render text into pixel buffer
+  // Check if text has spaces (multi-word)
+  bool hasSpace = false;
+  for (const char* p = text; *p; p++) {
+    if (*p == ' ') { hasSpace = true; break; }
+  }
+
+  if (!hasSpace) {
+    // Single word — render directly (existing behavior)
+    wledData.wordCount = 0;
+    wledPixelClear();
+    wledPixelDrawText(text, wledData.r, wledData.g, wledData.b);
+    wledData.frameDurationMs = durationMs;
+    wledData.sendState = WLED_FRAME_REQUESTED;
+    return;
+  }
+
+  // Multi-word: split by spaces into words[]
+  wledData.wordCount = 0;
+  const char* p = text;
+  while (*p && wledData.wordCount < 8) {
+    while (*p == ' ') p++;  // skip leading spaces
+    if (!*p) break;
+    uint8_t len = 0;
+    while (p[len] && p[len] != ' ' && len < 11) len++;
+    memcpy(wledData.words[wledData.wordCount], p, len);
+    wledData.words[wledData.wordCount][len] = '\0';
+    wledData.wordCount++;
+    p += len;
+  }
+
+  // Per-word duration: total / wordCount, min 800ms
+  wledData.perWordDurationMs = max((uint16_t)(durationMs / wledData.wordCount), (uint16_t)800);
+  wledData.currentWord = 0;
+
+  // Render first word and queue
   wledPixelClear();
-  wledPixelDrawText(text, wledData.r, wledData.g, wledData.b);
-
-  // Queue as DDP frame
-  wledData.frameDurationMs = durationMs;
+  wledPixelDrawText(wledData.words[0], wledData.r, wledData.g, wledData.b);
+  wledData.frameDurationMs = wledData.perWordDurationMs;
   wledData.sendState = WLED_FRAME_REQUESTED;
 }
 
@@ -513,11 +553,33 @@ void wledPollPalette() {
 // ============================================================================
 
 void pollWledDisplay() {
-  // ---- Hold complete → restore previous effect immediately ----
+  // ---- Hold complete → advance word or restore ----
   if (wledData.phase == WLED_PHASE_HOLD && millis() >= wledData.phaseEndMs) {
-    wledData.phase = WLED_PHASE_NONE;
-    wledData.restoreAtMs = millis();
-    WLED_DBGLN("WLED: hold done, restoring");
+    // Multi-word sequence: advance to next word
+    if (wledData.wordCount > 0 && wledData.currentWord + 1 < wledData.wordCount) {
+      wledData.currentWord++;
+      wledPixelClear();
+      wledPixelDrawText(wledData.words[wledData.currentWord],
+                        wledData.r, wledData.g, wledData.b);
+
+      if (wledSendDDP()) {
+        wledData.phaseEndMs = millis() + wledData.perWordDurationMs;
+        WLED_DBG("WLED: word ");
+        WLED_DBG(wledData.currentWord);
+        WLED_DBG("/");
+        WLED_DBGLN(wledData.wordCount);
+      } else {
+        // DDP failed — fall through to restore
+        wledData.phase = WLED_PHASE_NONE;
+        wledData.restoreAtMs = millis();
+      }
+    } else {
+      // No more words — restore
+      wledData.wordCount = 0;
+      wledData.phase = WLED_PHASE_NONE;
+      wledData.restoreAtMs = millis();
+      WLED_DBGLN("WLED: hold done, restoring");
+    }
   }
 
   // ---- Restore previous effect via HTTP (instant, no 2.5s DDP timeout) ----
@@ -546,6 +608,11 @@ void pollWledDisplay() {
 
   // ---- Send DDP frame (checked before idle poll — urgent requests skip blocking HTTP) ----
   if (wledData.sendState != WLED_FRAME_REQUESTED) {
+    // Skip idle poll if WLED unreachable (30s backoff, same as DDP sends)
+    if (!wledData.reachable &&
+        millis() - wledData.lastFailTime < WLED_RETRY_BACKOFF_MS) {
+      return;
+    }
     // Nothing urgent — run periodic state capture so hasSavedState is ready for next say
     if (wledData.enabled && wledData.ip[0] != '\0' && sysStatus.staConnected &&
         wledData.phase == WLED_PHASE_NONE &&
