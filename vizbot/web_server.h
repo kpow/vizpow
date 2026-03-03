@@ -421,6 +421,12 @@ extern struct InfoModeData infoMode;
 extern char weatherLat[12];
 extern char weatherLon[12];
 
+// Cloud status accessors (defined in cloud_client.h when CLOUD_ENABLED)
+#ifdef CLOUD_ENABLED
+extern const char* getCloudStateStr();
+extern CloudMeta cloudMeta;
+#endif
+
 void handleState() {
   String json = "{\"brightness\":" + String(brightness) +
                 ",\"speed\":" + String(speed) +
@@ -438,6 +444,11 @@ void handleState() {
                   ",\"mdns\":" + (sysStatus.mdnsReady ? "true" : "false") +
                   ",\"bootMs\":" + String(sysStatus.bootTimeMs) +
                   ",\"fails\":" + String(sysStatus.failCount) +
+                  ",\"freeHeap\":" + String(ESP.getFreeHeap()) +
+                  ",\"maxBlock\":" + String(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)) +
+                  ",\"psram\":" + (sysStatus.psramAvailable ? "true" : "false") +
+                  (sysStatus.psramAvailable ? ",\"psramTotal\":" + String(ESP.getPsramSize()) +
+                                              ",\"psramFree\":" + String(ESP.getFreePsram()) : "") +
                   ",\"sta\":" + (sysStatus.staConnected ? "true" : "false") +
                   (sysStatus.staConnected ? ",\"staIP\":\"" + sysStatus.staIP.toString() + "\"" : "") +
                 "},\"wled\":" + getWledStatusJson() +
@@ -447,6 +458,16 @@ void handleState() {
                 ",\"device\":\"" + String(apSSID) + "\"" +
                 ",\"hostname\":\"" + String(mdnsHostname) + ".local\"" +
                 ",\"deviceName\":\"" + String(apSSID) + "\"" +
+#ifdef CLOUD_ENABLED
+                ",\"cloud\":{" +
+                  "\"state\":\"" + String(getCloudStateStr()) + "\"" +
+                  ",\"botId\":\"" + String(cloudMeta.botId) + "\"" +
+                  ",\"contentVersion\":" + String(cloudMeta.contentVersion) +
+                  ",\"pollInterval\":" + String(cloudMeta.pollIntervalSec) +
+                  ",\"registered\":" + (sysStatus.cloudRegistered ? "true" : "false") +
+                  ",\"littlefs\":" + (sysStatus.littlefsReady ? "true" : "false") +
+                "}" +
+#endif
                 "}";
   server.send(200, "application/json", json);
 }
@@ -728,6 +749,35 @@ void handleWledTest() {
 }
 
 // ============================================================================
+// Cloud Endpoints
+// ============================================================================
+#ifdef CLOUD_ENABLED
+extern bool cloudRegister();
+
+void handleCloudStatus() {
+  String json = "{\"state\":\"" + String(getCloudStateStr()) + "\"" +
+                ",\"botId\":\"" + String(cloudMeta.botId) + "\"" +
+                ",\"contentVersion\":" + String(cloudMeta.contentVersion) +
+                ",\"pollInterval\":" + String(cloudMeta.pollIntervalSec) +
+                ",\"registered\":" + (sysStatus.cloudRegistered ? "true" : "false") +
+                ",\"littlefs\":" + (sysStatus.littlefsReady ? "true" : "false") +
+                "}";
+  server.send(200, "application/json", json);
+}
+
+void handleCloudSync() {
+  // Manual sync trigger — re-register if not yet registered
+  if (!cloudMeta.registered) {
+    bool ok = cloudRegister();
+    sysStatus.cloudRegistered = ok;
+    server.send(200, "text/plain", ok ? "Registered" : "Failed");
+  } else {
+    server.send(200, "text/plain", "OK — sync happens on next poll");
+  }
+}
+#endif
+
+// ============================================================================
 // Captive Portal — redirect OS connectivity checks to control page
 // ============================================================================
 // When a phone/laptop connects to vizBot WiFi, the OS sends a connectivity
@@ -770,6 +820,12 @@ void setupWebServer() {
   server.on("/wled/status", handleWledStatus);
   server.on("/wled/config", handleWledConfig);
   server.on("/wled/test", handleWledTest);
+
+  // Cloud endpoints
+  #ifdef CLOUD_ENABLED
+  server.on("/cloud/status", handleCloudStatus);
+  server.on("/cloud/sync", handleCloudSync);
+  #endif
 
   // Captive portal detection endpoints — all redirect to root
   server.on("/generate_204", handleCaptiveRedirect);          // Android

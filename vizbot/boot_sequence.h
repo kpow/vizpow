@@ -11,9 +11,13 @@
 #include "config.h"
 #include "layout.h"
 #include "system_status.h"
+#ifdef CLOUD_ENABLED
+#include "content_cache.h"
+#include "cloud_client.h"
+#endif
 
 // Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
+SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
@@ -54,7 +58,11 @@ extern Arduino_GFX *gfx;
 #endif
 
 static uint8_t bootStageIndex = 0;
+#ifdef CLOUD_ENABLED
+static const uint8_t BOOT_TOTAL_STAGES = 11;
+#else
 static const uint8_t BOOT_TOTAL_STAGES = 9;
+#endif
 
 // Draw the boot header
 void bootDrawHeader() {
@@ -464,6 +472,35 @@ void runBootSequence() {
     bootDrawResult(false, "No WiFi");
   }
   delay(80);
+
+#ifdef CLOUD_ENABLED
+  // --- Stage 10: LittleFS ---
+  bootDrawStage("Storage");
+  ok = initContentCache();
+  sysStatus.littlefsReady = ok;
+  bootDrawResult(ok, ok ? "LittleFS 128K" : "Format failed");
+  delay(80);
+
+  // --- Stage 11: Cloud ---
+  // Only load cached metadata here. Actual TLS connections happen in the cloud
+  // task on Core 0 (16KB stack). Core 1's setup stack (8KB) is too small for
+  // the mbedtls handshake and causes StoreProhibited crashes on non-PSRAM boards.
+  bootDrawStage("Cloud");
+  if (sysStatus.littlefsReady) {
+    initCloudClient();  // loads cached meta from NVS + LittleFS
+    sysStatus.cloudRegistered = cloudMeta.registered;
+    if (cloudMeta.registered) {
+      bootDrawResult(true, "Cached ID");
+    } else if (sysStatus.staConnected) {
+      bootDrawResult(true, "Will register");
+    } else {
+      bootDrawResult(true, "No WiFi yet");
+    }
+  } else {
+    bootDrawResult(false, "No storage");
+  }
+  delay(80);
+#endif
 
   // --- Summary ---
   sysStatus.bootTimeMs = millis() - bootStart;

@@ -55,6 +55,7 @@ inline uint16_t crgbToRgb565(CRGB color) {
 // Allocated lazily on first use of beginCanvas(); shared across frames.
 static LGFX_Sprite* _dp_canvas = nullptr;
 static bool _dp_canvas_active = false;
+static bool _dp_canvas_failed = false;  // Once allocation fails, stop retrying
 
 // Dispatch macro: calls method on canvas when active, otherwise on M5.Display.
 // All color args are cast to uint16_t so M5GFX treats them as RGB565, not RGB888
@@ -95,16 +96,64 @@ struct DisplayProxy {
   // beginCanvas() allocates the sprite once (lazy) and redirects all drawing to it.
   // flushCanvas() pushes the completed frame to the display atomically then restores.
   void beginCanvas() {
+    if (_dp_canvas_failed) return;
     if (!_dp_canvas) {
+      DBG("Canvas: free heap=");
+      DBG(ESP.getFreeHeap());
+      DBG(" max block=");
+      DBGLN(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
       _dp_canvas = new LGFX_Sprite(&M5.Display);
+
+      // Try 16-bit in PSRAM first (best quality, doesn't compete with internal heap)
       _dp_canvas->setColorDepth(16);
-      _dp_canvas->createSprite(LCD_WIDTH, LCD_HEIGHT);
+      _dp_canvas->setPsram(true);
+      if (_dp_canvas->createSprite(LCD_WIDTH, LCD_HEIGHT)) {
+        DBGLN("Canvas: 16-bit PSRAM");
+        goto canvas_ok;
+      }
+
+      // 16-bit internal fallback for boards without PSRAM
+      if (!psramFound()) {
+        _dp_canvas->setPsram(false);
+        if (_dp_canvas->createSprite(LCD_WIDTH, LCD_HEIGHT)) {
+          DBGLN("Canvas: 16-bit internal (no PSRAM)");
+          goto canvas_ok;
+        }
+      }
+
+      // 8-bit internal fallback
+      DBGLN("Canvas: 16-bit failed, trying 8-bit internal");
+      _dp_canvas->setColorDepth(8);
+      _dp_canvas->setPsram(false);
+      if (_dp_canvas->createSprite(LCD_WIDTH, LCD_HEIGHT)) goto canvas_ok;
+      DBGLN("Canvas: allocation failed");
+
+      // All attempts failed
+      delete _dp_canvas;
+      _dp_canvas = nullptr;
+      _dp_canvas_failed = true;
+      DBGLN("Canvas: ALL allocations failed — direct render (expect flicker)");
+      return;
+
+    canvas_ok:
+      DBG("Canvas: OK ");
+      DBG(_dp_canvas->getColorDepth());
+      DBG("bpp ");
+      DBG(_dp_canvas->bufferLength());
+      DBGLN(" bytes");
     }
-    _dp_canvas_active = true;
+    _dp_canvas_active = (_dp_canvas != nullptr);
   }
   void flushCanvas() {
-    if (_dp_canvas) _dp_canvas->pushSprite(0, 0);
+    if (_dp_canvas && _dp_canvas_active) _dp_canvas->pushSprite(0, 0);
     _dp_canvas_active = false;
+  }
+  // Pre-allocate the canvas early (before WiFi/tasks fragment the heap).
+  // Called once from setup(). Does NOT activate — just reserves the memory.
+  void preallocateCanvas() {
+    beginCanvas();   // allocates sprite
+    flushCanvas();   // deactivates (pushes empty frame, restores direct mode)
   }
 } displayProxyInstance;
 
@@ -115,6 +164,11 @@ void initLCD() {
   // It handles the AW9523 I2C expander, backlight, RST, and ILI9342C init.
   M5.Display.fillScreen(COLOR_BLACK);
   DBGLN("LCD initialized via M5Unified (Core S3, 320x240)");
+
+  // Pre-allocate canvas early (before WiFi/tasks fragment the heap).
+  // On PSRAM-equipped boards (Core S3 = 8MB, TARGET_LCD = 2MB), 16-bit canvas
+  // goes to PSRAM — internal heap stays free for TLS and tasks.
+  displayProxyInstance.preallocateCanvas();
 }
 
 // ============================================================================
@@ -126,6 +180,77 @@ void initLCD() {
 
 Arduino_DataBus *bus = nullptr;
 Arduino_GFX *gfx = nullptr;
+
+// PSRAM-aware canvas factory for TARGET_LCD — logs where the buffer landed.
+// Arduino_Canvas calls ps_malloc() internally when PSRAM is available, so we
+// measure free PSRAM before/after to confirm placement.
+Arduino_Canvas* createPsramAwareCanvas(int16_t w, int16_t h, Arduino_GFX* output) {
+  // Pre-check: largest contiguous block must fit the 16-bit framebuffer + overhead
+  size_t needed = (size_t)w * h * 2;
+  size_t maxBlock = psramFound()
+    ? heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)
+    : heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+  if (maxBlock < needed + 4096) {
+    DBG("Canvas: SKIP — need ");
+    DBG((needed + 4096) / 1024);
+    DBG("KB, largest=");
+    DBG(maxBlock / 1024);
+    DBGLN("KB");
+    return nullptr;
+  }
+
+  size_t psramBefore = psramFound() ? ESP.getFreePsram() : 0;
+  Arduino_Canvas* c = new Arduino_Canvas(w, h, output);
+  c->begin();
+  if (psramFound()) {
+    size_t used = psramBefore - ESP.getFreePsram();
+    DBG("Canvas: "); DBG(w); DBG("x"); DBG(h);
+    if (used > 1024) {
+      DBG(" in PSRAM ("); DBG(used / 1024); DBGLN("KB)");
+    } else {
+      DBGLN(" in internal heap (PSRAM not used)");
+    }
+  } else {
+    DBGLN("Canvas: internal heap (no PSRAM)");
+  }
+  return c;
+}
+
+// ============================================================================
+// ManagedCanvas — framebuffer lifecycle separated from Canvas object
+// ============================================================================
+// The raw framebuffer (134KB) is allocated FIRST at boot as one contiguous
+// block, then wrapped by a lightweight Canvas object. This lets us free and
+// reclaim the framebuffer cleanly for cloud TLS every 3 minutes — no
+// fragmentation because the buffer was one clean malloc, not interleaved
+// with display-driver allocations (which is what Arduino_Canvas::begin() does).
+
+// ============================================================================
+// Static framebuffer — in BSS, NOT on the heap
+// ============================================================================
+// By keeping the 134KB framebuffer in BSS instead of heap, the heap has ~100KB
+// more contiguous free space. TLS (32KB) fits without needing canvas release,
+// so there's zero flicker during cloud sync.
+static uint16_t _lcd_static_fb[LCD_WIDTH * LCD_HEIGHT] __attribute__((aligned(16)));
+
+// ManagedCanvas wraps a pre-existing framebuffer without allocating its own.
+// begin() is overridden to skip the internal aligned_alloc + display re-init.
+class ManagedCanvas : public Arduino_Canvas {
+public:
+  ManagedCanvas(int16_t w, int16_t h, Arduino_G *output, uint16_t* buf)
+    : Arduino_Canvas(w, h, output) {
+    _framebuffer = buf;  // Use externally-owned buffer (protected member)
+  }
+  bool begin(int32_t speed = GFX_NOT_DEFINED) override {
+    return _framebuffer != nullptr;  // Skip internal alloc + output re-init
+  }
+  ~ManagedCanvas() {
+    _framebuffer = nullptr;  // Don't free — we don't own it
+  }
+};
+
+// Pre-allocated canvas for TARGET_LCD (claimed early before WiFi/tasks fragment heap)
+Arduino_Canvas* _lcd_prealloc_canvas = nullptr;
 
 void initLCD() {
   bus = new Arduino_ESP32SPI(
@@ -154,6 +279,14 @@ void initLCD() {
   digitalWrite(LCD_BL, HIGH);
 
   DBGLN("LCD initialized (ST7789)");
+
+  // Canvas uses the static BSS framebuffer — zero heap cost for the 134KB buffer.
+  // This leaves the heap with ~100KB+ more contiguous space for WiFi + TLS.
+  _lcd_prealloc_canvas = new ManagedCanvas(LCD_WIDTH, LCD_HEIGHT, gfx, _lcd_static_fb);
+  _lcd_prealloc_canvas->begin();
+  DBG("Canvas: static BSS framebuffer ");
+  DBG(sizeof(_lcd_static_fb) / 1024);
+  DBGLN("KB");
 }
 
 #endif // TARGET_CORES3

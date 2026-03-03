@@ -16,7 +16,15 @@
 // ---- Boot Screen --------------------------------------------------------
 #define BOOT_LEFT_MARGIN   10
 #define BOOT_TOP_MARGIN    30
-#define BOOT_LINE_HEIGHT   22
+#ifdef CLOUD_ENABLED
+  #if defined(LCD_HEIGHT) && LCD_HEIGHT <= 240
+    #define BOOT_LINE_HEIGHT  18  // Core S3: 11 stages on 240px height
+  #else
+    #define BOOT_LINE_HEIGHT  20  // 1.69" LCD: 11 stages on 280px height
+  #endif
+#else
+  #define BOOT_LINE_HEIGHT  22
+#endif
 #define BOOT_STATUS_X      (LCD_WIDTH - 40)   // Right-aligned; was hardcoded 200 for 240px
 
 // ---- Speech Bubble (bot_overlays.h) ------------------------------------

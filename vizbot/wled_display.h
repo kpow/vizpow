@@ -25,6 +25,16 @@
 // frames stop (2.5s timeout). We use HTTP restore for instant cut-back.
 // ============================================================================
 
+// WLED debug logging — comment out to silence WLED serial chatter
+// #define WLED_DEBUG
+#ifdef WLED_DEBUG
+  #define WLED_DBG(...)   DBG(__VA_ARGS__)
+  #define WLED_DBGLN(...) DBGLN(__VA_ARGS__)
+#else
+  #define WLED_DBG(...)
+  #define WLED_DBGLN(...)
+#endif
+
 // Display geometry
 #define WLED_DISPLAY_WIDTH   32
 #define WLED_DISPLAY_HEIGHT  8
@@ -144,10 +154,10 @@ void loadWledSettings() {
 
   memset(wledData.pixelBuffer, 0, WLED_PIXEL_BYTES);
 
-  DBG("WLED: ");
-  DBG(wledData.enabled ? "ON" : "OFF");
-  DBG(" IP=");
-  DBGLN(wledData.ip);
+  WLED_DBG("WLED: ");
+  WLED_DBG(wledData.enabled ? "ON" : "OFF");
+  WLED_DBG(" IP=");
+  WLED_DBGLN(wledData.ip);
 }
 
 void saveWledSettings() {
@@ -163,7 +173,7 @@ void saveWledSettings() {
   prefs.putUChar("wledB", wledData.b);
 
   prefs.end();
-  DBGLN("WLED settings saved");
+  WLED_DBGLN("WLED settings saved");
 }
 
 // ============================================================================
@@ -420,11 +430,11 @@ bool wledCaptureState() {
 
   wledData.hasSavedState = (wledData.savedFx >= 0);
 
-  DBG("WLED captured: fx=");
-  DBG(wledData.savedFx);
-  DBG(" n=\"");
-  DBG(wledData.savedSegName);
-  DBGLN("\"");
+  WLED_DBG("WLED captured: fx=");
+  WLED_DBG(wledData.savedFx);
+  WLED_DBG(" n=\"");
+  WLED_DBG(wledData.savedSegName);
+  WLED_DBGLN("\"");
 
   return wledData.hasSavedState;
 }
@@ -492,10 +502,10 @@ void wledPollPalette() {
   int pal = seg.substring(palIdx + 6).toInt();
   wledData.pendingPalSync = wledMapPalette(pal);
 
-  DBG("WLED: pal poll wled=");
-  DBG(pal);
-  DBG(" local=");
-  DBGLN(wledData.pendingPalSync);
+  WLED_DBG("WLED: pal poll wled=");
+  WLED_DBG(pal);
+  WLED_DBG(" local=");
+  WLED_DBGLN(wledData.pendingPalSync);
 }
 
 // ============================================================================
@@ -507,7 +517,7 @@ void pollWledDisplay() {
   if (wledData.phase == WLED_PHASE_HOLD && millis() >= wledData.phaseEndMs) {
     wledData.phase = WLED_PHASE_NONE;
     wledData.restoreAtMs = millis();
-    DBGLN("WLED: hold done, restoring");
+    WLED_DBGLN("WLED: hold done, restoring");
   }
 
   // ---- Restore previous effect via HTTP (instant, no 2.5s DDP timeout) ----
@@ -524,9 +534,9 @@ void pollWledDisplay() {
         wledData.savedSegName);
 
       if (wledHttpPost(body)) {
-        DBGLN("WLED: restored");
+        WLED_DBGLN("WLED: restored");
       } else {
-        DBGLN("WLED: restore failed");
+        WLED_DBGLN("WLED: restore failed");
       }
       // Keep hasSavedState=true — WLED just resumed these exact values, so
       // the saved state is still valid for the next say (skips inline capture).
@@ -565,18 +575,18 @@ void pollWledDisplay() {
   if (wledData.hasSavedState) {
     // Already mid-display — keep original saved state, cancel pending restore
     wledData.restoreAtMs = 0;
-    DBG("WLED: replacing frame \"");
-    DBG(wledData.textBuffer);
-    DBGLN("\"");
+    WLED_DBG("WLED: replacing frame \"");
+    WLED_DBG(wledData.textBuffer);
+    WLED_DBGLN("\"");
   } else {
     // First frame — capture current state for later restore
     if (wledCaptureState()) {
-      DBG("WLED: captured, sending DDP \"");
+      WLED_DBG("WLED: captured, sending DDP \"");
     } else {
-      DBG("WLED: capture failed, sending DDP \"");
+      WLED_DBG("WLED: capture failed, sending DDP \"");
     }
-    DBG(wledData.textBuffer);
-    DBGLN("\"");
+    WLED_DBG(wledData.textBuffer);
+    WLED_DBGLN("\"");
   }
 
   // Send pixel buffer via DDP
@@ -588,13 +598,13 @@ void pollWledDisplay() {
     wledData.phaseEndMs = millis() + wledData.frameDurationMs;
     wledData.restoreAtMs = 0;
 
-    DBG("WLED: DDP frame for ");
-    DBG(wledData.frameDurationMs);
-    DBGLN("ms");
+    WLED_DBG("WLED: DDP frame for ");
+    WLED_DBG(wledData.frameDurationMs);
+    WLED_DBGLN("ms");
   } else {
     wledData.reachable = false;
     wledData.lastFailTime = millis();
-    DBGLN("WLED: DDP send failed");
+    WLED_DBGLN("WLED: DDP send failed");
   }
 }
 

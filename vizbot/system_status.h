@@ -20,6 +20,10 @@ struct SystemStatus {
   bool dnsReady;
   bool mdnsReady;
   bool staConnected;     // STA connected to external network
+  bool littlefsReady;    // LittleFS mounted successfully
+  bool cloudRegistered;  // Registered with vizCloud
+  bool psramAvailable;   // PSRAM detected at boot
+  uint32_t psramSizeKB;  // Total PSRAM in KB (0 if not available)
   IPAddress apIP;
   IPAddress staIP;       // IP on external network (when STA connected)
   uint32_t bootTimeMs;
