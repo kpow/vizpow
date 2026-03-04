@@ -25,6 +25,8 @@ enum SayingCategory : uint8_t {
   SAY_WAKE,
   SAY_SLEEP,
   SAY_INFO_ENTER,
+  SAY_REACT_SOUND,       // Reaction to loud sound (clap, bang)
+  SAY_REACT_PROXIMITY,   // Reaction to proximity sensor
   SAY_CATEGORY_COUNT
 };
 
@@ -208,6 +210,29 @@ const char* const sayInfoEnter[] PROGMEM = {
 };
 #define NUM_SAY_INFO_ENTER 5
 
+// Sound reaction sayings (clap, bang, loud noise)
+const char say_sound_0[] PROGMEM = "Whoa";
+const char say_sound_1[] PROGMEM = "Loud";
+const char say_sound_2[] PROGMEM = "Eep";
+const char say_sound_3[] PROGMEM = "What";
+const char say_sound_4[] PROGMEM = "Yikes";
+
+const char* const sayReactSound[] PROGMEM = {
+  say_sound_0, say_sound_1, say_sound_2, say_sound_3, say_sound_4
+};
+#define NUM_SAY_REACT_SOUND 5
+
+// Proximity reaction sayings (hand approaching, peek-a-boo, cover)
+const char say_prox_0[] PROGMEM = "Hi";
+const char say_prox_1[] PROGMEM = "Peekaboo";
+const char say_prox_2[] PROGMEM = "Hello";
+const char say_prox_3[] PROGMEM = "Dark";
+
+const char* const sayReactProx[] PROGMEM = {
+  say_prox_0, say_prox_1, say_prox_2, say_prox_3
+};
+#define NUM_SAY_REACT_PROX 4
+
 // ============================================================================
 // Selection helpers
 // ============================================================================
@@ -231,6 +256,8 @@ const char* getRandomSaying(SayingCategory category) {
     case SAY_WAKE:          pool = sayWake;        count = NUM_SAY_WAKE;       break;
     case SAY_SLEEP:         pool = saySleep;       count = NUM_SAY_SLEEP;      break;
     case SAY_INFO_ENTER:    pool = sayInfoEnter;   count = NUM_SAY_INFO_ENTER; break;
+    case SAY_REACT_SOUND:   pool = sayReactSound;  count = NUM_SAY_REACT_SOUND; break;
+    case SAY_REACT_PROXIMITY: pool = sayReactProx; count = NUM_SAY_REACT_PROX; break;
     default:                pool = sayIdle;        count = NUM_SAY_IDLE;       break;
   }
 
