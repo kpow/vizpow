@@ -37,7 +37,7 @@ const char webpage[] PROGMEM = R"rawliteral(
 
   <div class="card">
     <h2>Expressions</h2>
-    <div class="grid" id="botExpressions"></div>
+    <div class="grid4" id="botExpressions"></div>
   </div>
 
   <div class="card">
@@ -168,7 +168,7 @@ const char webpage[] PROGMEM = R"rawliteral(
   <div class="status">Connected to VizBot &middot; vizbot.local</div>
 
   <script>
-    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused"];
+    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Dead", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Bliss", "Focused", "Winking", "Devious", "Shocked", "Content", "Kissing", "Nervous", "Glitching", "Sassy"];
     const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
     const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
     const ambientNames = ["Plasma","Rainbow","Fire","Ocean","Matrix","Lava","Aurora","Confetti","Galaxy","Heart","Donut"];

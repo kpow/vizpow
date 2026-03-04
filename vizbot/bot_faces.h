@@ -26,7 +26,13 @@ enum BotEyeMode : uint8_t {
   EYE_X,             // X X dead/angry eyes
   EYE_SPIRAL,        // Spiral dizzy eyes (animated)
   EYE_STAR,          // Star/sparkle eyes
-  EYE_CLOSED         // Full-size eyes with horizontal line (sleeping)
+  EYE_CLOSED,        // Full-size eyes with horizontal line (sleeping)
+  EYE_DIAMOND,       // Rotated square (rhombus) pupils inside normal white ellipse
+  EYE_HALF,          // Half-closed lid (top portion covered by bgColor)
+  EYE_DOT,           // Tiny fixed-center pupils (no tracking), highlight glint
+  EYE_CURVED,        // Downward crescent arc (anime ^^ satisfied eyes, no pupils)
+  EYE_WINK,          // Asymmetric: left eye normal+pupil, right eye closed line
+  EYE_GLITCH         // Animated offset rectangular slices (digital malfunction)
 };
 
 // Mouth shape types
@@ -38,7 +44,13 @@ enum BotMouthType : uint8_t {
   MOUTH_OPEN_O,      // Circle/O shape (surprise)
   MOUTH_GRIN,        // Wide smile with teeth line
   MOUTH_WAVY,        // Wavy line (dizzy/confused)
-  MOUTH_SMIRK        // Asymmetric half-smile
+  MOUTH_SMIRK,       // Asymmetric half-smile
+  MOUTH_TEETH,       // Smile curve + white rect teeth bar with black gaps
+  MOUTH_TONGUE,      // Bottom semi-circle mouth + pink/red ellipse tongue
+  MOUTH_ZIGZAG,      // Zigzag line (6 segments), nervous/electric
+  MOUTH_POUT,        // Small filled circle with inner dark hole (pucker/kiss)
+  MOUTH_WHISTLE,     // Fixed tiny O shape (radius ~5px)
+  MOUTH_FLAT_FROWN   // Two angled lines forming shallow inverted-V
 };
 
 // Expression parameter struct — defines a complete face pose
@@ -91,7 +103,7 @@ struct BotExpression {
 #endif
 
 // Number of defined expressions
-#define BOT_NUM_EXPRESSIONS 20
+#define BOT_NUM_EXPRESSIONS 28
 
 // Expression indices
 #define EXPR_NEUTRAL    0
@@ -114,6 +126,14 @@ struct BotExpression {
 #define EXPR_ANNOYED    17
 #define EXPR_BLISS      18
 #define EXPR_FOCUSED    19
+#define EXPR_WINKING    20
+#define EXPR_DEVIOUS    21
+#define EXPR_SHOCKED    22
+#define EXPR_CONTENT    23
+#define EXPR_KISSING    24
+#define EXPR_NERVOUS    25
+#define EXPR_GLITCHING  26
+#define EXPR_SASSY      27
 
 // Expression parameter table (stored in PROGMEM)
 const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
@@ -162,14 +182,14 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 150
   },
 
-  // 4: SLEEPY — half-lidded eyes (vertically squished), slight open mouth
+  // 4: SLEEPY — closed eyes with horizontal line, slight open mouth
   {
     .eyeWhiteW = 50, .eyeWhiteH = 22, .eyeSpacing = 44,
     .pupilRadius = 12, .pupilOffsetX = 0, .pupilOffsetY = 4,
     .browOffsetY = -6, .browLength = 30, .browThickness = 6,
     .browAngleL = -5, .browAngleR = -5, .browVisible = true,
     .mouthType = MOUTH_OPEN_O, .mouthWidth = 8, .mouthOffsetY = 58, .mouthCurve = 6,
-    .eyeMode = EYE_NORMAL,
+    .eyeMode = EYE_CLOSED,
     .transitionMs = 500
   },
 
@@ -316,14 +336,14 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 250
   },
 
-  // 18: BLISS — soft relaxed eyes, gentle raised brows, content smile
+  // 18: BLISS — happy squint caret eyes, gentle raised brows, content smile
   {
     .eyeWhiteW = 50, .eyeWhiteH = 42, .eyeSpacing = 44,
     .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = 2,
     .browOffsetY = -14, .browLength = 26, .browThickness = 5,
     .browAngleL = 8, .browAngleR = 8, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 20, .mouthOffsetY = 58, .mouthCurve = 10,
-    .eyeMode = EYE_NORMAL,
+    .eyeMode = EYE_CARET,
     .transitionMs = 400
   },
 
@@ -336,6 +356,94 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .mouthType = MOUTH_NONE, .mouthWidth = 0, .mouthOffsetY = 62, .mouthCurve = 0,
     .eyeMode = EYE_NORMAL,
     .transitionMs = 300
+  },
+
+  // 20: WINKING — playful wink, left eye normal, right eye closed line
+  {
+    .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
+    .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
+    .browOffsetY = -14, .browLength = 28, .browThickness = 5,
+    .browAngleL = 6, .browAngleR = 10, .browVisible = true,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 20, .mouthOffsetY = 60, .mouthCurve = 8,
+    .eyeMode = EYE_WINK,
+    .transitionMs = 200
+  },
+
+  // 21: DEVIOUS — half-closed plotting eyes, toothy grin
+  {
+    .eyeWhiteW = 50, .eyeWhiteH = 30, .eyeSpacing = 44,
+    .pupilRadius = 12, .pupilOffsetX = 6, .pupilOffsetY = 2,
+    .browOffsetY = -6, .browLength = 30, .browThickness = 6,
+    .browAngleL = 12, .browAngleR = 12, .browVisible = true,
+    .mouthType = MOUTH_TEETH, .mouthWidth = 22, .mouthOffsetY = 60, .mouthCurve = 10,
+    .eyeMode = EYE_HALF,
+    .transitionMs = 300
+  },
+
+  // 22: SHOCKED — tiny dot pupils, thousand-yard stare, O mouth
+  {
+    .eyeWhiteW = 55, .eyeWhiteH = 52, .eyeSpacing = 46,
+    .pupilRadius = 4, .pupilOffsetX = 0, .pupilOffsetY = 0,
+    .browOffsetY = -20, .browLength = 26, .browThickness = 5,
+    .browAngleL = 12, .browAngleR = 12, .browVisible = true,
+    .mouthType = MOUTH_OPEN_O, .mouthWidth = 16, .mouthOffsetY = 62, .mouthCurve = 16,
+    .eyeMode = EYE_DOT,
+    .transitionMs = 100
+  },
+
+  // 23: CONTENT — anime ^^ satisfied crescent eyes, gentle smile
+  {
+    .eyeWhiteW = 50, .eyeWhiteH = 42, .eyeSpacing = 44,
+    .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
+    .browOffsetY = -14, .browLength = 26, .browThickness = 5,
+    .browAngleL = 8, .browAngleR = 8, .browVisible = false,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 18, .mouthOffsetY = 60, .mouthCurve = 8,
+    .eyeMode = EYE_CURVED,
+    .transitionMs = 350
+  },
+
+  // 24: KISSING — normal eyes, puckered pout mouth
+  {
+    .eyeWhiteW = 48, .eyeWhiteH = 42, .eyeSpacing = 44,
+    .pupilRadius = 12, .pupilOffsetX = 0, .pupilOffsetY = -2,
+    .browOffsetY = -12, .browLength = 26, .browThickness = 5,
+    .browAngleL = 6, .browAngleR = 6, .browVisible = true,
+    .mouthType = MOUTH_POUT, .mouthWidth = 10, .mouthOffsetY = 60, .mouthCurve = 8,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 250
+  },
+
+  // 25: NERVOUS — normal eyes, jittery zigzag mouth
+  {
+    .eyeWhiteW = 50, .eyeWhiteH = 48, .eyeSpacing = 44,
+    .pupilRadius = 11, .pupilOffsetX = -4, .pupilOffsetY = 2,
+    .browOffsetY = -14, .browLength = 26, .browThickness = 5,
+    .browAngleL = -10, .browAngleR = -10, .browVisible = true,
+    .mouthType = MOUTH_ZIGZAG, .mouthWidth = 18, .mouthOffsetY = 64, .mouthCurve = 5,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 200
+  },
+
+  // 26: GLITCHING — digital malfunction, glitch eyes + wavy mouth
+  {
+    .eyeWhiteW = 52, .eyeWhiteH = 45, .eyeSpacing = 44,
+    .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
+    .browOffsetY = -12, .browLength = 28, .browThickness = 5,
+    .browAngleL = 0, .browAngleR = 0, .browVisible = false,
+    .mouthType = MOUTH_WAVY, .mouthWidth = 20, .mouthOffsetY = 62, .mouthCurve = 6,
+    .eyeMode = EYE_GLITCH,
+    .transitionMs = 100
+  },
+
+  // 27: SASSY — normal eyes, tongue out
+  {
+    .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
+    .pupilRadius = 13, .pupilOffsetX = 8, .pupilOffsetY = -2,
+    .browOffsetY = -12, .browLength = 28, .browThickness = 6,
+    .browAngleL = -4, .browAngleR = 14, .browVisible = true,
+    .mouthType = MOUTH_TONGUE, .mouthWidth = 20, .mouthOffsetY = 60, .mouthCurve = 10,
+    .eyeMode = EYE_NORMAL,
+    .transitionMs = 250
   }
 };
 
