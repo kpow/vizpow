@@ -40,6 +40,7 @@
 #ifdef TARGET_CORES3
 #include "bot_sounds.h"     // Core S3 speaker sound effects (must come before bot_mode.h)
 #include "audio_analysis.h" // Core S3 mic audio analysis
+#include "proximity_light.h" // Core S3 proximity & ambient light sensor
 #endif
 #include "bot_mode.h"
 #include "info_mode.h"
@@ -412,10 +413,22 @@ void loop() {
   // Advance all active tweens (before rendering so values are current)
   tweenManager.update();
 
-  // Advance sound effect sequencer and mic analysis (Core S3 only)
+  // Advance sound effect sequencer, mic analysis, and proximity (Core S3 only)
   #ifdef TARGET_CORES3
   botSounds.update();
   audioAnalysis.update();
+  proxLight.update();
+
+  // Apply auto-brightness from ambient light sensor (every 500ms)
+  {
+    static unsigned long lastAutoBrightMs = 0;
+    if (sysStatus.proxLightReady && proxLight.autoBrightnessEnabled &&
+        millis() - lastAutoBrightMs > 500) {
+      lastAutoBrightMs = millis();
+      lcdBrightness = proxLight.autoBrightness;
+      setLCDBacklight(lcdBrightness);
+    }
+  }
   #endif
 
   // Apply queued commands from WiFi/touch before rendering

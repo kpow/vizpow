@@ -26,6 +26,7 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 #include <M5Unified.h>
 #include "bot_sounds.h"
 #include "audio_analysis.h"
+#include "proximity_light.h"
 #endif
 
 // ============================================================================
@@ -438,8 +439,15 @@ void runBootSequence() {
     // Mic init
     audioAnalysis.init();
     sysStatus.micReady = true;
-    // Proximity/light initialized in later commit
-    char detail[32] = "Spkr+Mic OK";
+    // Proximity/light init
+    proxLight.init();
+    sysStatus.proxLightReady = proxLight.initialized;
+    char detail[32];
+    if (proxLight.initialized) {
+      snprintf(detail, sizeof(detail), "Spkr+Mic+Prox");
+    } else {
+      snprintf(detail, sizeof(detail), "Spkr+Mic (no prox)");
+    }
     bootDrawResult(true, detail);
     delay(80);
   }
