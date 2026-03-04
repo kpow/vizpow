@@ -179,6 +179,10 @@ struct BotModeState {
       char buf[MAX_SAY_LEN];
       getRandomSayingText(SAY_WAKE, buf, sizeof(buf));
       speechBubble.show(buf, 2000);
+
+      #ifdef TARGET_CORES3
+      botSounds.play(SFX_WAKE_CHIME);
+      #endif
     }
     state = BOT_ACTIVE;
     stateEnteredTime = millis();
@@ -196,6 +200,10 @@ struct BotModeState {
     uint8_t pick = reactions[random(0, 8)];
     face.transitionTo(pick, 150);
 
+    #ifdef TARGET_CORES3
+    botSounds.play(SFX_TAP_BOOP);
+    #endif
+
     // Maybe show a tap saying
     if (random(100) < personality->sayChancePercent) {
       char buf[MAX_SAY_LEN];
@@ -212,6 +220,10 @@ struct BotModeState {
   void onShake() {
     registerInteraction();
     face.transitionTo(EXPR_DIZZY, 150);
+
+    #ifdef TARGET_CORES3
+    botSounds.play(SFX_SHAKE_RATTLE);
+    #endif
 
     // Show shake saying
     char buf[MAX_SAY_LEN];
@@ -286,6 +298,13 @@ void updateBotMode() {
       break;
 
     case BOT_SLEEPY:
+      #ifdef TARGET_CORES3
+      // Play descending lullaby when entering sleepy state
+      if (botMode.stateEnteredTime == now) {
+        botSounds.play(SFX_SLEEP_DESCEND);
+      }
+      #endif
+      // fall through
     case BOT_SLEEPING:
       // If somehow in a sleep state, wake immediately
       botMode.wake();
@@ -521,6 +540,10 @@ void enterBotMode() {
 
   if (!botMode.initialized) {
     botMode.init();
+
+    #ifdef TARGET_CORES3
+    botSounds.play(SFX_BOOT_CHIME);
+    #endif
 
     // Show greeting on first entry
     char buf[MAX_SAY_LEN];

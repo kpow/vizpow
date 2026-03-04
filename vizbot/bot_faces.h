@@ -3,6 +3,9 @@
 
 #include <Arduino.h>
 #include "tween.h"
+#ifdef TARGET_CORES3
+#include "bot_sounds.h"
+#endif
 
 // ============================================================================
 // Bot Face Expression System
@@ -410,6 +413,12 @@ struct BotFaceState {
   void transitionTo(uint8_t index, uint16_t durationMs = 0) {
     if (index >= BOT_NUM_EXPRESSIONS) index = EXPR_NEUTRAL;
     if (index == targetExpr && !transitioning) return;
+
+    // Expression chirp (Core S3 only) — only when expression actually changes
+    #ifdef TARGET_CORES3
+    extern BotSounds botSounds;
+    botSounds.play(SFX_EXPR_CHIRP);
+    #endif
 
     // Read target's default transition time if none specified
     if (durationMs == 0) {
