@@ -475,6 +475,19 @@ void handleState() {
                 ",\"device\":\"" + String(apSSID) + "\"" +
                 ",\"hostname\":\"" + String(mdnsHostname) + ".local\"" +
                 ",\"deviceName\":\"" + String(apSSID) + "\"" +
+#ifdef TARGET_CORES3
+                ",\"sensors\":{" +
+                  "\"speaker\":" + (sysStatus.speakerReady ? "true" : "false") +
+                  ",\"mic\":" + (sysStatus.micReady ? "true" : "false") +
+                  ",\"proxLight\":" + (sysStatus.proxLightReady ? "true" : "false") +
+                  ",\"soundEnabled\":" + (botSounds.enabled ? "true" : "false") +
+                  ",\"soundVolume\":" + String(botSounds.volume) +
+                  ",\"micEnabled\":" + (audioAnalysis.enabled ? "true" : "false") +
+                  ",\"proximity\":" + String(proxLight.rawProximity) +
+                  ",\"lux\":" + String(proxLight.ambientLux) +
+                  ",\"autoBrightness\":" + (proxLight.autoBrightnessEnabled ? "true" : "false") +
+                "}" +
+#endif
 #ifdef CLOUD_ENABLED
                 ",\"cloud\":{" +
                   "\"state\":\"" + String(getCloudStateStr()) + "\"" +
@@ -498,6 +511,8 @@ extern void cmdSayText(const char* text, uint16_t durationMs);
 extern void cmdSetTimeOverlay(bool enabled);
 extern void cmdToggleTimeOverlay();
 extern void cmdSetAmbientEffect(uint8_t val);
+extern void cmdPlaySound(uint16_t freq, uint16_t duration);
+extern void cmdSetVolume(uint8_t vol);
 
 void handleBrightness() {
   if (server.hasArg("v")) {
@@ -804,6 +819,44 @@ void handleCloudSync() {
 #endif
 
 // ============================================================================
+// Core S3 Sensor Endpoints — Sound & Mic
+// ============================================================================
+#ifdef TARGET_CORES3
+extern struct BotSounds botSounds;
+extern struct AudioAnalysis audioAnalysis;
+extern struct ProxLightState proxLight;
+
+void handleBotSound() {
+  if (server.hasArg("freq") && server.hasArg("dur")) {
+    uint16_t freq = constrain(server.arg("freq").toInt(), 100, 8000);
+    uint16_t dur = constrain(server.arg("dur").toInt(), 10, 5000);
+    cmdPlaySound(freq, dur);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotVolume() {
+  if (server.hasArg("v")) {
+    uint8_t vol = constrain(server.arg("v").toInt(), 0, 255);
+    cmdSetVolume(vol);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleBotMic() {
+  String json = "{\"rms\":" + String(audioAnalysis.rmsLevel, 1) +
+                ",\"smooth\":" + String(audioAnalysis.smoothLevel, 1) +
+                ",\"peak\":" + String(audioAnalysis.peakLevel, 1) +
+                ",\"normalized\":" + String(audioAnalysis.getNormalizedLevel(), 3) +
+                ",\"spike\":" + (audioAnalysis.spikeDetected ? "true" : "false") +
+                ",\"speech\":" + (audioAnalysis.speechDetected ? "true" : "false") +
+                ",\"enabled\":" + (audioAnalysis.enabled ? "true" : "false") +
+                "}";
+  server.send(200, "application/json", json);
+}
+#endif
+
+// ============================================================================
 // Captive Portal — redirect OS connectivity checks to control page
 // ============================================================================
 // When a phone/laptop connects to vizBot WiFi, the OS sends a connectivity
@@ -847,6 +900,13 @@ void setupWebServer() {
   server.on("/wled/status", handleWledStatus);
   server.on("/wled/config", handleWledConfig);
   server.on("/wled/test", handleWledTest);
+
+  // Core S3 sensor endpoints
+  #ifdef TARGET_CORES3
+  server.on("/bot/sound", handleBotSound);
+  server.on("/bot/volume", handleBotVolume);
+  server.on("/bot/mic", handleBotMic);
+  #endif
 
   // Cloud endpoints
   #ifdef CLOUD_ENABLED

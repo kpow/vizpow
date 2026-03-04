@@ -52,6 +52,8 @@ extern void cmdSayText(const char* text, uint16_t durationMs);
 extern void cmdSetBgStyle(uint8_t val);
 extern void cmdSetPersonality(uint8_t val);
 extern void cmdSetAmbientEffect(uint8_t val);
+extern void cmdPlaySound(uint16_t freq, uint16_t duration);
+extern void cmdSetVolume(uint8_t vol);
 
 // Forward declaration from bot_mode.h
 extern uint8_t getBotPersonality();
@@ -174,7 +176,11 @@ static String buildRegistrationBody() {
   #endif
   caps["hasIMU"] = true;
   caps["hasLED"] = true;
+  #ifdef TARGET_CORES3
+  caps["hasAudio"] = true;
+  #else
   caps["hasAudio"] = false;
+  #endif
   caps["hasBotMode"] = true;
 
   String body;
@@ -390,6 +396,21 @@ static void dispatchCloudCommand(const char* type, JsonObject& payload) {
     cmdSetAmbientEffect(val);
     DBG("Cloud cmd: ambient_effect=");
     DBGLN(val);
+
+  } else if (strcmp(type, "sound") == 0) {
+    uint16_t freq = payload["freq"] | 440;
+    uint16_t dur = payload["duration"] | 200;
+    cmdPlaySound(freq, dur);
+    DBG("Cloud cmd: sound freq=");
+    DBG(freq);
+    DBG(" dur=");
+    DBGLN(dur);
+
+  } else if (strcmp(type, "set_volume") == 0) {
+    uint8_t vol = payload["value"] | 200;
+    cmdSetVolume(vol);
+    DBG("Cloud cmd: set_volume=");
+    DBGLN(vol);
 
   } else if (strcmp(type, "reboot") == 0) {
     DBGLN("Cloud cmd: reboot");
