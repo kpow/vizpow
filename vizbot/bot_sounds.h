@@ -38,38 +38,57 @@ struct ToneStep {
 // Maximum steps per sound effect
 #define SFX_MAX_STEPS 4
 
+// Sine-wave tone generation — eliminates harsh square-wave harmonics
+// One cycle is generated and looped via playRaw repeat parameter
+#define SINE_BUF_MAX 200  // enough for ~240Hz at 48kHz sample rate
+
+static int16_t _sineBuf[SINE_BUF_MAX];
+
+static void _playSine(uint16_t freq, uint16_t durationMs) {
+  uint16_t samplesPerCycle = 48000 / freq;
+  if (samplesPerCycle > SINE_BUF_MAX) samplesPerCycle = SINE_BUF_MAX;
+
+  for (uint16_t i = 0; i < samplesPerCycle; i++) {
+    _sineBuf[i] = (int16_t)(20000.0f * sinf(2.0f * M_PI * i / samplesPerCycle));
+  }
+
+  uint8_t repeats = constrain((uint32_t)freq * durationMs / 1000, 1, 255);
+  M5.Speaker.playRaw(_sineBuf, samplesPerCycle, 48000, false, repeats);
+}
+
 // Sound effect definitions — each is an array of up to 4 steps
 // Terminated early by a step with freq=0 AND durationMs=0
+// Design: soft & round — lower frequencies, longer durations, gentle intervals
 static const ToneStep sfxSequences[][SFX_MAX_STEPS] = {
   // SFX_NONE (index 0) — placeholder
   { {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0} },
 
-  // SFX_BOOT_CHIME — C5 -> E5 -> G5 ascending triad
-  { {523, 80, 30}, {659, 80, 30}, {784, 120, 0}, {0, 0, 0} },
+  // SFX_BOOT_CHIME — G4 -> B4 -> D5 gentle ascending (major triad, warm register)
+  { {392, 120, 50}, {494, 120, 50}, {587, 180, 0}, {0, 0, 0} },
 
-  // SFX_TAP_BOOP — quick boop
-  { {880, 40, 20}, {440, 60, 0}, {0, 0, 0}, {0, 0, 0} },
+  // SFX_TAP_BOOP — soft round boop (low drop)
+  { {494, 60, 15}, {330, 80, 0}, {0, 0, 0}, {0, 0, 0} },
 
-  // SFX_SHAKE_RATTLE — rapid descending notes
-  { {1200, 40, 10}, {900, 40, 10}, {600, 40, 10}, {300, 60, 0} },
+  // SFX_SHAKE_RATTLE — gentle tumbling descent
+  { {587, 60, 20}, {494, 60, 20}, {392, 60, 20}, {294, 80, 0} },
 
-  // SFX_WAKE_CHIME — gentle ascending
-  { {440, 100, 40}, {554, 100, 40}, {659, 150, 0}, {0, 0, 0} },
+  // SFX_WAKE_CHIME — soft pentatonic rise (D4 -> E4 -> G4)
+  { {294, 140, 60}, {330, 140, 60}, {392, 200, 0}, {0, 0, 0} },
 
-  // SFX_SLEEP_DESCEND — slow descending lullaby
-  { {659, 120, 60}, {554, 120, 60}, {440, 150, 80}, {330, 200, 0} },
+  // SFX_SLEEP_DESCEND — slow gentle lullaby (G4 -> E4 -> D4 -> B3)
+  { {392, 160, 80}, {330, 160, 80}, {294, 180, 100}, {247, 250, 0} },
 
-  // SFX_BUBBLE_POP — short pop
-  { {1400, 25, 10}, {700, 35, 0}, {0, 0, 0}, {0, 0, 0} },
+  // SFX_BUBBLE_POP — soft pop (rounded, not harsh)
+  { {660, 35, 10}, {440, 45, 0}, {0, 0, 0}, {0, 0, 0} },
 
-  // SFX_EXPR_CHIRP — quick chirp
-  { {1000, 30, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0} },
+  // SFX_EXPR_CHIRP — gentle blip
+  { {494, 45, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0} },
 
-  // SFX_NOTIFICATION — two-tone
-  { {880, 80, 40}, {1100, 100, 0}, {0, 0, 0}, {0, 0, 0} },
+  // SFX_NOTIFICATION — warm two-tone (D5 -> G5)
+  { {587, 100, 50}, {784, 130, 0}, {0, 0, 0}, {0, 0, 0} },
 
-  // SFX_CLAP_REACT — sharp reaction
-  { {1500, 30, 10}, {800, 50, 0}, {0, 0, 0}, {0, 0, 0} },
+  // SFX_CLAP_REACT — surprised bloop (round, not sharp)
+  { {587, 50, 15}, {440, 70, 0}, {0, 0, 0}, {0, 0, 0} },
 };
 
 // ============================================================================
@@ -90,7 +109,7 @@ struct BotSounds {
 
   void init() {
     enabled = true;
-    volume = 200;
+    volume = 120;
     playing = false;
     currentSfx = SFX_NONE;
     stepIndex = 0;
@@ -128,7 +147,7 @@ struct BotSounds {
   // Play a single arbitrary tone (for web API)
   void playTone(uint16_t freq, uint16_t durationMs) {
     if (!enabled) return;
-    M5.Speaker.tone(freq, durationMs);
+    _playSine(freq, durationMs);
     playing = true;
     currentSfx = SFX_NONE;
     stepEndMs = millis() + durationMs;
@@ -202,7 +221,7 @@ private:
   void startStep() {
     const ToneStep& step = sfxSequences[currentSfx][stepIndex];
     if (step.freq > 0) {
-      M5.Speaker.tone(step.freq, step.durationMs);
+      _playSine(step.freq, step.durationMs);
     }
     stepEndMs = millis() + step.durationMs;
   }

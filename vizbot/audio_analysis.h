@@ -22,9 +22,9 @@ extern struct BotSounds botSounds;
 // Analysis configuration
 #define AUDIO_SAMPLE_COUNT    256    // Samples per analysis frame (512B at 16-bit)
 #define AUDIO_UPDATE_MS       50     // Rate limit: analyze every 50ms (~20Hz)
-#define AUDIO_SPIKE_MULT      3.0f   // RMS must exceed movingAvg by this factor
-#define AUDIO_SPEECH_FLOOR    300.0f // Minimum RMS to count as speech
-#define AUDIO_SPEECH_HOLD_MS  1000   // Sustained mid-level RMS for speech detection
+#define AUDIO_SPIKE_MULT      5.0f   // RMS must exceed movingAvg by this factor (high to ignore keyboard/taps)
+#define AUDIO_SPEECH_FLOOR    600.0f // Minimum RMS to count as speech (above keyboard/ambient noise)
+#define AUDIO_SPEECH_HOLD_MS  2000   // Sustained mid-level RMS for speech detection
 #define AUDIO_SILENCE_MS      30000  // No sound above threshold for extended silence
 #define AUDIO_MOVING_AVG_ALPHA 0.05f // Smoothing factor for moving average (lower = slower)
 #define AUDIO_SMOOTH_ALPHA    0.3f   // Smoothing factor for display level
@@ -118,10 +118,11 @@ struct AudioAnalysis {
                    rmsLevel * AUDIO_MOVING_AVG_ALPHA;
 
     // --- Spike detection (clap/bang) ---
-    // RMS must exceed moving average by SPIKE_MULT AND be above speech floor
+    // RMS must exceed moving average by SPIKE_MULT AND be above absolute floor
+    // High thresholds to ignore keyboard clicks, taps, and ambient transients
     if (rmsLevel > movingAvgRMS * AUDIO_SPIKE_MULT &&
-        rmsLevel > AUDIO_SPEECH_FLOOR * 2.0f &&
-        now - lastSpikeMs > 500) {  // 500ms debounce between spikes
+        rmsLevel > AUDIO_SPEECH_FLOOR * 3.0f &&
+        now - lastSpikeMs > 3000) {  // 3s debounce between spikes
       spikeDetected = true;
       lastSpikeMs = now;
     }

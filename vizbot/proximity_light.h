@@ -11,8 +11,7 @@
 // ============================================================================
 // Proximity sensor + ambient light sensor at I2C address 0x23.
 // Uses M5.In_I2C for internal bus access (avoids Wire conflicts).
-// Updates every 100ms. Provides proximity detection, cover detection,
-// and auto-brightness from ambient lux.
+// Updates every 100ms. Provides proximity detection and cover detection.
 // ============================================================================
 
 #define PROX_I2C_ADDR     0x23
@@ -40,32 +39,21 @@
 #define PROX_COVER_THRESHOLD  1500  // Raw proximity value for "sensor covered"
 #define PROX_UPDATE_MS        100   // Update rate (100ms = 10Hz)
 
-// Auto-brightness IIR smoothing
-#define AUTO_BRIGHT_ALPHA     0.1f  // Lower = smoother transitions
-
 struct ProxLightState {
   uint16_t rawProximity;        // Raw PS reading (0-2047, 11-bit)
   uint16_t ambientLux;          // Computed ambient light in lux
   bool nearDetected;            // Hand is nearby (rising edge for reactions)
   bool coverDetected;           // Sensor is fully covered
-  uint8_t autoBrightness;       // IIR-smoothed brightness from lux (0-255)
-  bool autoBrightnessEnabled;   // User toggle (default true)
   bool initialized;
   unsigned long lastUpdateMs;
-
-  // Internal
-  float smoothBrightness;       // Float for IIR filter
 
   void init() {
     rawProximity = 0;
     ambientLux = 0;
     nearDetected = false;
     coverDetected = false;
-    autoBrightness = 255;
-    autoBrightnessEnabled = true;
     initialized = false;
     lastUpdateMs = 0;
-    smoothBrightness = 255.0f;
 
     // Verify manufacturer ID
     uint8_t manufId = readReg(LTR553_MANUFAC_ID);
@@ -130,23 +118,6 @@ struct ProxLightState {
     // Update detection flags
     nearDetected = (rawProximity > PROX_NEAR_THRESHOLD);
     coverDetected = (rawProximity > PROX_COVER_THRESHOLD);
-
-    // Auto-brightness from ambient lux (IIR smoothed)
-    if (autoBrightnessEnabled) {
-      // Map lux to brightness: 0 lux -> 30 (minimum visible), 500+ lux -> 255
-      float targetBright;
-      if (ambientLux < 5) {
-        targetBright = 30.0f;    // Very dark — dim backlight
-      } else if (ambientLux > 500) {
-        targetBright = 255.0f;   // Bright room — full brightness
-      } else {
-        targetBright = 30.0f + (float)ambientLux / 500.0f * 225.0f;
-      }
-
-      smoothBrightness = smoothBrightness * (1.0f - AUTO_BRIGHT_ALPHA) +
-                          targetBright * AUTO_BRIGHT_ALPHA;
-      autoBrightness = (uint8_t)constrain(smoothBrightness, 30.0f, 255.0f);
-    }
   }
 
 private:

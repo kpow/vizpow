@@ -66,6 +66,10 @@ const char webpage[] PROGMEM = R"rawliteral(
       <div class="slider-label"><span>Brightness</span><span id="brightnessVal">15</span></div>
       <input type="range" id="brightness" min="1" max="50" value="15">
     </div>
+    <div class="slider-container">
+      <div class="slider-label"><span>Volume</span><span id="volumeVal">120</span></div>
+      <input type="range" id="volume" min="0" max="255" value="120">
+    </div>
     <div class="toggle-row">
       <span>Time Overlay</span>
       <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
@@ -224,6 +228,13 @@ const char webpage[] PROGMEM = R"rawliteral(
     };
     document.getElementById('brightness').onchange = function() { api('/brightness?v=' + this.value); };
 
+    document.getElementById('volume').oninput = function() {
+      document.getElementById('volumeVal').textContent = this.value;
+    };
+    document.getElementById('volume').onchange = function() {
+      api('/bot/volume?v=' + this.value);
+    };
+
     async function getState() {
       try {
         const r = await fetch('/state');
@@ -237,6 +248,10 @@ const char webpage[] PROGMEM = R"rawliteral(
         if (state.hiRes !== undefined) {
           hiResOn = state.hiRes;
           document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
+        }
+        if (state.sensors && state.sensors.soundVolume !== undefined) {
+          document.getElementById('volume').value = state.sensors.soundVolume;
+          document.getElementById('volumeVal').textContent = state.sensors.soundVolume;
         }
         if (state.ambientEffect !== undefined) {
           curAmbient = state.ambientEffect;
@@ -485,7 +500,6 @@ void handleState() {
                   ",\"micEnabled\":" + (audioAnalysis.enabled ? "true" : "false") +
                   ",\"proximity\":" + String(proxLight.rawProximity) +
                   ",\"lux\":" + String(proxLight.ambientLux) +
-                  ",\"autoBrightness\":" + (proxLight.autoBrightnessEnabled ? "true" : "false") +
                 "}" +
 #endif
 #ifdef CLOUD_ENABLED

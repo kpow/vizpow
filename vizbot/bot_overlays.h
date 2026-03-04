@@ -117,12 +117,6 @@ struct BotSpeechBubble {
     // Pop-in: scale 0→1 with overshoot easing
     tweenManager.start(&scale, 0.0f, 1.0f, POP_IN_MS, EASE_OUT_BACK);
 
-    // Bubble pop sound (Core S3 only)
-    #ifdef TARGET_CORES3
-    extern BotSounds botSounds;
-    botSounds.play(SFX_BUBBLE_POP);
-    #endif
-
     // Word-wrap into lines
     wrapText();
 

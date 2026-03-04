@@ -6,8 +6,8 @@
 // ============================================================================
 // Uncomment ONE of these:
 // #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-#define TARGET_LCD    // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
-// #define TARGET_CORES3    // M5Stack Core S3 (320x240 IPS, touch, BMI270)
+// #define TARGET_LCD    // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+#define TARGET_CORES3    // M5Stack Core S3 (320x240 IPS, touch, BMI270)
 
 // ============================================================================
 // Auto-configuration based on target

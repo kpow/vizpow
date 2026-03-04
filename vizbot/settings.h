@@ -54,10 +54,11 @@ void loadSettings() {
 
   #ifdef TARGET_CORES3
   // Core S3 sensor settings
-  proxLight.autoBrightnessEnabled = prefs.getBool("autoBr", true);
   botSounds.enabled   = prefs.getBool("sndOn", true);
-  botSounds.volume    = prefs.getUChar("sndVol", 200);
+  botSounds.volume    = prefs.getUChar("sndVol", 120);
   if (botSounds.volume > 0) botSounds.setVolume(botSounds.volume);
+  // Force full brightness — override any stale NVS dim value
+  lcdBrightness = 255;
   #endif
 
   prefs.end();
@@ -86,7 +87,6 @@ void saveSettings() {
   prefs.putString("wLon",   weatherLon);
 
   #ifdef TARGET_CORES3
-  prefs.putBool ("autoBr",  proxLight.autoBrightnessEnabled);
   prefs.putBool ("sndOn",   botSounds.enabled);
   prefs.putUChar("sndVol",  botSounds.volume);
   #endif

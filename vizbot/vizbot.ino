@@ -301,6 +301,11 @@ void setup() {
   // Apply loaded settings to hardware
   FastLED.setBrightness(brightness);
   setLCDBacklight(lcdBrightness);
+  #ifdef TARGET_CORES3
+  // Belt-and-suspenders: ensure Core S3 always boots at full brightness
+  lcdBrightness = 255;
+  setLCDBacklight(255);
+  #endif
 
   // Set palette from saved index
   currentPalette = palettes[paletteIndex % NUM_PALETTES];
@@ -418,17 +423,6 @@ void loop() {
   botSounds.update();
   audioAnalysis.update();
   proxLight.update();
-
-  // Apply auto-brightness from ambient light sensor (every 500ms)
-  {
-    static unsigned long lastAutoBrightMs = 0;
-    if (sysStatus.proxLightReady && proxLight.autoBrightnessEnabled &&
-        millis() - lastAutoBrightMs > 500) {
-      lastAutoBrightMs = millis();
-      lcdBrightness = proxLight.autoBrightness;
-      setLCDBacklight(lcdBrightness);
-    }
-  }
   #endif
 
   // Apply queued commands from WiFi/touch before rendering
