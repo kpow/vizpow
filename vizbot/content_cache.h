@@ -24,14 +24,29 @@
 // Thread safety: set true while cloud task writes, checked by getCloudSaying()
 volatile bool contentUpdateInProgress = false;
 
+struct CloudGroupInfo {
+  char id[40];
+  char name[32];
+  char syncMode[16];
+  char wledIp[16];        // shared WLED IP for this group
+  bool wledOwner;         // am I the stream owner?
+  char wledStreamMode[8]; // "emoji", "weather", "toggle"
+};
+
+#define MAX_CLOUD_GROUPS 4
+
 struct CloudMeta {
   char botId[40];
   uint32_t contentVersion;
   uint16_t pollIntervalSec;
   bool registered;
+  CloudGroupInfo groups[MAX_CLOUD_GROUPS];
+  uint8_t groupCount;
+  uint16_t fleetTotal;
+  uint16_t fleetOnline;
 };
 
-CloudMeta cloudMeta = {"", 0, CLOUD_POLL_DEFAULT, false};
+CloudMeta cloudMeta = {"", 0, CLOUD_POLL_DEFAULT, false, {}, 0, 0, 0};
 
 // ============================================================================
 // Filesystem Init

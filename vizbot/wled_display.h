@@ -10,6 +10,11 @@
 #include "wled_font.h"
 #include "emoji_sprites.h"
 
+// WLED ownership gate — set by cloud_client.h after parsing sync response.
+// True = this bot is allowed to send emoji/weather DDP frames.
+// Default true (standalone mode, no group constraint).
+static bool wledStreamAllowed = true;
+
 // ============================================================================
 // WLED Display — Direct pixel control via DDP (Distributed Display Protocol)
 // ============================================================================
@@ -566,8 +571,10 @@ void wledPollPalette() {
 // ============================================================================
 
 void pollWledDisplay() {
-  // Emoji display mode — continuous DDP stream
-  wledEmojiUpdate();
+  // Emoji display mode — continuous DDP stream (gated by ownership)
+  if (wledStreamAllowed) {
+    wledEmojiUpdate();
+  }
   if (wledEmoji.active) return;  // emoji mode owns WLED, skip normal logic
 
   // ---- Hold complete → advance word or restore ----
@@ -767,6 +774,11 @@ inline bool wledIsSyncing() {
   return wledData.enabled && wledData.ip[0] != '\0' &&
          sysStatus.staConnected && wledData.reachable;
 }
+
+// WLED toggle mode state (emoji/weather alternation)
+static uint8_t wledTogglePhase = 0;  // 0=emoji, 1=weather
+static unsigned long wledToggleNextMs = 0;
+#define WLED_TOGGLE_INTERVAL_MS 30000
 
 // Returns mapped local palette index if a WLED palette sync is pending, else -1.
 // Clears the pending flag — call once per loop iteration from Core 1.

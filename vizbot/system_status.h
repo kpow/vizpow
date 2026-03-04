@@ -26,6 +26,8 @@ struct SystemStatus {
   bool micReady;         // Core S3 microphone initialized
   bool proxLightReady;   // Core S3 proximity/light sensor initialized
   bool psramAvailable;   // PSRAM detected at boot
+  bool ntpSynced;            // NTP time obtained
+  unsigned long ntpSyncedAt; // millis() when NTP first synced
   uint32_t psramSizeKB;  // Total PSRAM in KB (0 if not available)
   IPAddress apIP;
   IPAddress staIP;       // IP on external network (when STA connected)

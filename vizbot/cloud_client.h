@@ -55,8 +55,10 @@ extern void cmdSetAmbientEffect(uint8_t val);
 extern void cmdPlaySound(uint16_t freq, uint16_t duration);
 extern void cmdSetVolume(uint8_t vol);
 
-// Forward declaration from bot_mode.h
+// Forward declarations from bot_mode.h
 extern uint8_t getBotPersonality();
+extern uint8_t getBotExpression();
+extern uint8_t getBotState();
 
 // CloudMeta is defined in content_cache.h
 extern CloudMeta cloudMeta;
@@ -86,6 +88,28 @@ static uint8_t ackCount = 0;
 static uint32_t cloudBackoffSec = 0;
 static unsigned long lastSyncAttempt = 0;
 static unsigned long cloudNextPollMs = 0;
+
+// Scheduled command buffer
+#define SCHED_CMD_SLOTS 8
+struct ScheduledCommand {
+  char id[48];
+  char type[20];
+  uint8_t payloadBuf[128];
+  uint16_t payloadLen;
+  time_t executeAt;
+  bool occupied;
+};
+static ScheduledCommand scheduledCmds[SCHED_CMD_SLOTS];
+
+// ISO-8601 UTC parser
+static time_t parseISO8601(const char* iso) {
+  struct tm tm = {};
+  sscanf(iso, "%d-%d-%dT%d:%d:%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+    &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
+  tm.tm_year -= 1900;
+  tm.tm_mon -= 1;
+  return mktime(&tm);
+}
 
 
 // ============================================================================
@@ -208,6 +232,43 @@ static String buildSyncBody() {
       }
     }
   }
+
+  // Enhanced state reporting
+  JsonObject state = doc["state"].to<JsonObject>();
+  state["expression"] = getBotExpression();
+  state["personality"] = getBotPersonality();
+  state["botState"] = getBotState();  // BOT_ACTIVE=0, BOT_IDLE=1, etc.
+  state["rssi"] = WiFi.RSSI();
+  state["freeHeap"] = ESP.getFreeHeap();
+  state["uptime"] = millis() / 1000;
+
+  // NTP time (ISO-8601 UTC)
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo, 0)) {
+    char timeBuf[25];
+    strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+    state["ntpTime"] = timeBuf;
+    state["ntpSynced"] = true;
+  } else {
+    state["ntpSynced"] = false;
+  }
+
+  // IMU orientation
+  extern float accelX, accelY, accelZ;
+  if (sysStatus.imuReady) {
+    state["ax"] = (int)(accelX * 100);
+    state["ay"] = (int)(accelY * 100);
+    state["az"] = (int)(accelZ * 100);
+  }
+
+  // Core S3 environment sensors
+  #ifdef TARGET_CORES3
+  if (sysStatus.proxLightReady) {
+    extern ProxLightState proxLight;
+    state["lux"] = proxLight.ambientLux;
+    state["proximity"] = proxLight.rawProximity;
+  }
+  #endif
 
   String body;
   serializeJson(doc, body);
@@ -412,6 +473,26 @@ static void dispatchCloudCommand(const char* type, JsonObject& payload) {
     DBG("Cloud cmd: set_volume=");
     DBGLN(vol);
 
+  } else if (strcmp(type, "auto_brightness") == 0) {
+    extern bool autoBrightnessEnabled;
+    bool enabled = payload["enabled"] | true;
+    autoBrightnessEnabled = enabled;
+    DBG("Cloud cmd: auto_brightness=");
+    DBGLN(enabled ? "on" : "off");
+
+  } else if (strcmp(type, "sleep") == 0) {
+    // Sleep command dispatched via command queue
+    extern void cmdSleep(uint32_t durationMs);
+    uint32_t dur = payload["durationMs"] | 30000;
+    cmdSleep(dur);
+    DBG("Cloud cmd: sleep dur=");
+    DBGLN(dur);
+
+  } else if (strcmp(type, "ble_scan") == 0) {
+    extern volatile bool bleScanRequested;
+    bleScanRequested = true;
+    DBGLN("Cloud cmd: ble_scan requested (stub)");
+
   } else if (strcmp(type, "reboot") == 0) {
     DBGLN("Cloud cmd: reboot");
     delay(100);
@@ -527,14 +608,86 @@ bool cloudSync() {
         const char* id = cmd["id"] | "";
         const char* type = cmd["type"] | "";
         JsonObject payload = cmd["payload"];
+        const char* execAt = cmd["execute_at"] | "";
 
-        if (strlen(type) > 0) {
+        // Check if this is a scheduled command
+        bool scheduled = false;
+        if (strlen(execAt) > 0 && sysStatus.ntpSynced) {
+          time_t execTime = parseISO8601(execAt);
+          time_t now_t = time(NULL);
+          if (execTime > now_t + 2) {
+            // Schedule for later — find a free slot
+            for (uint8_t s = 0; s < SCHED_CMD_SLOTS; s++) {
+              if (!scheduledCmds[s].occupied) {
+                strncpy(scheduledCmds[s].id, id, sizeof(scheduledCmds[s].id) - 1);
+                strncpy(scheduledCmds[s].type, type, sizeof(scheduledCmds[s].type) - 1);
+                // Serialize payload into buffer
+                String payStr;
+                serializeJson(payload, payStr);
+                uint16_t len = min((uint16_t)payStr.length(), (uint16_t)(sizeof(scheduledCmds[s].payloadBuf) - 1));
+                memcpy(scheduledCmds[s].payloadBuf, payStr.c_str(), len);
+                scheduledCmds[s].payloadBuf[len] = '\0';
+                scheduledCmds[s].payloadLen = len;
+                scheduledCmds[s].executeAt = execTime;
+                scheduledCmds[s].occupied = true;
+                scheduled = true;
+                DBG("Cloud: scheduled cmd type=");
+                DBG(type);
+                DBG(" at T+");
+                DBGLN(execTime - now_t);
+                break;
+              }
+            }
+          }
+        }
+
+        if (!scheduled && strlen(type) > 0) {
           dispatchCloudCommand(type, payload);
         }
+        // Always ack so server doesn't re-send
         if (strlen(id) > 0) {
           pushAck(id);
         }
       }
+    }
+
+    // Parse groups from sync response
+    JsonArray groupsArr = doc["groups"];
+    cloudMeta.groupCount = 0;
+    if (!groupsArr.isNull()) {
+      for (JsonObject g : groupsArr) {
+        if (cloudMeta.groupCount >= MAX_CLOUD_GROUPS) break;
+        CloudGroupInfo& gi = cloudMeta.groups[cloudMeta.groupCount];
+        strncpy(gi.id, g["id"] | "", sizeof(gi.id) - 1);
+        gi.id[sizeof(gi.id) - 1] = '\0';
+        strncpy(gi.name, g["name"] | "", sizeof(gi.name) - 1);
+        gi.name[sizeof(gi.name) - 1] = '\0';
+        strncpy(gi.syncMode, g["syncMode"] | "independent", sizeof(gi.syncMode) - 1);
+        gi.syncMode[sizeof(gi.syncMode) - 1] = '\0';
+        strncpy(gi.wledIp, g["wledIp"] | "", sizeof(gi.wledIp) - 1);
+        gi.wledIp[sizeof(gi.wledIp) - 1] = '\0';
+        gi.wledOwner = g["wledOwner"] | false;
+        strncpy(gi.wledStreamMode, g["wledStreamMode"] | "emoji", sizeof(gi.wledStreamMode) - 1);
+        gi.wledStreamMode[sizeof(gi.wledStreamMode) - 1] = '\0';
+        cloudMeta.groupCount++;
+      }
+    }
+
+    // Update WLED stream permission from group data
+    extern bool wledStreamAllowed;
+    wledStreamAllowed = true;  // default: allowed
+    for (uint8_t i = 0; i < cloudMeta.groupCount; i++) {
+      if (strlen(cloudMeta.groups[i].wledIp) > 0) {
+        wledStreamAllowed = cloudMeta.groups[i].wledOwner;
+        break;
+      }
+    }
+
+    // Parse fleet info
+    JsonObject fleet = doc["fleet"];
+    if (!fleet.isNull()) {
+      cloudMeta.fleetTotal = fleet["totalBots"] | 0;
+      cloudMeta.fleetOnline = fleet["onlineBots"] | 0;
     }
 
     // Process content update
@@ -580,6 +733,28 @@ bool cloudSync() {
     }
     cloudState = CLOUD_REGISTERED;
     return false;
+  }
+}
+
+// ============================================================================
+// Scheduled Command Polling — called from WiFi task loop
+// ============================================================================
+
+void pollScheduledCommands() {
+  if (!sysStatus.ntpSynced) return;
+  time_t now_t = time(NULL);
+  for (uint8_t i = 0; i < SCHED_CMD_SLOTS; i++) {
+    if (!scheduledCmds[i].occupied) continue;
+    if (now_t >= scheduledCmds[i].executeAt) {
+      // Time to execute — deserialize payload and dispatch
+      JsonDocument payDoc;
+      deserializeJson(payDoc, (const char*)scheduledCmds[i].payloadBuf);
+      JsonObject payload = payDoc.as<JsonObject>();
+      DBG("Cloud: executing scheduled cmd type=");
+      DBGLN(scheduledCmds[i].type);
+      dispatchCloudCommand(scheduledCmds[i].type, payload);
+      scheduledCmds[i].occupied = false;
+    }
   }
 }
 

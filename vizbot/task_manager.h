@@ -66,6 +66,9 @@ enum CommandType : uint8_t {
   CMD_SET_AMBIENT_EFFECT,
   CMD_PLAY_SOUND,
   CMD_SET_VOLUME,
+  CMD_AUTO_BRIGHTNESS,
+  CMD_SLEEP,
+  CMD_BLE_SCAN,
 };
 
 // ~64-byte command payload — fits all command types including multi-word phrases
@@ -204,6 +207,26 @@ void cmdSetVolume(uint8_t vol) {
   pushCommand(cmd);
 }
 
+void cmdAutoBrightness(bool enabled) {
+  Command cmd;
+  cmd.type = CMD_AUTO_BRIGHTNESS;
+  cmd.u8val = enabled ? 1 : 0;
+  pushCommand(cmd);
+}
+
+void cmdSleep(uint32_t durationMs) {
+  Command cmd;
+  cmd.type = CMD_SLEEP;
+  cmd.i32val = (int32_t)durationMs;
+  pushCommand(cmd);
+}
+
+void cmdBleScan() {
+  Command cmd;
+  cmd.type = CMD_BLE_SCAN;
+  pushCommand(cmd);
+}
+
 // ============================================================================
 // Drain Queue — called once per frame from the main loop
 // ============================================================================
@@ -296,6 +319,28 @@ void drainCommandQueue() {
         }
         #endif
         break;
+      case CMD_AUTO_BRIGHTNESS:
+        {
+          extern bool autoBrightnessEnabled;
+          autoBrightnessEnabled = (cmd.u8val == 1);
+        }
+        break;
+      case CMD_SLEEP:
+        {
+          extern struct InfoModeData infoMode;
+          if (infoMode.active) {
+            infoMode.beginExitTransition();
+          }
+          // TODO: transition to BOT_SLEEPING state with duration
+          // For now just trigger idle-to-sleepy
+        }
+        break;
+      case CMD_BLE_SCAN:
+        {
+          extern volatile bool bleScanRequested;
+          bleScanRequested = true;
+        }
+        break;
     }
   }
 }
@@ -324,6 +369,7 @@ extern void pollWeatherFetch();
 // Defined in cloud_client.h — non-blocking cloud sync (TLS registration + polling).
 #ifdef CLOUD_ENABLED
 extern void pollCloudSync();
+extern void pollScheduledCommands();
 #endif
 
 TaskHandle_t wifiTaskHandle = nullptr;
@@ -342,6 +388,7 @@ void wifiServerTask(void* param) {
       pollWeatherFetch();                // Weather API fetch (if requested)
       #ifdef CLOUD_ENABLED
       pollCloudSync();                   // Cloud registration + sync (TLS)
+      pollScheduledCommands();           // Execute scheduled commands at their target time
       #endif
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP
