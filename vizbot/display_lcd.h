@@ -91,6 +91,8 @@ struct DisplayProxy {
   void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t color) { DP(fillRoundRect, x, y, w, h, r, (uint16_t)color); }
   void fillEllipse(int32_t x, int32_t y, int32_t rx, int32_t ry, uint32_t color) { DP(fillEllipse, x, y, rx, ry, (uint16_t)color); }
   void fillTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t color) { DP(fillTriangle, x0, y0, x1, y1, x2, y2, (uint16_t)color); }
+  void setFont(const lgfx::IFont* font) { DP(setFont, font); }
+  int16_t textWidth(const char* s) { return _dp_canvas_active ? (int16_t)_dp_canvas->textWidth(s) : (int16_t)M5.Display.textWidth(s); }
   void begin() {}  // no-op: M5.begin() handles display init
   int16_t width()  { return (int16_t)M5.Display.width(); }
   int16_t height() { return (int16_t)M5.Display.height(); }
@@ -276,6 +278,8 @@ struct DisplayProxy {
   void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t color) { DP(fillRoundRect, x, y, w, h, r, (uint16_t)color); }
   void fillEllipse(int32_t x, int32_t y, int32_t rx, int32_t ry, uint32_t color) { DP(fillEllipse, x, y, rx, ry, (uint16_t)color); }
   void fillTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t color) { DP(fillTriangle, x0, y0, x1, y1, x2, y2, (uint16_t)color); }
+  void setFont(const lgfx::IFont* font) { DP(setFont, font); }
+  int16_t textWidth(const char* s) { return _dp_canvas_active ? (int16_t)_dp_canvas->textWidth(s) : (int16_t)_lcd_display.textWidth(s); }
   void begin() {}  // no-op: initLCD() handles display init
   int16_t width()  { return (int16_t)_lcd_display.width(); }
   int16_t height() { return (int16_t)_lcd_display.height(); }
