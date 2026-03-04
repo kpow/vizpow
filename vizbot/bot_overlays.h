@@ -42,8 +42,8 @@ struct BotSpeechBubble {
   float scale;                 // Tween-driven: 0→1 pop-in, 1→0 fade-out
 
   // Word-wrap state
-  uint8_t numLines;            // 1-3
-  char lines[3][20];           // Wrapped line buffers (17 chars + null + margin)
+  uint8_t numLines;            // 1-4
+  char lines[4][28];           // Wrapped line buffers (wider for proportional font)
 
   // Animation timing
   static const uint16_t POP_IN_MS = 150;
@@ -61,41 +61,54 @@ struct BotSpeechBubble {
     fadeOutTime = 0;
   }
 
-  // Word-wrap text into lines[] for multi-line rendering
+  // Word-wrap text into lines[] using proportional font width measurement
   void wrapText() {
-    uint8_t maxChars = (OVERLAY_BUBBLE_MAX_W - 24) / 12;  // 17 for 240px LCD
+    int16_t maxLineW = OVERLAY_BUBBLE_MAX_W - 32;  // 16px padding each side
     numLines = 0;
 
-    uint8_t textLen = strlen(text);
-    if (textLen <= maxChars) {
-      strncpy(lines[0], text, 19); lines[0][19] = '\0';
+    // Check if text fits on one line
+    gfx->setFont(&fonts::DejaVu18);
+    gfx->setTextSize(1);
+    if (gfx->textWidth(text) <= maxLineW) {
+      strncpy(lines[0], text, 27); lines[0][27] = '\0';
       numLines = 1;
       return;
     }
 
-    // Greedy word-wrap
+    // Greedy word-wrap using proportional width
     const char* p = text;
-    while (*p && numLines < 3) {
-      uint8_t lineLen = 0;
+    while (*p && numLines < 4) {
       const char* lastSpace = nullptr;
       const char* scan = p;
+      char testBuf[28];
+      uint8_t bufIdx = 0;
 
-      while (*scan && lineLen < maxChars) {
+      while (*scan && bufIdx < 27) {
+        testBuf[bufIdx] = *scan;
+        testBuf[bufIdx + 1] = '\0';
+        if (gfx->textWidth(testBuf) > maxLineW) break;
         if (*scan == ' ') lastSpace = scan;
-        lineLen++; scan++;
+        bufIdx++; scan++;
       }
 
       // If remaining text fits, take it all
       if (!*scan) {
-        strncpy(lines[numLines], p, 19);
-        lines[numLines][19] = '\0';
+        uint8_t take = (uint8_t)(scan - p);
+        if (take > 27) take = 27;
+        memcpy(lines[numLines], p, take);
+        lines[numLines][take] = '\0';
         numLines++;
         break;
       }
 
-      // Break at last space, or force-break if no space
-      uint8_t take = lastSpace ? (uint8_t)(lastSpace - p) : maxChars;
-      if (take > 19) take = 19;
+      // Break at last space, or force-break
+      uint8_t take;
+      if (lastSpace && lastSpace > p) {
+        take = (uint8_t)(lastSpace - p);
+      } else {
+        take = bufIdx > 0 ? bufIdx : 1;
+      }
+      if (take > 27) take = 27;
       memcpy(lines[numLines], p, take);
       lines[numLines][take] = '\0';
       numLines++;
@@ -117,18 +130,22 @@ struct BotSpeechBubble {
     // Pop-in: scale 0→1 with overshoot easing
     tweenManager.start(&scale, 0.0f, 1.0f, POP_IN_MS, EASE_OUT_BACK);
 
+    // Set proportional font for measurement
+    gfx->setFont(&fonts::DejaVu18);
+    gfx->setTextSize(1);
+
     // Word-wrap into lines
     wrapText();
 
-    // Bubble width based on longest wrapped line
-    uint8_t maxLineLen = 0;
+    // Bubble width based on widest wrapped line (proportional measurement)
+    int16_t maxLineW = 0;
     for (uint8_t i = 0; i < numLines; i++) {
-      uint8_t len = strlen(lines[i]);
-      if (len > maxLineLen) maxLineLen = len;
+      int16_t w = gfx->textWidth(lines[i]);
+      if (w > maxLineW) maxLineW = w;
     }
-    bubbleW = maxLineLen * 12 + 24;  // 12px padding each side
+    bubbleW = maxLineW + 32;  // 16px padding each side
     if (bubbleW > OVERLAY_BUBBLE_MAX_W) bubbleW = OVERLAY_BUBBLE_MAX_W;
-    bubbleH = numLines * 16 + 14;  // 16px per line + 14px padding
+    bubbleH = numLines * 20 + 16;  // 20px per line + 16px padding
     bubbleX = (LCD_WIDTH - bubbleW) / 2;  // Centered
     bubbleY = OVERLAY_BUBBLE_Y;
 
@@ -171,36 +188,70 @@ struct BotSpeechBubble {
     if (s < 0.0f) s = 0.0f;
     if (s > 1.1f) s = 1.1f;  // Allow slight overshoot from EASE_OUT_BACK
 
+    // ---- Sensor-aware positioning ----
+    int16_t renderY = bubbleY;
+    int16_t renderX = bubbleX;
+    bool flipPointer = false;
+
+    #if defined(TARGET_CORES3) || defined(TARGET_LCD)
+    {
+      extern float accelX, accelY;
+      // Upside-down detection: move bubble to top, flip pointer
+      if (accelX < -0.3f) {
+        renderY = 8;
+        flipPointer = true;
+      }
+      // Tilt shift: subtle horizontal offset (max ±15px)
+      int16_t tiltOffset = (int16_t)constrain(-accelY * 15.0f, -15.0f, 15.0f);
+      renderX = bubbleX + tiltOffset;
+      // Clamp to screen
+      if (renderX < 2) renderX = 2;
+      if (renderX + bubbleW > LCD_WIDTH - 2) renderX = LCD_WIDTH - 2 - bubbleW;
+    }
+    #endif
+
     // Calculate scaled dimensions
     int16_t sw = (int16_t)(bubbleW * s);
     int16_t sh = (int16_t)(bubbleH * s);
-    int16_t sx = bubbleX + (bubbleW - sw) / 2;
-    int16_t sy = bubbleY + (bubbleH - sh) / 2;
+    int16_t sx = renderX + (bubbleW - sw) / 2;
+    int16_t sy = renderY + (bubbleH - sh) / 2;
 
     if (sw < 4 || sh < 4) return;
 
     // Draw bubble background (rounded rect)
-    gfx->fillRoundRect(sx, sy, sw, sh, 6, OVERLAY_BG);
-    gfx->drawRoundRect(sx, sy, sw, sh, 6, OVERLAY_BORDER);
+    gfx->fillRoundRect(sx, sy, sw, sh, 10, OVERLAY_BG);
+    gfx->drawRoundRect(sx, sy, sw, sh, 10, OVERLAY_BORDER);
 
-    // Draw small triangle pointer (pointing up toward face)
+    // Draw triangle pointer
     int16_t triCX = sx + sw / 2;
-    int16_t triTop = sy - 5;
-    gfx->fillTriangle(triCX - 5, sy, triCX + 5, sy, triCX, triTop, OVERLAY_BG);
+    if (!flipPointer) {
+      // Pointing up toward face
+      int16_t triTop = sy - 8;
+      gfx->fillTriangle(triCX - 6, sy, triCX + 6, sy, triCX, triTop, OVERLAY_BG);
+      // Pointer border outline
+      gfx->drawLine(triCX - 6, sy, triCX, triTop, OVERLAY_BORDER);
+      gfx->drawLine(triCX + 6, sy, triCX, triTop, OVERLAY_BORDER);
+    } else {
+      // Pointing down (upside-down mode)
+      int16_t triBot = sy + sh + 8;
+      gfx->fillTriangle(triCX - 6, sy + sh, triCX + 6, sy + sh, triCX, triBot, OVERLAY_BG);
+      gfx->drawLine(triCX - 6, sy + sh, triCX, triBot, OVERLAY_BORDER);
+      gfx->drawLine(triCX + 6, sy + sh, triCX, triBot, OVERLAY_BORDER);
+    }
 
     // Draw text (only when fully visible or popping in past 50%)
     if (s > 0.5f) {
-      gfx->setTextSize(2);
+      gfx->setFont(&fonts::DejaVu18);
+      gfx->setTextSize(1);
       gfx->setTextColor(OVERLAY_TEXT);
 
-      int16_t totalTextH = numLines * 16;
+      int16_t totalTextH = numLines * 20;
       int16_t startY = sy + (sh - totalTextH) / 2;
 
       for (uint8_t i = 0; i < numLines; i++) {
-        uint8_t lineLen = strlen(lines[i]);
-        int16_t textW = lineLen * 12;
+        int16_t textW = gfx->textWidth(lines[i]);
         int16_t textX = sx + (sw - textW) / 2;  // center each line
-        int16_t textY = startY + i * 16;
+        int16_t textY = startY + i * 20;
 
         // Bold: draw twice with 1px horizontal offset
         gfx->setCursor(textX, textY);
@@ -208,6 +259,10 @@ struct BotSpeechBubble {
         gfx->setCursor(textX + 1, textY);
         gfx->print(lines[i]);
       }
+
+      // Reset font so notification/time overlays use default sizing
+      gfx->setFont(&fonts::Font0);
+      gfx->setTextSize(1);
     }
   }
 };

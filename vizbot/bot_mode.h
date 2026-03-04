@@ -464,13 +464,17 @@ void updateBotMode() {
 
   // ---- Update animation systems ----
 
-  // Blink (not while sleeping or during special eye modes)
-  if (botMode.state != BOT_SLEEPING &&
-      botMode.face.eyeMode == EYE_NORMAL) {
-    botMode.face.blinkAmount = botMode.blink.update();
-  } else if (botMode.state == BOT_SLEEPING) {
-    botMode.face.blinkAmount = 0.0f;  // Don't squish — EYE_CLOSED handles it
-    botMode.face.eyeMode = EYE_CLOSED;
+  // Blink (not while sleeping or during non-blinkable eye modes)
+  {
+    BotEyeMode em = botMode.face.eyeMode;
+    bool canBlink = (em == EYE_NORMAL || em == EYE_DIAMOND || em == EYE_HALF ||
+                     em == EYE_DOT || em == EYE_WINK);
+    if (botMode.state != BOT_SLEEPING && canBlink) {
+      botMode.face.blinkAmount = botMode.blink.update();
+    } else if (botMode.state == BOT_SLEEPING) {
+      botMode.face.blinkAmount = 0.0f;  // Don't squish — EYE_CLOSED handles it
+      botMode.face.eyeMode = EYE_CLOSED;
+    }
   }
 
   // Look-around (only when active or idle, and not reacting)

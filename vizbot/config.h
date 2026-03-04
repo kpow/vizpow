@@ -36,7 +36,7 @@
   #define HIRES_ENABLED  // Hi-res ambient effects (PSRAM provides heap headroom)
   // Full power profile for USB-powered LCD board
   #define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Full TX — USB powered, needs range
-  #define OVERLAY_BUBBLE_Y 192              // Closer to mouth (default LCD_HEIGHT-58=222)
+  #define OVERLAY_BUBBLE_Y 182              // Closer to mouth, taller bubble (default LCD_HEIGHT-68)
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
@@ -142,7 +142,7 @@
 // Ambient effect count (used for bot background overlay)
 #define NUM_AMBIENT_EFFECTS 11
 #define NUM_PALETTES 15
-#define MAX_SAY_LEN 64  // Max characters for speech text (LCD + WLED)
+#define MAX_SAY_LEN 96  // Max characters for speech text (LCD + WLED)
 
 // Shake detection threshold (for bot reactions)
 #define SHAKE_THRESHOLD 2.0      // Acceleration magnitude to count as a shake (g)

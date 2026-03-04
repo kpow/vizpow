@@ -33,7 +33,7 @@
 
 // ---- Speech Bubble (bot_overlays.h) ------------------------------------
 #ifndef OVERLAY_BUBBLE_Y
-  #define OVERLAY_BUBBLE_Y    (LCD_HEIGHT - 58)   // Near bottom; was hardcoded 220 for 280px
+  #define OVERLAY_BUBBLE_Y    (LCD_HEIGHT - 68)   // Near bottom; taller bubble for proportional font
 #endif
 #define OVERLAY_BUBBLE_MAX_W  (LCD_WIDTH - 6)     // 3px margin each side; was hardcoded 234
 
