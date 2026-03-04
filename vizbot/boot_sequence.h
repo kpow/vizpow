@@ -17,7 +17,7 @@
 #endif
 
 // Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
+SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, 0, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)

@@ -673,6 +673,16 @@ bool cloudSync() {
       }
     }
 
+    // Update WLED stream permission from group data
+    extern bool wledStreamAllowed;
+    wledStreamAllowed = true;  // default: allowed
+    for (uint8_t i = 0; i < cloudMeta.groupCount; i++) {
+      if (strlen(cloudMeta.groups[i].wledIp) > 0) {
+        wledStreamAllowed = cloudMeta.groups[i].wledOwner;
+        break;
+      }
+    }
+
     // Parse fleet info
     JsonObject fleet = doc["fleet"];
     if (!fleet.isNull()) {

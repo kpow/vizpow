@@ -10,6 +10,11 @@
 #include "wled_font.h"
 #include "emoji_sprites.h"
 
+// WLED ownership gate — set by cloud_client.h after parsing sync response.
+// True = this bot is allowed to send emoji/weather DDP frames.
+// Default true (standalone mode, no group constraint).
+static bool wledStreamAllowed = true;
+
 // ============================================================================
 // WLED Display — Direct pixel control via DDP (Distributed Display Protocol)
 // ============================================================================
@@ -567,7 +572,7 @@ void wledPollPalette() {
 
 void pollWledDisplay() {
   // Emoji display mode — continuous DDP stream (gated by ownership)
-  if (isWledStreamAllowed()) {
+  if (wledStreamAllowed) {
     wledEmojiUpdate();
   }
   if (wledEmoji.active) return;  // emoji mode owns WLED, skip normal logic
@@ -769,24 +774,6 @@ inline bool wledIsSyncing() {
   return wledData.enabled && wledData.ip[0] != '\0' &&
          sysStatus.staConnected && wledData.reachable;
 }
-
-// WLED ownership gate — checks if this bot is allowed to send emoji/weather DDP.
-// If not in any group with wled_ip, always allowed (standalone).
-// If in a group with wled_ip, only allowed if wledOwner == true.
-// Text (say) commands bypass this — server handles queuing via executeAt.
-#ifdef CLOUD_ENABLED
-extern struct CloudMeta cloudMeta;
-bool isWledStreamAllowed() {
-  for (uint8_t i = 0; i < cloudMeta.groupCount; i++) {
-    if (strlen(cloudMeta.groups[i].wledIp) > 0) {
-      return cloudMeta.groups[i].wledOwner;
-    }
-  }
-  return true;  // no group WLED constraint
-}
-#else
-bool isWledStreamAllowed() { return true; }
-#endif
 
 // WLED toggle mode state (emoji/weather alternation)
 static uint8_t wledTogglePhase = 0;  // 0=emoji, 1=weather
