@@ -8,6 +8,7 @@
 #include "config.h"
 #include "system_status.h"
 #include "wled_font.h"
+#include "emoji_sprites.h"
 
 // ============================================================================
 // WLED Display — Direct pixel control via DDP (Distributed Display Protocol)
@@ -549,10 +550,19 @@ void wledPollPalette() {
 }
 
 // ============================================================================
+// WLED Emoji Display — sprite slideshow on 32x8 matrix
+// ============================================================================
+#include "wled_emoji.h"
+
+// ============================================================================
 // Poll — called from Core 0 (WiFi task)
 // ============================================================================
 
 void pollWledDisplay() {
+  // Emoji display mode — continuous DDP stream
+  wledEmojiUpdate();
+  if (wledEmoji.active) return;  // emoji mode owns WLED, skip normal logic
+
   // ---- Hold complete → advance word or restore ----
   if (wledData.phase == WLED_PHASE_HOLD && millis() >= wledData.phaseEndMs) {
     // Multi-word sequence: advance to next word

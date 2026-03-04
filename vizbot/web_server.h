@@ -147,6 +147,20 @@ const char webpage[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
+  <div class="card">
+    <h2>WLED Sprites</h2>
+    <div class="grid4" id="emojiGrid"></div>
+    <div id="emojiQueue" style="margin-top:12px;min-height:20px"></div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button onclick="clearWledEmoji()" style="flex:1">Clear</button>
+      <button onclick="toggleWledEmoji()" id="emojiToggleBtn" style="flex:1;background:rgba(99,102,241,0.6)">Start</button>
+    </div>
+    <div class="slider-container" style="margin-top:12px">
+      <div class="slider-label"><span>Cycle Time</span><span id="emojiCycleVal">4s</span></div>
+      <input type="range" id="emojiCycle" min="1" max="10" value="4">
+    </div>
+  </div>
+
   <div class="status">Connected to VizBot &middot; vizbot.local</div>
 
   <script>
@@ -269,6 +283,19 @@ const char webpage[] PROGMEM = R"rawliteral(
         }
         if (state.deviceName) {
           document.getElementById('deviceNameInput').value = state.deviceName;
+        }
+        if (state.wledEmoji) {
+          emojiQueue = state.wledEmoji.queue || [];
+          emojiActive = state.wledEmoji.active || false;
+          document.getElementById('emojiToggleBtn').textContent = emojiActive ? 'Stop' : 'Start';
+          document.getElementById('emojiToggleBtn').style.background = emojiActive ? '#6366f1' : 'rgba(99,102,241,0.6)';
+          if (state.wledEmoji.cycleTime) {
+            const sec = Math.round(state.wledEmoji.cycleTime / 1000);
+            document.getElementById('emojiCycle').value = sec;
+            document.getElementById('emojiCycleVal').textContent = sec + 's';
+          }
+          renderEmojiGrid();
+          renderEmojiQueue();
         }
       } catch(e) {}
     }
@@ -426,10 +453,72 @@ const char webpage[] PROGMEM = R"rawliteral(
       }
     }
 
+    // WLED Emoji sprite controls
+    const emojiNames=["Heart","Star","Check","X","Fire","Potion","Sword","Shield","ArrowUp","ArrowDn","ArrowL","ArrowR","Skull","Ghost","Alien","Pacman","PacGhost","ShyGuy","Music","WiFi","Rainbow","Mushroom","Skelly","Chicken","Invader","Dragon","TwnklHrt","Popsicle"];
+    let emojiQueue=[];
+    let emojiActive=false;
+
+    function renderEmojiGrid() {
+      document.getElementById('emojiGrid').innerHTML = emojiNames.map((n,i) => {
+        const inQ = emojiQueue.indexOf(i) >= 0;
+        return `<button class="${inQ?'active':''}" onclick="addWledEmoji(${i})" style="font-size:11px;padding:10px 4px">${n}</button>`;
+      }).join('');
+    }
+
+    function renderEmojiQueue() {
+      const el = document.getElementById('emojiQueue');
+      if (emojiQueue.length === 0) {
+        el.innerHTML = '<div style="color:#666;font-size:12px">No sprites selected</div>';
+        return;
+      }
+      el.innerHTML = emojiQueue.map((idx,pos) =>
+        `<span onclick="removeWledEmoji(${pos})" style="display:inline-block;background:rgba(99,102,241,0.4);border-radius:8px;padding:4px 10px;margin:2px 4px 2px 0;font-size:12px;cursor:pointer">${emojiNames[idx]} &times;</span>`
+      ).join('');
+    }
+
+    function addWledEmoji(i) {
+      if (emojiQueue.indexOf(i) < 0) emojiQueue.push(i);
+      api('/wled/emoji/add?v=' + i);
+      renderEmojiGrid();
+      renderEmojiQueue();
+    }
+
+    function removeWledEmoji(pos) {
+      emojiQueue.splice(pos, 1);
+      api('/wled/emoji/remove?v=' + pos);
+      renderEmojiGrid();
+      renderEmojiQueue();
+    }
+
+    function clearWledEmoji() {
+      emojiQueue = [];
+      api('/wled/emoji/clear');
+      renderEmojiGrid();
+      renderEmojiQueue();
+    }
+
+    function toggleWledEmoji() {
+      emojiActive = !emojiActive;
+      api('/wled/emoji/toggle');
+      document.getElementById('emojiToggleBtn').textContent = emojiActive ? 'Stop' : 'Start';
+      document.getElementById('emojiToggleBtn').className = emojiActive ? 'active' : '';
+      document.getElementById('emojiToggleBtn').style.background = emojiActive ? '#6366f1' : 'rgba(99,102,241,0.6)';
+    }
+
+    document.getElementById('emojiCycle').oninput = function() {
+      document.getElementById('emojiCycleVal').textContent = this.value + 's';
+    };
+    document.getElementById('emojiCycle').onchange = function() {
+      api('/wled/emoji/settings?cycle=' + (this.value * 1000));
+    };
+
+    function initEmoji() { renderEmojiGrid(); renderEmojiQueue(); }
+
     getState();
     render();
     wifiInitCheck();
     wledUpdateStatus();
+    initEmoji();
   </script>
 </body>
 </html>
@@ -484,6 +573,7 @@ void handleState() {
                   ",\"sta\":" + (sysStatus.staConnected ? "true" : "false") +
                   (sysStatus.staConnected ? ",\"staIP\":\"" + sysStatus.staIP.toString() + "\"" : "") +
                 "},\"wled\":" + getWledStatusJson() +
+                ",\"wledEmoji\":" + getWledEmojiJson() +
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
@@ -803,6 +893,49 @@ void handleWledTest() {
   server.send(200, "text/plain", "OK");
 }
 
+// WLED Emoji handlers (defined in wled_emoji.h, included via wled_display.h)
+
+void handleWledEmojiAdd() {
+  if (server.hasArg("v")) {
+    uint8_t idx = constrain(server.arg("v").toInt(), 0, ICON_COUNT - 1);
+    wledEmojiAdd(idx);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleWledEmojiRemove() {
+  if (server.hasArg("v")) {
+    uint8_t pos = server.arg("v").toInt();
+    wledEmojiRemove(pos);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleWledEmojiClear() {
+  wledEmojiClear();
+  if (wledEmoji.active) wledEmojiStop();
+  server.send(200, "text/plain", "OK");
+}
+
+void handleWledEmojiToggle() {
+  if (wledEmoji.active) {
+    wledEmojiStop();
+  } else {
+    wledEmojiStart();
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleWledEmojiSettings() {
+  if (server.hasArg("cycle")) {
+    wledEmoji.cycleTimeMs = constrain(server.arg("cycle").toInt(), 1000, 10000);
+  }
+  if (server.hasArg("fade")) {
+    wledEmoji.fadeTimeMs = constrain(server.arg("fade").toInt(), 200, 2000);
+  }
+  server.send(200, "text/plain", "OK");
+}
+
 // ============================================================================
 // Cloud Endpoints
 // ============================================================================
@@ -914,6 +1047,13 @@ void setupWebServer() {
   server.on("/wled/status", handleWledStatus);
   server.on("/wled/config", handleWledConfig);
   server.on("/wled/test", handleWledTest);
+
+  // WLED emoji display endpoints
+  server.on("/wled/emoji/add", handleWledEmojiAdd);
+  server.on("/wled/emoji/remove", handleWledEmojiRemove);
+  server.on("/wled/emoji/clear", handleWledEmojiClear);
+  server.on("/wled/emoji/toggle", handleWledEmojiToggle);
+  server.on("/wled/emoji/settings", handleWledEmojiSettings);
 
   // Core S3 sensor endpoints
   #ifdef TARGET_CORES3
