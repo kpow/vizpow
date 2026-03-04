@@ -25,6 +25,7 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 #ifdef TARGET_CORES3
 #include <M5Unified.h>
 #include "bot_sounds.h"
+#include "audio_analysis.h"
 #endif
 
 // ============================================================================
@@ -434,8 +435,11 @@ void runBootSequence() {
     // Speaker init
     botSounds.init();
     sysStatus.speakerReady = true;
-    // Mic and proximity initialized in later commits
-    char detail[32] = "Spkr OK";
+    // Mic init
+    audioAnalysis.init();
+    sysStatus.micReady = true;
+    // Proximity/light initialized in later commit
+    char detail[32] = "Spkr+Mic OK";
     bootDrawResult(true, detail);
     delay(80);
   }

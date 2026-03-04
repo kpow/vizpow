@@ -39,6 +39,7 @@
 #include "effects_ambient.h"
 #ifdef TARGET_CORES3
 #include "bot_sounds.h"     // Core S3 speaker sound effects (must come before bot_mode.h)
+#include "audio_analysis.h" // Core S3 mic audio analysis
 #endif
 #include "bot_mode.h"
 #include "info_mode.h"
@@ -411,9 +412,10 @@ void loop() {
   // Advance all active tweens (before rendering so values are current)
   tweenManager.update();
 
-  // Advance sound effect sequencer (Core S3 only)
+  // Advance sound effect sequencer and mic analysis (Core S3 only)
   #ifdef TARGET_CORES3
   botSounds.update();
+  audioAnalysis.update();
   #endif
 
   // Apply queued commands from WiFi/touch before rendering
