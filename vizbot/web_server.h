@@ -134,6 +134,10 @@ const char webpage[] PROGMEM = R"rawliteral(
         <span>Forward Speech to WLED</span>
         <div class="toggle" id="wledToggle" onclick="toggleWled()"></div>
       </div>
+      <div class="toggle-row" style="margin-top:8px">
+        <span>Hologram Mode</span>
+        <div class="toggle" id="hologramToggle" onclick="toggleHologram()"></div>
+      </div>
     </div>
     <div style="margin-top:10px">
       <div style="display:flex;gap:8px">
@@ -424,10 +428,16 @@ const char webpage[] PROGMEM = R"rawliteral(
 
     // WLED display controls
     let wledOn = false;
+    let hologramOn = false;
     function toggleWled() {
       wledOn = !wledOn;
       document.getElementById('wledToggle').className = 'toggle ' + (wledOn ? 'on' : '');
       api('/wled/config?on=' + (wledOn ? 1 : 0));
+    }
+    function toggleHologram() {
+      hologramOn = !hologramOn;
+      document.getElementById('hologramToggle').className = 'toggle ' + (hologramOn ? 'on' : '');
+      api('/wled/config?hologram=' + (hologramOn ? 1 : 0));
     }
     function setWledIP() {
       const ip = document.getElementById('wledIP').value.trim();
@@ -443,6 +453,8 @@ const char webpage[] PROGMEM = R"rawliteral(
       const d = await r.json();
       wledOn = d.enabled;
       document.getElementById('wledToggle').className = 'toggle ' + (wledOn ? 'on' : '');
+      hologramOn = !!d.hologram;
+      document.getElementById('hologramToggle').className = 'toggle ' + (hologramOn ? 'on' : '');
       if (d.ip) document.getElementById('wledIP').value = d.ip;
       const el = document.getElementById('wledStatus');
       if (d.ip && d.enabled) {
@@ -861,6 +873,7 @@ extern void wledSetSpeed(uint8_t spd);
 extern void wledSetIx(uint8_t ix);
 extern String getWledStatusJson();
 extern void wledQueueText(const char* text, uint16_t durationMs);
+extern void wledSetHologram(bool on);
 
 void handleWledStatus() {
   server.send(200, "application/json", getWledStatusJson());
@@ -878,6 +891,9 @@ void handleWledConfig() {
   }
   if (server.hasArg("ix")) {
     wledSetIx(constrain(server.arg("ix").toInt(), 0, 255));
+  }
+  if (server.hasArg("hologram")) {
+    wledSetHologram(server.arg("hologram").toInt() == 1);
   }
   if (server.hasArg("r") && server.hasArg("g") && server.hasArg("b")) {
     wledSetColor(
