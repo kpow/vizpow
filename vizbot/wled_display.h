@@ -80,6 +80,7 @@ struct WledDisplayData {
   uint8_t scrollSpeed;       // 0-255 (kept for NVS compatibility)
   uint8_t textIx;            // 0-255 (kept for NVS compatibility)
   uint8_t r, g, b;           // text color
+  bool hologramMode;         // horizontal mirror for Pepper's ghost prism
 
   // Pixel buffer — 256 pixels × 3 bytes RGB (BSS, not stack)
   uint8_t pixelBuffer[WLED_PIXEL_BYTES];
@@ -146,6 +147,11 @@ void loadWledSettings() {
   wledData.r           = prefs.getUChar("wledR", 255);
   wledData.g           = prefs.getUChar("wledG", 255);
   wledData.b           = prefs.getUChar("wledB", 255);
+  wledData.hologramMode = prefs.getBool("hologram", false);
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+  extern bool hologramMirrorLCD;
+  hologramMirrorLCD = wledData.hologramMode;
+  #endif
 
   prefs.end();
 
@@ -180,6 +186,7 @@ void saveWledSettings() {
   prefs.putUChar("wledR", wledData.r);
   prefs.putUChar("wledG", wledData.g);
   prefs.putUChar("wledB", wledData.b);
+  prefs.putBool("hologram", wledData.hologramMode);
 
   prefs.end();
   WLED_DBGLN("WLED settings saved");
@@ -723,6 +730,15 @@ void wledSetIx(uint8_t ix) {
   saveWledSettings();
 }
 
+void wledSetHologram(bool on) {
+  wledData.hologramMode = on;
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+  extern bool hologramMirrorLCD;
+  hologramMirrorLCD = on;
+  #endif
+  saveWledSettings();
+}
+
 String getWledStatusJson() {
   String json = "{\"enabled\":";
   json += wledData.enabled ? "true" : "false";
@@ -740,6 +756,8 @@ String getWledStatusJson() {
   json += wledData.g;
   json += ",\"b\":";
   json += wledData.b;
+  json += ",\"hologram\":";
+  json += wledData.hologramMode ? "true" : "false";
   json += "}";
   return json;
 }

@@ -16,6 +16,9 @@
 #define GRID_OFFSET_X ((LCD_WIDTH - GRID_SIZE) / 2)
 #define GRID_OFFSET_Y ((LCD_HEIGHT - GRID_SIZE) / 2)
 
+// Hologram mode — horizontal mirror for Pepper's ghost prism display
+bool hologramMirrorLCD = false;
+
 // Hi-res mode flag - renders effects at full LCD resolution instead of 8x8 simulation
 bool hiResMode = false;
 bool hiResRenderedThisFrame = false;  // Set by hi-res effects to skip 8x8 rendering
@@ -331,7 +334,36 @@ struct DisplayProxy {
     _dp_canvas_active = (_dp_canvas != nullptr);
   }
   void flushCanvas() {
-    if (_dp_canvas && _dp_canvas_active) _dp_canvas->pushSprite(0, 0);
+    if (_dp_canvas && _dp_canvas_active) {
+      if (hologramMirrorLCD) {
+        // Horizontal flip in-place: swap pixels left↔right per row
+        uint16_t w = _dp_canvas->width();
+        uint16_t h = _dp_canvas->height();
+        uint16_t half = w >> 1;
+        if (_dp_canvas->getColorDepth() > 8) {
+          uint16_t* buf = (uint16_t*)_dp_canvas->getBuffer();
+          for (uint16_t y = 0; y < h; y++) {
+            uint16_t* row = buf + y * w;
+            for (uint16_t x = 0; x < half; x++) {
+              uint16_t tmp = row[x];
+              row[x] = row[w - 1 - x];
+              row[w - 1 - x] = tmp;
+            }
+          }
+        } else {
+          uint8_t* buf = (uint8_t*)_dp_canvas->getBuffer();
+          for (uint16_t y = 0; y < h; y++) {
+            uint8_t* row = buf + y * w;
+            for (uint16_t x = 0; x < half; x++) {
+              uint8_t tmp = row[x];
+              row[x] = row[w - 1 - x];
+              row[w - 1 - x] = tmp;
+            }
+          }
+        }
+      }
+      _dp_canvas->pushSprite(0, 0);
+    }
     _dp_canvas_active = false;
   }
   // Pre-allocate the canvas early (before WiFi/tasks fragment the heap).
