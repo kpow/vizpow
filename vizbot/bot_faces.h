@@ -103,7 +103,7 @@ struct BotExpression {
 #endif
 
 // Number of defined expressions
-#define BOT_NUM_EXPRESSIONS 27
+#define BOT_NUM_EXPRESSIONS 26
 
 // Expression indices
 #define EXPR_NEUTRAL    0
@@ -117,22 +117,21 @@ struct BotExpression {
 #define EXPR_THINKING   8
 #define EXPR_EXCITED    9
 #define EXPR_MISCHIEF   10
-#define EXPR_DEAD       11
-#define EXPR_SKEPTICAL  12
-#define EXPR_WORRIED    13
-#define EXPR_CONFUSED   14
-#define EXPR_PROUD      15
-#define EXPR_SHY        16
-#define EXPR_ANNOYED    17
-#define EXPR_BLISS      18
-#define EXPR_FOCUSED    19
-#define EXPR_WINKING    20
-#define EXPR_DEVIOUS    21
-#define EXPR_SHOCKED    22
-#define EXPR_KISSING    23
-#define EXPR_NERVOUS    24
-#define EXPR_GLITCHING  25
-#define EXPR_SASSY      26
+#define EXPR_SKEPTICAL  11
+#define EXPR_WORRIED    12
+#define EXPR_CONFUSED   13
+#define EXPR_PROUD      14
+#define EXPR_SHY        15
+#define EXPR_ANNOYED    16
+#define EXPR_BLISS      17
+#define EXPR_FOCUSED    18
+#define EXPR_WINKING    19
+#define EXPR_DEVIOUS    20
+#define EXPR_SHOCKED    21
+#define EXPR_KISSING    22
+#define EXPR_NERVOUS    23
+#define EXPR_GLITCHING  24
+#define EXPR_SASSY      25
 
 // Expression parameter table (stored in PROGMEM)
 const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
@@ -258,18 +257,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 300
   },
 
-  // 11: DEAD — X eyes, flat line mouth
-  {
-    .eyeWhiteW = 48, .eyeWhiteH = 42, .eyeSpacing = 44,
-    .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
-    .browOffsetY = -10, .browLength = 28, .browThickness = 5,
-    .browAngleL = 0, .browAngleR = 0, .browVisible = false,
-    .mouthType = MOUTH_LINE, .mouthWidth = 18, .mouthOffsetY = 62, .mouthCurve = 0,
-    .eyeMode = EYE_X,
-    .transitionMs = 150
-  },
-
-  // 12: SKEPTICAL — one eye narrowed, one normal, flat mouth
+  // 11: SKEPTICAL — one eye narrowed, one normal, flat mouth
   {
     .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
     .pupilRadius = 13, .pupilOffsetX = 6, .pupilOffsetY = 2,
@@ -280,7 +268,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 300
   },
 
-  // 13: WORRIED — wide eyes, brows angled inward-up, frown
+  // 12: WORRIED — wide eyes, brows angled inward-up, frown
   {
     .eyeWhiteW = 52, .eyeWhiteH = 50, .eyeSpacing = 44,
     .pupilRadius = 11, .pupilOffsetX = 0, .pupilOffsetY = 4,
@@ -291,7 +279,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 350
   },
 
-  // 14: CONFUSED — looking sideways, asymmetric brows, wavy mouth
+  // 13: CONFUSED — looking sideways, asymmetric brows, wavy mouth
   {
     .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
     .pupilRadius = 12, .pupilOffsetX = -8, .pupilOffsetY = -4,
@@ -302,7 +290,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 350
   },
 
-  // 15: PROUD — eyes slightly closed, chin-up look, big smile
+  // 14: PROUD — eyes slightly closed, chin-up look, big smile
   {
     .eyeWhiteW = 50, .eyeWhiteH = 35, .eyeSpacing = 44,
     .pupilRadius = 12, .pupilOffsetX = 0, .pupilOffsetY = -4,
@@ -313,7 +301,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 350
   },
 
-  // 16: SHY — looking down-left, small pupils, slight smile
+  // 15: SHY — looking down-left, small pupils, slight smile
   {
     .eyeWhiteW = 48, .eyeWhiteH = 42, .eyeSpacing = 44,
     .pupilRadius = 10, .pupilOffsetX = -10, .pupilOffsetY = 8,
@@ -324,7 +312,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 400
   },
 
-  // 17: ANNOYED — half-lidded, side-looking, flat mouth
+  // 16: ANNOYED — half-lidded, side-looking, flat mouth
   {
     .eyeWhiteW = 52, .eyeWhiteH = 28, .eyeSpacing = 44,
     .pupilRadius = 12, .pupilOffsetX = 8, .pupilOffsetY = 2,
@@ -335,18 +323,18 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 250
   },
 
-  // 18: BLISS — happy squint caret eyes, gentle raised brows, content smile
+  // 17: BLISS — anime satisfied crescent eyes, gentle raised brows, content smile
   {
     .eyeWhiteW = 50, .eyeWhiteH = 42, .eyeSpacing = 44,
     .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = 2,
     .browOffsetY = -14, .browLength = 26, .browThickness = 5,
     .browAngleL = 8, .browAngleR = 8, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 20, .mouthOffsetY = 58, .mouthCurve = 10,
-    .eyeMode = EYE_CARET,
+    .eyeMode = EYE_CURVED,
     .transitionMs = 400
   },
 
-  // 19: FOCUSED — normal eyes looking straight, slight squint, no mouth
+  // 18: FOCUSED — normal eyes looking straight, slight squint, no mouth
   {
     .eyeWhiteW = 48, .eyeWhiteH = 38, .eyeSpacing = 44,
     .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = 0,
@@ -357,7 +345,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 300
   },
 
-  // 20: WINKING — playful wink, left eye normal, right eye closed line
+  // 19: WINKING — playful wink, left eye normal, right eye closed line
   {
     .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
     .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
@@ -368,7 +356,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 200
   },
 
-  // 21: DEVIOUS — half-closed plotting eyes, toothy grin
+  // 20: DEVIOUS — half-closed plotting eyes, toothy grin
   {
     .eyeWhiteW = 50, .eyeWhiteH = 30, .eyeSpacing = 44,
     .pupilRadius = 12, .pupilOffsetX = 6, .pupilOffsetY = 2,
@@ -379,7 +367,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 300
   },
 
-  // 22: SHOCKED — tiny dot pupils, thousand-yard stare, O mouth
+  // 21: SHOCKED — tiny dot pupils, thousand-yard stare, O mouth
   {
     .eyeWhiteW = 55, .eyeWhiteH = 52, .eyeSpacing = 46,
     .pupilRadius = 4, .pupilOffsetX = 0, .pupilOffsetY = 0,
@@ -390,7 +378,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 100
   },
 
-  // 23: KISSING — normal eyes, puckered pout mouth
+  // 22: KISSING — normal eyes, puckered pout mouth
   {
     .eyeWhiteW = 48, .eyeWhiteH = 42, .eyeSpacing = 44,
     .pupilRadius = 12, .pupilOffsetX = 0, .pupilOffsetY = -2,
@@ -401,7 +389,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 250
   },
 
-  // 24: NERVOUS — normal eyes, jittery zigzag mouth
+  // 23: NERVOUS — normal eyes, jittery zigzag mouth
   {
     .eyeWhiteW = 50, .eyeWhiteH = 48, .eyeSpacing = 44,
     .pupilRadius = 11, .pupilOffsetX = -4, .pupilOffsetY = 2,
@@ -412,7 +400,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 200
   },
 
-  // 25: GLITCHING — digital malfunction, glitch eyes + wavy mouth
+  // 24: GLITCHING — digital malfunction, glitch eyes + wavy mouth
   {
     .eyeWhiteW = 52, .eyeWhiteH = 45, .eyeSpacing = 44,
     .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
@@ -423,7 +411,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 100
   },
 
-  // 26: SASSY — normal eyes, tongue out
+  // 25: SASSY — normal eyes, tongue out
   {
     .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
     .pupilRadius = 13, .pupilOffsetX = 8, .pupilOffsetY = -2,

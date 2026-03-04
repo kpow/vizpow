@@ -791,16 +791,17 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_SMILE: {
+      // Smile: edges at mouthCY, center dips down to mouthCY + mouthCurve
       if (drawStroke) {
         for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
           float t = (float)x / face.mouthWidth;
-          int16_t y = (int16_t)(face.mouthCurve * t * t);
+          int16_t y = (int16_t)(face.mouthCurve * (1.0f - t * t));
           gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
         }
       }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
-        int16_t y = (int16_t)(face.mouthCurve * t * t);
+        int16_t y = (int16_t)(face.mouthCurve * (1.0f - t * t));
         gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
       }
       mLeft = mouthCX - face.mouthWidth - 2; mRight = mouthCX + face.mouthWidth + 2;
@@ -809,16 +810,17 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_FROWN: {
+      // Frown: edges at mouthCY, center rises to mouthCY - mouthCurve
       if (drawStroke) {
         for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
           float t = (float)x / face.mouthWidth;
-          int16_t y = -(int16_t)(face.mouthCurve * t * t);
+          int16_t y = -(int16_t)(face.mouthCurve * (1.0f - t * t));
           gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
         }
       }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
-        int16_t y = -(int16_t)(face.mouthCurve * t * t);
+        int16_t y = -(int16_t)(face.mouthCurve * (1.0f - t * t));
         gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
       }
       mLeft = mouthCX - face.mouthWidth - 2; mRight = mouthCX + face.mouthWidth + 2;
@@ -838,16 +840,17 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_GRIN: {
+      // Grin: smile curve with teeth line across
       if (drawStroke) {
         for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
           float t = (float)x / face.mouthWidth;
-          int16_t y = (int16_t)(face.mouthCurve * t * t);
+          int16_t y = (int16_t)(face.mouthCurve * (1.0f - t * t));
           gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
         }
       }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
-        int16_t y = (int16_t)(face.mouthCurve * t * t);
+        int16_t y = (int16_t)(face.mouthCurve * (1.0f - t * t));
         gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
       }
       drawThickLine(mouthCX - face.mouthWidth + 4, mouthCY + 2,
@@ -876,22 +879,23 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
     }
 
     case MOUTH_SMIRK: {
+      // Smirk: asymmetric — left corner dips, right corner stays up
       if (drawStroke) {
         for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
           float t = (float)x / face.mouthWidth;
           float normalized = (t + 1.0f) / 2.0f;
-          int16_t y = (int16_t)(face.mouthCurve * normalized * normalized);
-          gfx->fillCircle(mouthCX + x, mouthCY + y - face.mouthCurve / 3, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
+          int16_t y = (int16_t)(face.mouthCurve * (1.0f - normalized) * (1.0f - normalized));
+          gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
         }
       }
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
         float normalized = (t + 1.0f) / 2.0f;
-        int16_t y = (int16_t)(face.mouthCurve * normalized * normalized);
-        gfx->fillCircle(mouthCX + x, mouthCY + y - face.mouthCurve / 3, 2, botFaceColor);
+        int16_t y = (int16_t)(face.mouthCurve * (1.0f - normalized) * (1.0f - normalized));
+        gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
       }
       mLeft = mouthCX - face.mouthWidth - 2; mRight = mouthCX + face.mouthWidth + 2;
-      mTop = mouthCY - face.mouthCurve / 3 - 2; mBot = mouthCY + face.mouthCurve + 2;
+      mTop = mouthCY - 2; mBot = mouthCY + face.mouthCurve + 2;
       break;
     }
 
@@ -900,17 +904,17 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
       if (drawStroke) {
         for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
           float t = (float)x / face.mouthWidth;
-          int16_t y = (int16_t)(face.mouthCurve * t * t);
+          int16_t y = (int16_t)(face.mouthCurve * (1.0f - t * t));
           gfx->fillCircle(mouthCX + x, mouthCY + y, 2 + BOT_STROKE_PX, BOT_COLOR_BG);
         }
       }
       // Draw the smile curve (lip line)
       for (int16_t x = -face.mouthWidth; x <= face.mouthWidth; x++) {
         float t = (float)x / face.mouthWidth;
-        int16_t y = (int16_t)(face.mouthCurve * t * t);
+        int16_t y = (int16_t)(face.mouthCurve * (1.0f - t * t));
         gfx->fillCircle(mouthCX + x, mouthCY + y, 2, botFaceColor);
       }
-      // Teeth bar: white rect below the lip line
+      // Teeth bar: below the lip edges
       int16_t teethTop = mouthCY + 2;
       int16_t teethH = 8;
       int16_t teethW = face.mouthWidth * 3 / 2;
@@ -924,7 +928,7 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
         gfx->drawFastVLine(tx, teethTop, teethH, BOT_COLOR_BG);
       }
       mLeft = mouthCX - teethW - 2; mRight = mouthCX + teethW + 2;
-      mTop = mouthCY - 2; mBot = teethTop + teethH + 2;
+      mTop = mouthCY - 2; mBot = max((int16_t)(teethTop + teethH + 2), (int16_t)(mouthCY + face.mouthCurve + 2));
       break;
     }
 
