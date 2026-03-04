@@ -234,11 +234,22 @@ void doWifiConnectBlocking() {
     saveWifiCredentials(wifiProv.ssid, wifiProv.pass, true);
     MDNS.end();
     startMDNS();
-    // Configure NTP time sync — EST (UTC-5) with 1hr DST offset
-    configTime(-5 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
+    // Configure NTP time sync — UTC (cloud timestamps are UTC)
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     Serial.print("STA CONNECTED! IP: ");
     Serial.println(sysStatus.staIP);
-    Serial.println("NTP configured");
+    Serial.println("NTP configured (UTC)");
+    // Non-blocking NTP sync poll (up to 5s)
+    for (int i = 0; i < 10; i++) {
+      struct tm timeinfo;
+      if (getLocalTime(&timeinfo, 0) && timeinfo.tm_year > 100) {
+        sysStatus.ntpSynced = true;
+        sysStatus.ntpSyncedAt = millis();
+        Serial.println("NTP synced");
+        break;
+      }
+      delay(500);
+    }
   } else {
     // Failed — back to AP-only
     if (status == WL_NO_SSID_AVAIL) {
@@ -344,13 +355,24 @@ bool bootAttemptSTA() {
   if (finalStatus == WL_CONNECTED) {
     sysStatus.staConnected = true;
     sysStatus.staIP = WiFi.localIP();
-    // Configure NTP time sync — EST (UTC-5) with 1hr DST offset
-    configTime(-5 * 3600, 3600, "pool.ntp.org", "time.nist.gov");
+    // Configure NTP time sync — UTC (cloud timestamps are UTC)
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     Serial.print("CONNECTED! IP: ");
     Serial.println(sysStatus.staIP);
     Serial.print("RSSI: ");
     Serial.println(WiFi.RSSI());
-    Serial.println("NTP configured");
+    Serial.println("NTP configured (UTC)");
+    // Non-blocking NTP sync poll (up to 5s)
+    for (int i = 0; i < 10; i++) {
+      struct tm timeinfo;
+      if (getLocalTime(&timeinfo, 0) && timeinfo.tm_year > 100) {
+        sysStatus.ntpSynced = true;
+        sysStatus.ntpSyncedAt = millis();
+        Serial.println("NTP synced");
+        break;
+      }
+      delay(500);
+    }
     return true;
   }
 

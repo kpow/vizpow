@@ -767,6 +767,8 @@ inline void toggleBotTimeOverlay() {}
 inline bool isBotTimeOverlayEnabled() { return false; }
 inline void setBotPersonality(uint8_t index) {}
 inline uint8_t getBotPersonality() { return 0; }
+inline uint8_t getBotExpression() { return 0; }
+inline uint8_t getBotState() { return 0; }
 inline void setBotBackgroundStyle(uint8_t style) {}
 inline uint8_t getBotBackgroundStyle() { return 0; }
 

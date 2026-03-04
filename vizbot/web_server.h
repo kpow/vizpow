@@ -612,6 +612,10 @@ void handleState() {
                   ",\"pollInterval\":" + String(cloudMeta.pollIntervalSec) +
                   ",\"registered\":" + (sysStatus.cloudRegistered ? "true" : "false") +
                   ",\"littlefs\":" + (sysStatus.littlefsReady ? "true" : "false") +
+                  ",\"ntpSynced\":" + (sysStatus.ntpSynced ? "true" : "false") +
+                  ",\"groups\":" + String(cloudMeta.groupCount) +
+                  ",\"fleetTotal\":" + String(cloudMeta.fleetTotal) +
+                  ",\"fleetOnline\":" + String(cloudMeta.fleetOnline) +
                 "}" +
 #endif
                 "}";

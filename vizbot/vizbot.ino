@@ -99,6 +99,13 @@ float gyroX = 0, gyroY = 0, gyroZ = 0;
 char weatherLat[12] = WEATHER_LAT_DEFAULT;
 char weatherLon[12] = WEATHER_LON_DEFAULT;
 
+// Auto-brightness (toggled by cloud command)
+bool autoBrightnessEnabled = false;
+static unsigned long lastAutoBrightnessMs = 0;
+
+// BLE scan request (stub for future)
+volatile bool bleScanRequested = false;
+
 // Sustained shake tracking (for info mode toggle)
 unsigned long shakeStartTime = 0;        // When continuous shaking began
 bool shakeSustainedTriggered = false;    // Whether sustained shake already fired
@@ -454,6 +461,27 @@ void loop() {
 
   // Flush dirty settings to NVS (debounced — waits 2s after last change)
   flushSettingsIfDirty();
+
+  // Auto-brightness from ambient light sensor (Core S3 only)
+  #ifdef TARGET_CORES3
+  if (autoBrightnessEnabled && sysStatus.proxLightReady) {
+    unsigned long now = millis();
+    if (now - lastAutoBrightnessMs >= 2000) {
+      lastAutoBrightnessMs = now;
+      uint16_t lux = proxLight.ambientLux;
+      uint8_t newBright;
+      if (lux <= 10)       newBright = 3;
+      else if (lux <= 100) newBright = map(lux, 10, 100, 5, 15);
+      else if (lux <= 500) newBright = map(lux, 100, 500, 15, 35);
+      else                 newBright = 50;
+      // Only apply if change > 2 to avoid flicker
+      if (abs((int)newBright - (int)brightness) > 2) {
+        brightness = newBright;
+        FastLED.setBrightness(brightness);
+      }
+    }
+  }
+  #endif
 
   // Run the appropriate mode
   if (infoMode.active) {
