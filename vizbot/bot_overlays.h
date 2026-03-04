@@ -130,10 +130,6 @@ struct BotSpeechBubble {
     // Pop-in: scale 0→1 with overshoot easing
     tweenManager.start(&scale, 0.0f, 1.0f, POP_IN_MS, EASE_OUT_BACK);
 
-    #ifdef TARGET_CORES3
-    botSounds.play(SFX_BUBBLE_POP);
-    #endif
-
     // Set proportional font for measurement
     gfx->setFont(&fonts::DejaVu18);
     gfx->setTextSize(1);
@@ -257,7 +253,10 @@ struct BotSpeechBubble {
         int16_t textX = sx + (sw - textW) / 2;  // center each line
         int16_t textY = startY + i * 20;
 
+        // Bold: draw twice with 1px horizontal offset
         gfx->setCursor(textX, textY);
+        gfx->print(lines[i]);
+        gfx->setCursor(textX + 1, textY);
         gfx->print(lines[i]);
       }
 

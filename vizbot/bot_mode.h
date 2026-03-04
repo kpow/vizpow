@@ -117,9 +117,6 @@ struct BotModeState {
   bool shakeReacting;
   unsigned long shakeReactEnd;
 
-  // Expression sound rate-limit (Core S3)
-  unsigned long lastExprSoundMs;
-
   // Audio reaction cooldown (Core S3)
   unsigned long lastAudioReactionMs;
 
@@ -165,7 +162,6 @@ struct BotModeState {
     sleepBreathPhase = 0;
     lastZzzTime = 0;
     shakeReacting = false;
-    lastExprSoundMs = 0;
     lastAudioReactionMs = 0;
     lastProxReactionMs = 0;
     peekCount = 0;
@@ -261,14 +257,6 @@ struct BotModeState {
     registerInteraction();
     face.transitionTo(exprIndex, duration);
     shakeReacting = false;
-
-    #ifdef TARGET_CORES3
-    unsigned long now = millis();
-    if (now - lastExprSoundMs > 500) {
-      botSounds.play(SFX_EXPR_CHIRP);
-      lastExprSoundMs = now;
-    }
-    #endif
   }
 
   // Show a custom saying (from web UI)
@@ -361,13 +349,6 @@ void updateBotMode() {
     }
     botMode.face.transitionTo(pick, 500);
     botMode.nextRandomExpr = now + random(p->exprMinMs, p->exprMaxMs);
-
-    #ifdef TARGET_CORES3
-    if (now - botMode.lastExprSoundMs > 500) {
-      botSounds.play(SFX_EXPR_CHIRP);
-      botMode.lastExprSoundMs = now;
-    }
-    #endif
   }
 
   // ---- Random idle sayings (personality-driven) ----

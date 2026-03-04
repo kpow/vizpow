@@ -103,7 +103,7 @@ struct BotExpression {
 #endif
 
 // Number of defined expressions
-#define BOT_NUM_EXPRESSIONS 28
+#define BOT_NUM_EXPRESSIONS 27
 
 // Expression indices
 #define EXPR_NEUTRAL    0
@@ -129,11 +129,10 @@ struct BotExpression {
 #define EXPR_WINKING    20
 #define EXPR_DEVIOUS    21
 #define EXPR_SHOCKED    22
-#define EXPR_CONTENT    23
-#define EXPR_KISSING    24
-#define EXPR_NERVOUS    25
-#define EXPR_GLITCHING  26
-#define EXPR_SASSY      27
+#define EXPR_KISSING    23
+#define EXPR_NERVOUS    24
+#define EXPR_GLITCHING  25
+#define EXPR_SASSY      26
 
 // Expression parameter table (stored in PROGMEM)
 const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
@@ -391,18 +390,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 100
   },
 
-  // 23: CONTENT — anime ^^ satisfied crescent eyes, gentle smile
-  {
-    .eyeWhiteW = 50, .eyeWhiteH = 42, .eyeSpacing = 44,
-    .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
-    .browOffsetY = -14, .browLength = 26, .browThickness = 5,
-    .browAngleL = 8, .browAngleR = 8, .browVisible = false,
-    .mouthType = MOUTH_SMILE, .mouthWidth = 18, .mouthOffsetY = 60, .mouthCurve = 8,
-    .eyeMode = EYE_CURVED,
-    .transitionMs = 350
-  },
-
-  // 24: KISSING — normal eyes, puckered pout mouth
+  // 23: KISSING — normal eyes, puckered pout mouth
   {
     .eyeWhiteW = 48, .eyeWhiteH = 42, .eyeSpacing = 44,
     .pupilRadius = 12, .pupilOffsetX = 0, .pupilOffsetY = -2,
@@ -413,7 +401,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 250
   },
 
-  // 25: NERVOUS — normal eyes, jittery zigzag mouth
+  // 24: NERVOUS — normal eyes, jittery zigzag mouth
   {
     .eyeWhiteW = 50, .eyeWhiteH = 48, .eyeSpacing = 44,
     .pupilRadius = 11, .pupilOffsetX = -4, .pupilOffsetY = 2,
@@ -424,7 +412,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 200
   },
 
-  // 26: GLITCHING — digital malfunction, glitch eyes + wavy mouth
+  // 25: GLITCHING — digital malfunction, glitch eyes + wavy mouth
   {
     .eyeWhiteW = 52, .eyeWhiteH = 45, .eyeSpacing = 44,
     .pupilRadius = 13, .pupilOffsetX = 0, .pupilOffsetY = 0,
@@ -435,7 +423,7 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 100
   },
 
-  // 27: SASSY — normal eyes, tongue out
+  // 26: SASSY — normal eyes, tongue out
   {
     .eyeWhiteW = 50, .eyeWhiteH = 45, .eyeSpacing = 44,
     .pupilRadius = 13, .pupilOffsetX = 8, .pupilOffsetY = -2,
