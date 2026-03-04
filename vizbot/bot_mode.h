@@ -391,6 +391,70 @@ void updateBotMode() {
   }
   #endif
 
+  // ---- Core S3: Proximity-reactive expressions ----
+  #ifdef TARGET_CORES3
+  if (sysStatus.proxLightReady && !botMode.shakeReacting &&
+      (now - botMode.lastProxReactionMs > 2000)) {
+
+    bool nearNow = proxLight.nearDetected;
+    bool coverNow = proxLight.coverDetected;
+
+    // Peek-a-boo: 3+ cover/uncover cycles in 4 seconds
+    if (botMode.lastCoverState && !coverNow) {
+      // Uncover event
+      if (botMode.peekCount == 0) {
+        botMode.firstPeekMs = now;
+      }
+      botMode.peekCount++;
+      if (botMode.peekCount >= 3 && (now - botMode.firstPeekMs < 4000)) {
+        botMode.face.transitionTo(EXPR_HAPPY, 150);
+        char buf[MAX_SAY_LEN];
+        strncpy(buf, "Peekaboo", sizeof(buf));
+        botMode.speechBubble.show(buf, 2500);
+        botMode.shakeReacting = true;
+        botMode.shakeReactEnd = now + 2500;
+        botMode.lastProxReactionMs = now;
+        botMode.peekCount = 0;
+        botMode.registerInteraction();
+      }
+    }
+    // Reset peek counter after 4s window
+    if (botMode.peekCount > 0 && (now - botMode.firstPeekMs > 4000)) {
+      botMode.peekCount = 0;
+    }
+
+    // Sustained cover (>2s): WORRIED expression
+    if (coverNow) {
+      if (!botMode.lastCoverState) {
+        botMode.coverStartMs = now;  // Cover just started
+      }
+      if (now - botMode.coverStartMs > 2000 && botMode.lastProxReactionMs < botMode.coverStartMs) {
+        botMode.face.transitionTo(EXPR_WORRIED, 300);
+        char buf[MAX_SAY_LEN];
+        strncpy(buf, "Dark", sizeof(buf));
+        botMode.speechBubble.show(buf, 2000);
+        botMode.lastProxReactionMs = now;
+      }
+    }
+
+    // Hand approaching (nearDetected rising edge): SURPRISED or SHY
+    if (nearNow && !botMode.lastNearState && !coverNow) {
+      uint8_t pick = random(2) == 0 ? EXPR_SURPRISED : EXPR_SHY;
+      botMode.face.transitionTo(pick, 150);
+      char buf[MAX_SAY_LEN];
+      getRandomSayingText(SAY_REACT_PROXIMITY, buf, sizeof(buf));
+      botMode.speechBubble.show(buf, 2000);
+      botMode.shakeReacting = true;
+      botMode.shakeReactEnd = now + 2000;
+      botMode.lastProxReactionMs = now;
+      botMode.registerInteraction();
+    }
+
+    botMode.lastNearState = nearNow;
+    botMode.lastCoverState = coverNow;
+  }
+  #endif
+
   // ---- Fire pending say when WLED pre-delay has elapsed ----
   // skipWled=true: wledQueueText was already called in showBotSaying(), don't double-queue
   if (botMode.pendingSayAt > 0 && now >= botMode.pendingSayAt) {
