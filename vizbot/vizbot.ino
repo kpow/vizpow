@@ -37,6 +37,11 @@
 #include "display_lcd.h"    // Must come before any file that calls gfx->methods() (defines DisplayProxy)
 #include "tween.h"          // Tween animation system (must come before bot_mode.h)
 #include "effects_ambient.h"
+#ifdef TARGET_CORES3
+#include "bot_sounds.h"     // Core S3 speaker sound effects (must come before bot_mode.h)
+#include "audio_analysis.h" // Core S3 mic audio analysis
+#include "proximity_light.h" // Core S3 proximity & ambient light sensor
+#endif
 #include "bot_mode.h"
 #include "info_mode.h"
 #include "wled_display.h"
@@ -296,6 +301,11 @@ void setup() {
   // Apply loaded settings to hardware
   FastLED.setBrightness(brightness);
   setLCDBacklight(lcdBrightness);
+  #ifdef TARGET_CORES3
+  // Belt-and-suspenders: ensure Core S3 always boots at full brightness
+  lcdBrightness = 255;
+  setLCDBacklight(255);
+  #endif
 
   // Set palette from saved index
   currentPalette = palettes[paletteIndex % NUM_PALETTES];
@@ -407,6 +417,13 @@ void loop() {
 
   // Advance all active tweens (before rendering so values are current)
   tweenManager.update();
+
+  // Advance sound effect sequencer, mic analysis, and proximity (Core S3 only)
+  #ifdef TARGET_CORES3
+  botSounds.update();
+  audioAnalysis.update();
+  proxLight.update();
+  #endif
 
   // Apply queued commands from WiFi/touch before rendering
   drainCommandQueue();

@@ -16,12 +16,16 @@
 // ---- Boot Screen --------------------------------------------------------
 #define BOOT_LEFT_MARGIN   10
 #define BOOT_TOP_MARGIN    30
-#ifdef CLOUD_ENABLED
+#if defined(TARGET_CORES3) && defined(CLOUD_ENABLED)
+  #define BOOT_LINE_HEIGHT  16  // Core S3: 12 stages on 240px height
+#elif defined(CLOUD_ENABLED)
   #if defined(LCD_HEIGHT) && LCD_HEIGHT <= 240
-    #define BOOT_LINE_HEIGHT  18  // Core S3: 11 stages on 240px height
+    #define BOOT_LINE_HEIGHT  18
   #else
     #define BOOT_LINE_HEIGHT  20  // 1.69" LCD: 11 stages on 280px height
   #endif
+#elif defined(TARGET_CORES3)
+  #define BOOT_LINE_HEIGHT  18  // Core S3 without cloud: 10 stages on 240px
 #else
   #define BOOT_LINE_HEIGHT  22
 #endif

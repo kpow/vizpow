@@ -5,6 +5,9 @@
 #include "config.h"
 #include "layout.h"
 #include "tween.h"
+#ifdef TARGET_CORES3
+#include "bot_sounds.h"
+#endif
 
 // ============================================================================
 // Bot Overlays — Speech Bubbles, Notifications, Time Display

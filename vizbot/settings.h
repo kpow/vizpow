@@ -24,6 +24,10 @@ extern uint8_t lcdBrightness;
 extern bool    hiResMode;
 extern char    weatherLat[12];
 extern char    weatherLon[12];
+#ifdef TARGET_CORES3
+extern struct ProxLightState proxLight;
+extern struct BotSounds botSounds;
+#endif
 
 // ── Load ────────────────────────────────────────────────────────────────────
 void loadSettings() {
@@ -47,6 +51,15 @@ void loadSettings() {
   String lon = prefs.getString("wLon", weatherLon);
   strncpy(weatherLat, lat.c_str(), sizeof(weatherLat) - 1);
   strncpy(weatherLon, lon.c_str(), sizeof(weatherLon) - 1);
+
+  #ifdef TARGET_CORES3
+  // Core S3 sensor settings
+  botSounds.enabled   = prefs.getBool("sndOn", true);
+  botSounds.volume    = prefs.getUChar("sndVol", 120);
+  if (botSounds.volume > 0) botSounds.setVolume(botSounds.volume);
+  // Force full brightness — override any stale NVS dim value
+  lcdBrightness = 255;
+  #endif
 
   prefs.end();
 
@@ -72,6 +85,11 @@ void saveSettings() {
   prefs.putBool ("hiRes",   hiResMode);
   prefs.putString("wLat",   weatherLat);
   prefs.putString("wLon",   weatherLon);
+
+  #ifdef TARGET_CORES3
+  prefs.putBool ("sndOn",   botSounds.enabled);
+  prefs.putUChar("sndVol",  botSounds.volume);
+  #endif
 
   prefs.end();
   settingsDirty = false;

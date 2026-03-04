@@ -3,6 +3,9 @@
 
 #include <Arduino.h>
 #include "tween.h"
+#ifdef TARGET_CORES3
+#include "bot_sounds.h"
+#endif
 
 // ============================================================================
 // Bot Face Expression System

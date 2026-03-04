@@ -64,6 +64,8 @@ enum CommandType : uint8_t {
   CMD_TOGGLE_INFO_MODE,
   CMD_SET_PERSONALITY,
   CMD_SET_AMBIENT_EFFECT,
+  CMD_PLAY_SOUND,
+  CMD_SET_VOLUME,
 };
 
 // ~64-byte command payload — fits all command types including multi-word phrases
@@ -77,6 +79,10 @@ struct Command {
       char text[60];
       uint16_t duration;
     } say;
+    struct {
+      uint16_t freq;
+      uint16_t duration;
+    } sound;
   };
 };
 
@@ -183,6 +189,21 @@ void cmdSetAmbientEffect(uint8_t val) {
   pushCommand(cmd);
 }
 
+void cmdPlaySound(uint16_t freq, uint16_t duration) {
+  Command cmd;
+  cmd.type = CMD_PLAY_SOUND;
+  cmd.sound.freq = freq;
+  cmd.sound.duration = duration;
+  pushCommand(cmd);
+}
+
+void cmdSetVolume(uint8_t vol) {
+  Command cmd;
+  cmd.type = CMD_SET_VOLUME;
+  cmd.u8val = vol;
+  pushCommand(cmd);
+}
+
 // ============================================================================
 // Drain Queue — called once per frame from the main loop
 // ============================================================================
@@ -257,6 +278,23 @@ void drainCommandQueue() {
       case CMD_SET_AMBIENT_EFFECT:
         effectIndex = cmd.u8val % NUM_AMBIENT_EFFECTS;
         markSettingsDirty();
+        break;
+      case CMD_PLAY_SOUND:
+        #ifdef TARGET_CORES3
+        {
+          extern BotSounds botSounds;
+          botSounds.playTone(cmd.sound.freq, cmd.sound.duration);
+        }
+        #endif
+        break;
+      case CMD_SET_VOLUME:
+        #ifdef TARGET_CORES3
+        {
+          extern BotSounds botSounds;
+          botSounds.setVolume(cmd.u8val);
+          markSettingsDirty();
+        }
+        #endif
         break;
     }
   }

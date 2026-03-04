@@ -117,6 +117,17 @@ struct BotModeState {
   bool shakeReacting;
   unsigned long shakeReactEnd;
 
+  // Audio reaction cooldown (Core S3)
+  unsigned long lastAudioReactionMs;
+
+  // Proximity reaction cooldown (Core S3)
+  unsigned long lastProxReactionMs;
+  uint8_t peekCount;               // Cover/uncover cycles for peek-a-boo
+  unsigned long firstPeekMs;       // When first cover/uncover started
+  bool lastNearState;              // Previous nearDetected state
+  bool lastCoverState;             // Previous coverDetected state
+  unsigned long coverStartMs;      // When cover started (for sustained cover)
+
   // Personality
   uint8_t personalityIndex;
   const BotPersonality* personality;
@@ -151,6 +162,13 @@ struct BotModeState {
     sleepBreathPhase = 0;
     lastZzzTime = 0;
     shakeReacting = false;
+    lastAudioReactionMs = 0;
+    lastProxReactionMs = 0;
+    peekCount = 0;
+    firstPeekMs = 0;
+    lastNearState = false;
+    lastCoverState = false;
+    coverStartMs = 0;
     hasCustomSaying = false;
     customSaying[0] = '\0';
     pendingSayText[0] = '\0';
@@ -179,6 +197,10 @@ struct BotModeState {
       char buf[MAX_SAY_LEN];
       getRandomSayingText(SAY_WAKE, buf, sizeof(buf));
       speechBubble.show(buf, 2000);
+
+      #ifdef TARGET_CORES3
+      botSounds.play(SFX_WAKE_CHIME);
+      #endif
     }
     state = BOT_ACTIVE;
     stateEnteredTime = millis();
@@ -196,6 +218,10 @@ struct BotModeState {
     uint8_t pick = reactions[random(0, 8)];
     face.transitionTo(pick, 150);
 
+    #ifdef TARGET_CORES3
+    botSounds.play(SFX_TAP_BOOP);
+    #endif
+
     // Maybe show a tap saying
     if (random(100) < personality->sayChancePercent) {
       char buf[MAX_SAY_LEN];
@@ -212,6 +238,10 @@ struct BotModeState {
   void onShake() {
     registerInteraction();
     face.transitionTo(EXPR_DIZZY, 150);
+
+    #ifdef TARGET_CORES3
+    botSounds.play(SFX_SHAKE_RATTLE);
+    #endif
 
     // Show shake saying
     char buf[MAX_SAY_LEN];
@@ -286,6 +316,13 @@ void updateBotMode() {
       break;
 
     case BOT_SLEEPY:
+      #ifdef TARGET_CORES3
+      // Play descending lullaby when entering sleepy state
+      if (botMode.stateEnteredTime == now) {
+        botSounds.play(SFX_SLEEP_DESCEND);
+      }
+      #endif
+      // fall through
     case BOT_SLEEPING:
       // If somehow in a sleep state, wake immediately
       botMode.wake();
@@ -322,6 +359,101 @@ void updateBotMode() {
     botMode.speechBubble.show(buf, 3500);
     botMode.nextIdleSaying = now + random(p->sayMinMs, p->sayMaxMs);
   }
+
+  // ---- Core S3: Audio-reactive expressions ----
+  #ifdef TARGET_CORES3
+  if (sysStatus.micReady && !botMode.shakeReacting &&
+      (now - botMode.lastAudioReactionMs > 3000)) {
+
+    // Spike (clap/bang): SURPRISED + sound + saying
+    if (audioAnalysis.spikeDetected) {
+      botMode.face.transitionTo(EXPR_SURPRISED, 100);
+      botSounds.play(SFX_CLAP_REACT);
+      char buf[MAX_SAY_LEN];
+      getRandomSayingText(SAY_REACT_SOUND, buf, sizeof(buf));
+      botMode.speechBubble.show(buf, 2000);
+      botMode.shakeReacting = true;
+      botMode.shakeReactEnd = now + 2000;
+      botMode.lastAudioReactionMs = now;
+      botMode.registerInteraction();
+    }
+    // Speech (someone talking): FOCUSED, hold while speech continues
+    else if (audioAnalysis.speechDetected) {
+      botMode.face.transitionTo(EXPR_FOCUSED, 300);
+      botMode.lastAudioReactionMs = now;
+      botMode.registerInteraction();
+    }
+    // Extended silence: sleepy expression
+    else if (audioAnalysis.silenceExtended && botMode.state == BOT_IDLE) {
+      botMode.face.transitionTo(EXPR_SLEEPY, 500);
+      botMode.lastAudioReactionMs = now;
+    }
+  }
+  #endif
+
+  // ---- Core S3: Proximity-reactive expressions ----
+  #ifdef TARGET_CORES3
+  if (sysStatus.proxLightReady && !botMode.shakeReacting &&
+      (now - botMode.lastProxReactionMs > 2000)) {
+
+    bool nearNow = proxLight.nearDetected;
+    bool coverNow = proxLight.coverDetected;
+
+    // Peek-a-boo: 3+ cover/uncover cycles in 4 seconds
+    if (botMode.lastCoverState && !coverNow) {
+      // Uncover event
+      if (botMode.peekCount == 0) {
+        botMode.firstPeekMs = now;
+      }
+      botMode.peekCount++;
+      if (botMode.peekCount >= 3 && (now - botMode.firstPeekMs < 4000)) {
+        botMode.face.transitionTo(EXPR_HAPPY, 150);
+        char buf[MAX_SAY_LEN];
+        strncpy(buf, "Peekaboo", sizeof(buf));
+        botMode.speechBubble.show(buf, 2500);
+        botMode.shakeReacting = true;
+        botMode.shakeReactEnd = now + 2500;
+        botMode.lastProxReactionMs = now;
+        botMode.peekCount = 0;
+        botMode.registerInteraction();
+      }
+    }
+    // Reset peek counter after 4s window
+    if (botMode.peekCount > 0 && (now - botMode.firstPeekMs > 4000)) {
+      botMode.peekCount = 0;
+    }
+
+    // Sustained cover (>2s): WORRIED expression
+    if (coverNow) {
+      if (!botMode.lastCoverState) {
+        botMode.coverStartMs = now;  // Cover just started
+      }
+      if (now - botMode.coverStartMs > 2000 && botMode.lastProxReactionMs < botMode.coverStartMs) {
+        botMode.face.transitionTo(EXPR_WORRIED, 300);
+        char buf[MAX_SAY_LEN];
+        strncpy(buf, "Dark", sizeof(buf));
+        botMode.speechBubble.show(buf, 2000);
+        botMode.lastProxReactionMs = now;
+      }
+    }
+
+    // Hand approaching (nearDetected rising edge): SURPRISED or SHY
+    if (nearNow && !botMode.lastNearState && !coverNow) {
+      uint8_t pick = random(2) == 0 ? EXPR_SURPRISED : EXPR_SHY;
+      botMode.face.transitionTo(pick, 150);
+      char buf[MAX_SAY_LEN];
+      getRandomSayingText(SAY_REACT_PROXIMITY, buf, sizeof(buf));
+      botMode.speechBubble.show(buf, 2000);
+      botMode.shakeReacting = true;
+      botMode.shakeReactEnd = now + 2000;
+      botMode.lastProxReactionMs = now;
+      botMode.registerInteraction();
+    }
+
+    botMode.lastNearState = nearNow;
+    botMode.lastCoverState = coverNow;
+  }
+  #endif
 
   // ---- Fire pending say when WLED pre-delay has elapsed ----
   // skipWled=true: wledQueueText was already called in showBotSaying(), don't double-queue
@@ -521,6 +653,10 @@ void enterBotMode() {
 
   if (!botMode.initialized) {
     botMode.init();
+
+    #ifdef TARGET_CORES3
+    botSounds.play(SFX_BOOT_CHIME);
+    #endif
 
     // Show greeting on first entry
     char buf[MAX_SAY_LEN];
