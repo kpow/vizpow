@@ -68,7 +68,7 @@ enum CommandType : uint8_t {
   CMD_SET_VOLUME,
   CMD_AUTO_BRIGHTNESS,
   CMD_SLEEP,
-  CMD_BLE_SCAN,
+  CMD_MESH_SCAN,
 };
 
 // ~64-byte command payload — fits all command types including multi-word phrases
@@ -221,9 +221,9 @@ void cmdSleep(uint32_t durationMs) {
   pushCommand(cmd);
 }
 
-void cmdBleScan() {
+void cmdMeshScan() {
   Command cmd;
-  cmd.type = CMD_BLE_SCAN;
+  cmd.type = CMD_MESH_SCAN;
   pushCommand(cmd);
 }
 
@@ -335,10 +335,10 @@ void drainCommandQueue() {
           // For now just trigger idle-to-sleepy
         }
         break;
-      case CMD_BLE_SCAN:
+      case CMD_MESH_SCAN:
         {
-          extern volatile bool bleScanRequested;
-          bleScanRequested = true;
+          extern volatile bool meshScanRequested;
+          meshScanRequested = true;
         }
         break;
     }

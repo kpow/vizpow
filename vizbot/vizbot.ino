@@ -103,8 +103,8 @@ char weatherLon[12] = WEATHER_LON_DEFAULT;
 bool autoBrightnessEnabled = false;
 static unsigned long lastAutoBrightnessMs = 0;
 
-// BLE scan request (stub for future)
-volatile bool bleScanRequested = false;
+// Mesh scan request (stub for ESP-NOW peer discovery)
+volatile bool meshScanRequested = false;
 
 // Sustained shake tracking (for info mode toggle)
 unsigned long shakeStartTime = 0;        // When continuous shaking began
