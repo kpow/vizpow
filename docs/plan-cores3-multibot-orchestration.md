@@ -91,7 +91,7 @@ Adding sensor polling, ESP-NOW mesh, and expanded JSON to the sync API costs ~8-
 | Flash | 16MB | 16MB | **BOTH** |
 | Power Button | None | AXP2101 hardware button | Core S3 only |
 | GPIO Expansion | **4 pads** (GPIO2,3,17,18) + I2C + UART | 3x Grove ports + M-Bus | Both |
-| BLE/ESP-NOW | ESP-NOW (via WiFi radio) | ESP-NOW (via WiFi radio) | **BOTH** |
+| ESP-NOW | ESP-NOW (via WiFi radio) | ESP-NOW (via WiFi radio) | **BOTH** |
 
 ### Waveshare I2C Address Map (Bus: GPIO11 SDA / GPIO10 SCL)
 

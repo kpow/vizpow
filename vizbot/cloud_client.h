@@ -488,10 +488,10 @@ static void dispatchCloudCommand(const char* type, JsonObject& payload) {
     DBG("Cloud cmd: sleep dur=");
     DBGLN(dur);
 
-  } else if (strcmp(type, "ble_scan") == 0) {
-    extern volatile bool bleScanRequested;
-    bleScanRequested = true;
-    DBGLN("Cloud cmd: ble_scan requested (stub)");
+  } else if (strcmp(type, "mesh_scan") == 0) {
+    extern volatile bool meshScanRequested;
+    meshScanRequested = true;
+    DBGLN("Cloud cmd: mesh_scan requested (stub)");
 
   } else if (strcmp(type, "reboot") == 0) {
     DBGLN("Cloud cmd: reboot");
