@@ -70,7 +70,7 @@ struct BotPersonality {
 const BotPersonality botPersonalities[BOT_NUM_PERSONALITIES] = {
   // CHILL: lively and expressive, default behavior
   { "Chill", 90000, 240000, 360000, 4000, 10000, 16000, 40000, 30,
-    { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_MISCHIEF, EXPR_BLISS } },
+    { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_MISCHIEF, EXPR_WINKING } },
 
   // HYPER: energetic, constant expressions and sayings
   { "Hyper", 180000, 360000, 600000, 2000, 6000, 8000, 24000, 45,
@@ -82,7 +82,7 @@ const BotPersonality botPersonalities[BOT_NUM_PERSONALITIES] = {
 
   // SLEEPY: drowsy but still talks a bit
   { "Sleepy", 30000, 60000, 120000, 10000, 25000, 30000, 70000, 15,
-    { EXPR_SLEEPY, EXPR_BLISS, EXPR_NEUTRAL, EXPR_THINKING, EXPR_SHY } },
+    { EXPR_SLEEPY, EXPR_NEUTRAL, EXPR_NEUTRAL, EXPR_THINKING, EXPR_SHY } },
 };
 
 // ============================================================================

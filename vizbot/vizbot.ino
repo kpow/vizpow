@@ -57,6 +57,7 @@
 #include "touch_control.h"
 #endif
 #include "task_manager.h"
+#include "esp_now_mesh.h"
 #include "wifi_provisioning.h"
 #include "boot_sequence.h"
 
@@ -337,6 +338,7 @@ void setup() {
   // Start WiFi server task on Core 0 (render stays on Core 1)
   if (wifiEnabled) {
     startWifiTask();
+    initMesh();  // ESP-NOW mesh discovery (requires AP interface active)
   }
 
   // Cloud sync now runs inside wifiServerTask via pollCloudSync() —

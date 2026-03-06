@@ -621,12 +621,20 @@ void pollWledDisplay() {
 
       if (wledHttpPost(body)) {
         WLED_DBGLN("WLED: restored");
+        extern void meshSetWledActive(bool);
+        meshSetWledActive(false);
       } else {
         WLED_DBGLN("WLED: restore failed");
+        extern void meshSetWledActive(bool);
+        meshSetWledActive(false);
       }
       // Keep hasSavedState=true — WLED just resumed these exact values, so
       // the saved state is still valid for the next say (skips inline capture).
       // The idle poll will refresh it in the background within 1 second.
+    } else {
+      // No saved state to restore — just clear wledActive
+      extern void meshSetWledActive(bool);
+      meshSetWledActive(false);
     }
   }
 
@@ -647,6 +655,16 @@ void pollWledDisplay() {
       if (!ok) wledData.lastFailTime = millis();
     }
     return;
+  }
+
+  // Mesh coordination: defer if a peer is sending DDP.
+  // Don't consume the request — leave sendState as WLED_FRAME_REQUESTED
+  // so we retry on the next poll cycle (~2ms) until the peer finishes.
+  extern bool meshAnyPeerWledActive();
+  extern void meshSetWledActive(bool);
+  if (meshAnyPeerWledActive()) {
+    WLED_DBGLN("WLED: deferred — mesh peer active");
+    return;  // sendState stays WLED_FRAME_REQUESTED → retries next cycle
   }
 
   // Consume the request
@@ -679,6 +697,8 @@ void pollWledDisplay() {
     WLED_DBG(wledData.textBuffer);
     WLED_DBGLN("\"");
   }
+
+  meshSetWledActive(true);
 
   // Send pixel buffer via DDP
   if (wledSendDDP()) {
