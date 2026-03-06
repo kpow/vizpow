@@ -244,8 +244,25 @@ extern bool autoCycle;
 extern bool hiResMode;
 extern void toggleHiResMode();
 
+// Deferred say — held until mesh peer finishes WLED
+static bool deferredSayPending = false;
+static Command deferredSayCmd;
+
+// Mesh peer check (defined in esp_now_mesh.h, safe to read from Core 1)
+extern bool meshAnyPeerWledActive();
+
 void drainCommandQueue() {
   if (cmdQueue == nullptr) return;
+
+  // Check if a deferred say can now execute
+  if (deferredSayPending) {
+    if (!meshAnyPeerWledActive()) {
+      deferredSayPending = false;
+      showBotSaying(deferredSayCmd.say.text, deferredSayCmd.say.duration);
+    }
+    // Still blocked — skip processing new commands to preserve ordering
+    return;
+  }
 
   Command cmd;
   while (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) {
@@ -266,6 +283,13 @@ void drainCommandQueue() {
         markSettingsDirty();
         break;
       case CMD_SAY_TEXT:
+        // Defer speech if a mesh peer is currently using WLED
+        if (meshAnyPeerWledActive()) {
+          deferredSayPending = true;
+          deferredSayCmd = cmd;
+          DBGLN("Say deferred — mesh peer using WLED");
+          return;  // Stop draining — preserve command ordering
+        }
         showBotSaying(cmd.say.text, cmd.say.duration);
         break;
       case CMD_SET_TIME_OVERLAY:
@@ -366,6 +390,9 @@ extern void pollWledDisplay();
 // Defined in weather_data.h — checks fetchRequested flag and fetches if needed.
 extern void pollWeatherFetch();
 
+// Defined in esp_now_mesh.h — periodic mesh broadcast + stale peer eviction.
+extern void pollMeshBroadcast();
+
 // Defined in cloud_client.h — non-blocking cloud sync (TLS registration + polling).
 #ifdef CLOUD_ENABLED
 extern void pollCloudSync();
@@ -390,6 +417,7 @@ void wifiServerTask(void* param) {
       pollCloudSync();                   // Cloud registration + sync (TLS)
       pollScheduledCommands();           // Execute scheduled commands at their target time
       #endif
+      pollMeshBroadcast();               // ESP-NOW mesh broadcast + stale eviction
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP
     }

@@ -277,26 +277,24 @@ void doWifiConnectBlocking() {
   Serial.println("=== doWifiConnectBlocking END ===");
 }
 
-// Poll AP linger — after STA connects, keep AP alive for a while then shut it down
+// Poll AP linger — after STA connects, keep AP alive but stop captive portal DNS.
+// ESP-NOW requires the AP interface to remain active on the same WiFi channel.
+// The AP in STA+AP mode consumes minimal power (beacons only, no clients expected).
 void pollWifiApLinger() {
   if (wifiProv.state != PROV_CONNECTED) return;
 
   if (millis() - wifiProv.connectedAtMs > WIFI_AP_LINGER_MS) {
-    // Shut down AP, switch to STA-only
-    DBGLN("AP linger expired — switching to STA-only");
+    // Stop captive portal DNS (no longer needed), but keep AP alive for ESP-NOW
+    DBGLN("AP linger expired — stopping DNS, keeping AP for ESP-NOW mesh");
 
     stopDNS();
     sysStatus.dnsReady = false;
-    WiFi.softAPdisconnect(true);
-
-    // Re-enforce TX power after mode change (ESP-IDF may reset on mode switch)
-    WiFi.setTxPower(WIFI_TX_POWER);
 
     // mDNS stays running on STA interface
     wifiProv.state = PROV_STA_ACTIVE;
     sysStatus.wifiReady = true;  // still has web access via STA
 
-    DBG("STA-only mode. IP: ");
+    DBG("STA+AP mode (mesh). STA IP: ");
     DBGLN(sysStatus.staIP);
   }
 }

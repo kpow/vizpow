@@ -261,6 +261,10 @@ static String buildSyncBody() {
     state["az"] = (int)(accelZ * 100);
   }
 
+  // ESP-NOW mesh peer count
+  extern uint8_t meshGetPeerCount();
+  state["meshPeers"] = meshGetPeerCount();
+
   // Core S3 environment sensors
   #ifdef TARGET_CORES3
   if (sysStatus.proxLightReady) {
