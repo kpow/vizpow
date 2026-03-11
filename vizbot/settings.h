@@ -44,6 +44,7 @@ void loadSettings() {
   paletteIndex       = prefs.getUChar("palette",  paletteIndex);
   autoCycle          = prefs.getBool ("autoCyc",  autoCycle);
   botBackgroundStyle = prefs.getUChar("bgStyle",  botBackgroundStyle);
+  if (botBackgroundStyle > 4) botBackgroundStyle = 0;  // clamp stale NVS values
   hiResMode          = prefs.getBool ("hiRes",    hiResMode);
 
   // Weather location
