@@ -602,6 +602,9 @@ void renderBotMode() {
     }
     renderBotAmbientBackground();
     bgColor = 0x0000;  // Face erase uses black (though prevFrame is invalidated)
+  } else {
+    // Out-of-range style (stale NVS value etc.) — always clear to avoid overlay
+    gfx->fillScreen(BOT_COLOR_BG);
   }
 
   // Since we redraw everything fresh each frame, skip the old targeted-erase logic
@@ -716,7 +719,7 @@ void setBotFaceColor(uint16_t color) {
 }
 
 void setBotBackgroundStyle(uint8_t style) {
-  botBackgroundStyle = style;
+  botBackgroundStyle = (style <= 4) ? style : 0;
 }
 
 uint8_t getBotBackgroundStyle() {

@@ -110,7 +110,8 @@ struct DisplayProxy {
 
       _dp_canvas = new LGFX_Sprite(&M5.Display);
 
-      // Try 16-bit in PSRAM first (best quality, doesn't compete with internal heap)
+      // PSRAM first — Core S3 has 8MB QSPI PSRAM, keeps internal heap free
+      // for TLS and tasks.  M5Unified's display driver handles cache coherency.
       _dp_canvas->setColorDepth(16);
       _dp_canvas->setPsram(true);
       if (_dp_canvas->createSprite(LCD_WIDTH, LCD_HEIGHT)) {
@@ -118,20 +119,21 @@ struct DisplayProxy {
         goto canvas_ok;
       }
 
-      // 16-bit internal fallback for boards without PSRAM
-      if (!psramFound()) {
-        _dp_canvas->setPsram(false);
-        if (_dp_canvas->createSprite(LCD_WIDTH, LCD_HEIGHT)) {
-          DBGLN("Canvas: 16-bit internal (no PSRAM)");
-          goto canvas_ok;
-        }
+      // 16-bit internal fallback
+      DBGLN("Canvas: PSRAM failed, trying 16-bit internal");
+      _dp_canvas->setColorDepth(16);
+      _dp_canvas->setPsram(false);
+      if (_dp_canvas->createSprite(LCD_WIDTH, LCD_HEIGHT)) {
+        DBGLN("Canvas: 16-bit internal");
+        goto canvas_ok;
       }
 
-      // 8-bit internal fallback
-      DBGLN("Canvas: 16-bit failed, trying 8-bit internal");
+      // 8-bit internal fallback (half the RAM)
+      DBGLN("Canvas: 16-bit internal failed, trying 8-bit");
       _dp_canvas->setColorDepth(8);
       _dp_canvas->setPsram(false);
       if (_dp_canvas->createSprite(LCD_WIDTH, LCD_HEIGHT)) goto canvas_ok;
+
       DBGLN("Canvas: allocation failed");
 
       // All attempts failed
@@ -151,7 +153,9 @@ struct DisplayProxy {
     _dp_canvas_active = (_dp_canvas != nullptr);
   }
   void flushCanvas() {
-    if (_dp_canvas && _dp_canvas_active) _dp_canvas->pushSprite(0, 0);
+    if (_dp_canvas && _dp_canvas_active) {
+      _dp_canvas->pushSprite(0, 0);
+    }
     _dp_canvas_active = false;
   }
   // Pre-allocate the canvas early (before WiFi/tasks fragment the heap).
