@@ -133,6 +133,19 @@ struct WledDisplayData {
 
 static WledDisplayData wledData = {};
 
+// Parse IPv4 string "x.x.x.x" to uint32_t (network byte order)
+static uint32_t wledParseIPv4(const char* ip) {
+  uint8_t octets[4] = {0};
+  int n = sscanf(ip, "%hhu.%hhu.%hhu.%hhu", &octets[0], &octets[1], &octets[2], &octets[3]);
+  if (n != 4) return 0;
+  return ((uint32_t)octets[0] << 24) | ((uint32_t)octets[1] << 16) |
+         ((uint32_t)octets[2] << 8) | octets[3];
+}
+
+uint32_t wledGetIPAsU32() {
+  return wledParseIPv4(wledData.ip);
+}
+
 // ============================================================================
 // NVS Persistence
 // ============================================================================
@@ -579,8 +592,16 @@ void pollWledDisplay() {
 
   // ---- Hold complete → advance word or restore ----
   if (wledData.phase == WLED_PHASE_HOLD && millis() >= wledData.phaseEndMs) {
+    // New content already queued — skip restore, let new frame take priority
+    if (wledData.sendState == WLED_FRAME_REQUESTED) {
+      WLED_DBGLN("WLED: hold expired but new frame queued — skipping restore");
+      wledData.phase = WLED_PHASE_NONE;
+      wledData.wordCount = 0;
+      wledData.restoreAtMs = 0;
+      // Falls through to FRAME_REQUESTED handling below
+    }
     // Multi-word sequence: advance to next word
-    if (wledData.wordCount > 0 && wledData.currentWord + 1 < wledData.wordCount) {
+    else if (wledData.wordCount > 0 && wledData.currentWord + 1 < wledData.wordCount) {
       wledData.currentWord++;
       wledPixelClear();
       wledPixelDrawText(wledData.words[wledData.currentWord],
@@ -636,6 +657,10 @@ void pollWledDisplay() {
       extern void meshSetWledActive(bool);
       meshSetWledActive(false);
     }
+
+    // Resume scheduled content after speech completes
+    extern void schedOnSpeechEnd();
+    schedOnSpeechEnd();
   }
 
   // ---- Send DDP frame (checked before idle poll — urgent requests skip blocking HTTP) ----
@@ -660,9 +685,10 @@ void pollWledDisplay() {
   // Mesh coordination: defer if a peer is sending DDP.
   // Don't consume the request — leave sendState as WLED_FRAME_REQUESTED
   // so we retry on the next poll cycle (~2ms) until the peer finishes.
-  extern bool meshAnyPeerWledActive();
+  extern bool meshAnyPeerWledActiveForIP(uint32_t);
+  extern uint32_t wledGetIPAsU32();
   extern void meshSetWledActive(bool);
-  if (meshAnyPeerWledActive()) {
+  if (meshAnyPeerWledActiveForIP(wledGetIPAsU32())) {
     WLED_DBGLN("WLED: deferred — mesh peer active");
     return;  // sendState stays WLED_FRAME_REQUESTED → retries next cycle
   }

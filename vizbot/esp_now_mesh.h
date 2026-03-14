@@ -56,7 +56,9 @@ struct __attribute__((packed)) MeshStatePacket {
   uint16_t ambientLux;     // Ambient light (lux)
 
   uint8_t  reserved[6];    // reserved[0] bit 0 = wledActive flag
-                           // reserved[1..5] = future use
+                           // reserved[0] bit 1 = schedOwner flag
+                           // reserved[1..4] = WLED target IP (4 octets)
+                           // reserved[5] = future use
 };
 
 static_assert(sizeof(MeshStatePacket) == 24, "MeshStatePacket must be 24 bytes");
@@ -83,6 +85,7 @@ static struct {
   uint8_t       myDeviceId;
   bool          initialized;
   bool          wledActive;        // Are WE currently sending DDP?
+  bool          schedOwner;        // Are WE the scheduled content owner?
 
   unsigned long lastBroadcastMs;
 
@@ -101,6 +104,9 @@ extern uint8_t effectIndex;
 extern uint8_t paletteIndex;
 extern float accelX, accelY, accelZ;
 extern volatile bool meshScanRequested;
+
+// wledGetIPAsU32() defined in wled_display.h (same translation unit)
+extern uint32_t wledGetIPAsU32();
 
 // ============================================================================
 // Packet Builder
@@ -143,6 +149,18 @@ static void meshBuildPacket(MeshStatePacket& pkt) {
   if (meshData.wledActive) {
     pkt.reserved[0] |= 0x01;
   }
+
+  // Scheduler owner flag in reserved[0] bit 1
+  if (meshData.schedOwner) {
+    pkt.reserved[0] |= 0x02;
+  }
+
+  // WLED target IP in reserved[1..4]
+  uint32_t wledIP = wledGetIPAsU32();
+  pkt.reserved[1] = (wledIP >> 24) & 0xFF;
+  pkt.reserved[2] = (wledIP >> 16) & 0xFF;
+  pkt.reserved[3] = (wledIP >> 8)  & 0xFF;
+  pkt.reserved[4] = wledIP & 0xFF;
 }
 
 // ============================================================================
@@ -353,6 +371,51 @@ void meshSetWledActive(bool active) {
   if (meshData.initialized) {
     meshBroadcast();
   }
+}
+
+// IP-aware: returns true if any peer on the SAME WLED IP has wledActive=1
+bool meshAnyPeerWledActiveForIP(uint32_t localIP) {
+  if (localIP == 0) return false;  // No WLED configured
+  for (uint8_t i = 0; i < meshData.peerCount; i++) {
+    if (!meshData.peers[i].active) continue;
+    if (!(meshData.peers[i].lastPacket.reserved[0] & 0x01)) continue;
+
+    // Reconstruct peer's WLED IP from reserved[1..4]
+    const uint8_t* r = meshData.peers[i].lastPacket.reserved;
+    uint32_t peerIP = ((uint32_t)r[1] << 24) | ((uint32_t)r[2] << 16) |
+                      ((uint32_t)r[3] << 8) | r[4];
+    if (peerIP == localIP) return true;
+  }
+  return false;
+}
+
+// ============================================================================
+// Scheduler Ownership — cooperative first-online-claims
+// ============================================================================
+
+void meshSetSchedOwner(bool owner) {
+  if (meshData.schedOwner == owner) return;
+  meshData.schedOwner = owner;
+  if (meshData.initialized) meshBroadcast();
+}
+
+bool meshIsSchedOwner() {
+  return meshData.schedOwner;
+}
+
+// Returns true if any peer on the same WLED IP claims scheduler ownership
+bool meshAnyPeerSchedOwnerForIP(uint32_t localIP) {
+  if (localIP == 0) return false;
+  for (uint8_t i = 0; i < meshData.peerCount; i++) {
+    if (!meshData.peers[i].active) continue;
+    if (!(meshData.peers[i].lastPacket.reserved[0] & 0x02)) continue;
+
+    const uint8_t* r = meshData.peers[i].lastPacket.reserved;
+    uint32_t peerIP = ((uint32_t)r[1] << 24) | ((uint32_t)r[2] << 16) |
+                      ((uint32_t)r[3] << 8) | r[4];
+    if (peerIP == localIP) return true;
+  }
+  return false;
 }
 
 // ============================================================================

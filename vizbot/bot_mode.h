@@ -26,6 +26,12 @@ extern GfxDevice *gfx;
 extern float accelX, accelY, accelZ;
 extern bool menuVisible;
 
+// Forward declarations (defined in vizbot.ino)
+SayingCategory pickPersonalitySayCategory();
+
+// Forward declaration (defined later in this file)
+void setBotPersonality(uint8_t index);
+
 // Bot activity states
 enum BotState : uint8_t {
   BOT_ACTIVE = 0,    // Normal active state — expressions, look-around, reactions
@@ -43,47 +49,107 @@ enum BotState : uint8_t {
 #define WLED_SAY_PRE_DELAY_MS  50        // ms WLED gets head-start before LCD bubble appears
 
 // ============================================================================
-// Personality Presets
+// Personality System — dynamic, cloud-managed
 // ============================================================================
-// Each personality adjusts idle behavior, saying frequency, and expression
-// distribution. Configurable via web UI.
+// RuntimePersonality is the active personality format used at runtime.
+// Built-in defaults (Chill, Hyper, Grumpy) are loaded on boot.
+// Cloud personalities are synced, cached in LittleFS, and loaded into
+// runtimePersonalities[] slots 3+.
 
-#define BOT_NUM_PERSONALITIES 4
+#define MAX_RUNTIME_PERSONALITIES 12
+#define BOT_NUM_BUILTIN_PERSONALITIES 3
+
 #define PERSONALITY_CHILL   0
 #define PERSONALITY_HYPER   1
 #define PERSONALITY_GRUMPY  2
-#define PERSONALITY_SLEEPY  3
 
-struct BotPersonality {
-  const char* name;
-  uint32_t idleTimeoutMs;       // Time before idle state
-  uint32_t sleepyTimeoutMs;     // Time before sleepy state
-  uint32_t sleepTimeoutMs;      // Time before sleeping state
-  uint32_t exprMinMs;           // Min time between random expressions
-  uint32_t exprMaxMs;           // Max time between random expressions
-  uint32_t sayMinMs;            // Min time between idle sayings
-  uint32_t sayMaxMs;            // Max time between idle sayings
-  uint8_t  sayChancePercent;    // % chance of saying on reaction
-  uint8_t  favoriteExprs[5];    // Weighted idle expression pool
+struct RuntimePersonality {
+  char     name[32];
+  char     cloudId[40];              // Cloud UUID (empty for built-ins)
+  uint32_t idleTimeoutMs;
+  uint32_t exprMinMs;
+  uint32_t exprMaxMs;
+  uint32_t sayMinMs;
+  uint32_t sayMaxMs;
+  uint8_t  sayChancePercent;
+  uint8_t  favoriteExprCount;
+  uint8_t  favoriteExprs[8];
+  uint8_t  favoritePaletteCount;
+  uint8_t  favoritePalettes[4];
+  uint8_t  favoriteEffectCount;
+  uint8_t  favoriteEffects[4];
+  uint16_t sayingCategoryMask;       // Bitmask of SayingCategory
 };
 
-const BotPersonality botPersonalities[BOT_NUM_PERSONALITIES] = {
+// Global runtime personality array and count
+RuntimePersonality runtimePersonalities[MAX_RUNTIME_PERSONALITIES];
+uint8_t runtimePersonalityCount = 0;
+
+// Initialize built-in personality defaults (called once on boot)
+void initBuiltinPersonalities() {
+  runtimePersonalityCount = BOT_NUM_BUILTIN_PERSONALITIES;
+
   // CHILL: lively and expressive, default behavior
-  { "Chill", 90000, 240000, 360000, 4000, 10000, 16000, 40000, 30,
-    { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_MISCHIEF, EXPR_WINKING } },
+  RuntimePersonality& chill = runtimePersonalities[0];
+  memset(&chill, 0, sizeof(RuntimePersonality));
+  strncpy(chill.name, "Chill", sizeof(chill.name));
+  chill.idleTimeoutMs = 90000;
+  chill.exprMinMs = 4000;  chill.exprMaxMs = 10000;
+  chill.sayMinMs = 16000;  chill.sayMaxMs = 40000;
+  chill.sayChancePercent = 30;
+  chill.favoriteExprCount = 8;
+  uint8_t chillExprs[] = { EXPR_NEUTRAL, EXPR_HAPPY, EXPR_THINKING, EXPR_MISCHIEF,
+                           EXPR_WINKING, EXPR_SHY, EXPR_PROUD, EXPR_SASSY };
+  memcpy(chill.favoriteExprs, chillExprs, 8);
+  chill.favoritePaletteCount = 4;
+  uint8_t chillPals[] = { 0, 1, 7, 12 };  // Rainbow, Ocean, Sunset, Vaporwave
+  memcpy(chill.favoritePalettes, chillPals, 4);
+  chill.favoriteEffectCount = 4;
+  uint8_t chillFx[] = { 2, 3, 0, 4 };  // lava, ocean, rainbow, fire
+  memcpy(chill.favoriteEffects, chillFx, 4);
+  chill.sayingCategoryMask = (1 << SAY_IDLE) | (1 << SAY_GREETING) | (1 << SAY_STATUS);
 
   // HYPER: energetic, constant expressions and sayings
-  { "Hyper", 180000, 360000, 600000, 2000, 6000, 8000, 24000, 45,
-    { EXPR_HAPPY, EXPR_EXCITED, EXPR_SURPRISED, EXPR_LOVE, EXPR_PROUD } },
+  RuntimePersonality& hyper = runtimePersonalities[1];
+  memset(&hyper, 0, sizeof(RuntimePersonality));
+  strncpy(hyper.name, "Hyper", sizeof(hyper.name));
+  hyper.idleTimeoutMs = 180000;
+  hyper.exprMinMs = 2000;  hyper.exprMaxMs = 6000;
+  hyper.sayMinMs = 8000;   hyper.sayMaxMs = 24000;
+  hyper.sayChancePercent = 45;
+  hyper.favoriteExprCount = 8;
+  uint8_t hyperExprs[] = { EXPR_HAPPY, EXPR_EXCITED, EXPR_SURPRISED, EXPR_LOVE,
+                           EXPR_PROUD, EXPR_WINKING, EXPR_KISSING, EXPR_SASSY };
+  memcpy(hyper.favoriteExprs, hyperExprs, 8);
+  hyper.favoritePaletteCount = 4;
+  uint8_t hyperPals[] = { 4, 0, 9, 8 };  // Party, Rainbow, Toxic, Cyber
+  memcpy(hyper.favoritePalettes, hyperPals, 4);
+  hyper.favoriteEffectCount = 4;
+  uint8_t hyperFx[] = { 1, 0, 4, 6 };  // confetti, rainbow, party, plasma
+  memcpy(hyper.favoriteEffects, hyperFx, 4);
+  hyper.sayingCategoryMask = (1 << SAY_IDLE) | (1 << SAY_GREETING) |
+                             (1 << SAY_REACT_TAP) | (1 << SAY_REACT_SHAKE);
 
   // GRUMPY: annoyed but still chatty and expressive
-  { "Grumpy", 45000, 120000, 240000, 6000, 18000, 20000, 55000, 30,
-    { EXPR_ANGRY, EXPR_ANNOYED, EXPR_MISCHIEF, EXPR_SKEPTICAL, EXPR_ANGRY } },
-
-  // SLEEPY: drowsy but still talks a bit
-  { "Sleepy", 30000, 60000, 120000, 10000, 25000, 30000, 70000, 15,
-    { EXPR_SLEEPY, EXPR_NEUTRAL, EXPR_NEUTRAL, EXPR_THINKING, EXPR_SHY } },
-};
+  RuntimePersonality& grumpy = runtimePersonalities[2];
+  memset(&grumpy, 0, sizeof(RuntimePersonality));
+  strncpy(grumpy.name, "Grumpy", sizeof(grumpy.name));
+  grumpy.idleTimeoutMs = 45000;
+  grumpy.exprMinMs = 6000;  grumpy.exprMaxMs = 18000;
+  grumpy.sayMinMs = 20000;  grumpy.sayMaxMs = 55000;
+  grumpy.sayChancePercent = 30;
+  grumpy.favoriteExprCount = 8;
+  uint8_t grumpyExprs[] = { EXPR_ANGRY, EXPR_ANNOYED, EXPR_MISCHIEF, EXPR_SKEPTICAL,
+                            EXPR_DEVIOUS, EXPR_NERVOUS, EXPR_GLITCHING, EXPR_FOCUSED };
+  memcpy(grumpy.favoriteExprs, grumpyExprs, 8);
+  grumpy.favoritePaletteCount = 4;
+  uint8_t grumpyPals[] = { 2, 11, 5, 3 };  // Lava, Blood, Heat, Forest
+  memcpy(grumpy.favoritePalettes, grumpyPals, 4);
+  grumpy.favoriteEffectCount = 4;
+  uint8_t grumpyFx[] = { 4, 2, 8, 10 };  // fire, lava, meteor, noise
+  memcpy(grumpy.favoriteEffects, grumpyFx, 4);
+  grumpy.sayingCategoryMask = (1 << SAY_IDLE) | (1 << SAY_REACT_SHAKE) | (1 << SAY_REACT_TAP);
+}
 
 // ============================================================================
 // Bot Mode State
@@ -130,7 +196,13 @@ struct BotModeState {
 
   // Personality
   uint8_t personalityIndex;
-  const BotPersonality* personality;
+  const RuntimePersonality* personality;
+
+  // Personality rotation
+  uint8_t  personalityList[MAX_RUNTIME_PERSONALITIES]; // indices into runtimePersonalities[]
+  uint8_t  personalityListCount;                       // 0 = use all loaded
+  uint32_t personalityRotIntervalMs;                   // ms between random switches (default 300000)
+  unsigned long lastPersonalityRotMs;
 
   // Custom saying from web
   char customSaying[MAX_SAY_LEN];
@@ -152,8 +224,12 @@ struct BotModeState {
     speechBubble.init();
     notification.init();
     timeOverlay.init();
+    initBuiltinPersonalities();
     personalityIndex = PERSONALITY_CHILL;
-    personality = &botPersonalities[PERSONALITY_CHILL];
+    personality = &runtimePersonalities[PERSONALITY_CHILL];
+    personalityListCount = 0;  // 0 = rotate through all loaded
+    personalityRotIntervalMs = 300000;  // 5 min default
+    lastPersonalityRotMs = millis();
     lastInteraction = millis();
     lastFrameTime = millis();
     nextRandomExpr = millis() + random(personality->exprMinMs, personality->exprMaxMs);
@@ -300,7 +376,7 @@ void updateBotMode() {
 
   // ---- State machine: activity level transitions (personality-driven) ----
   // Sleep is disabled for now — bot stays active or idle, never sleeps.
-  const BotPersonality* p = botMode.personality;
+  const RuntimePersonality* p = botMode.personality;
   switch (botMode.state) {
     case BOT_ACTIVE:
       if (timeSinceInteraction > p->idleTimeoutMs) {
@@ -337,15 +413,33 @@ void updateBotMode() {
     }
   }
 
+  // ---- Personality rotation timer ----
+  if (botMode.personalityRotIntervalMs > 0 &&
+      (now - botMode.lastPersonalityRotMs) >= botMode.personalityRotIntervalMs) {
+    botMode.lastPersonalityRotMs = now;
+    uint8_t count = botMode.personalityListCount > 0 ? botMode.personalityListCount : runtimePersonalityCount;
+    if (count > 1) {
+      uint8_t pick;
+      do {
+        if (botMode.personalityListCount > 0) {
+          pick = botMode.personalityList[random(botMode.personalityListCount)];
+        } else {
+          pick = random(count);
+        }
+      } while (pick == botMode.personalityIndex && count > 1);
+      setBotPersonality(pick);
+    }
+  }
+
   // ---- Random idle expression changes (personality-driven) ----
   if (botMode.state == BOT_ACTIVE && !botMode.shakeReacting && now >= botMode.nextRandomExpr) {
     uint8_t pick;
-    if (random(100) < 35) {
-      // 35% chance: pick from full expression range for variety
+    if (p->favoriteExprCount == 0 || random(100) < 35) {
+      // 35% chance (or no favorites): pick from full expression range
       pick = random(0, BOT_NUM_EXPRESSIONS);
     } else {
       // 65% chance: pick from personality favorites
-      pick = p->favoriteExprs[random(0, 5)];
+      pick = p->favoriteExprs[random(0, p->favoriteExprCount)];
     }
     botMode.face.transitionTo(pick, 500);
     botMode.nextRandomExpr = now + random(p->exprMinMs, p->exprMaxMs);
@@ -355,7 +449,7 @@ void updateBotMode() {
   if ((botMode.state == BOT_ACTIVE || botMode.state == BOT_IDLE) &&
       !botMode.speechBubble.active && now >= botMode.nextIdleSaying) {
     char buf[MAX_SAY_LEN];
-    getRandomSayingText(SAY_IDLE, buf, sizeof(buf));
+    getRandomSayingText(pickPersonalitySayCategory(), buf, sizeof(buf));
     botMode.speechBubble.show(buf, 3500);
     botMode.nextIdleSaying = now + random(p->sayMinMs, p->sayMaxMs);
   }
@@ -727,6 +821,10 @@ uint8_t getBotBackgroundStyle() {
 }
 
 void showBotSaying(const char* text, uint16_t durationMs) {
+  // Interrupt scheduled content if running
+  extern void schedOnSpeechStart();
+  schedOnSpeechStart();
+
   // Queue WLED first — Core 0 starts capture + DDP while we wait
   wledQueueText(text, WLED_SAY_PRE_DELAY_MS + durationMs);
   // Schedule LCD bubble to appear after pre-delay (synchronized with WLED)
@@ -742,9 +840,9 @@ bool isBotTimeOverlayEnabled() {
 }
 
 void setBotPersonality(uint8_t index) {
-  if (index >= BOT_NUM_PERSONALITIES) index = 0;
+  if (index >= runtimePersonalityCount) index = 0;
   botMode.personalityIndex = index;
-  botMode.personality = &botPersonalities[index];
+  botMode.personality = &runtimePersonalities[index];
   botMode.registerInteraction();
 
   // Show notification

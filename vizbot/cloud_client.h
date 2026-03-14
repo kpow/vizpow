@@ -405,6 +405,7 @@ static void processContent(JsonObject& content) {
   if (sysStatus.littlefsReady) {
     writeCloudContent(sayingsStr, personalitiesStr);
     saveCloudMeta(cloudMeta);
+    applyCloudPersonalities();  // Load cloud personalities into runtime array
   }
 
   DBG("Cloud: cached ");

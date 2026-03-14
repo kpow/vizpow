@@ -177,6 +177,99 @@ bool loadCloudPersonalities(JsonDocument& doc) {
   return true;
 }
 
+// ============================================================================
+// Apply cloud personalities to runtime array (slots 3+)
+// ============================================================================
+// Called after cloud sync writes new personality data. Parses the cached JSON
+// and populates runtimePersonalities[BOT_NUM_BUILTIN_PERSONALITIES..].
+// Cloud rate fields (floats) are mapped to firmware timer values.
+
+void applyCloudPersonalities() {
+  JsonDocument doc;
+  if (!loadCloudPersonalities(doc)) {
+    DBGLN("Cache: no cloud personalities to apply");
+    return;
+  }
+
+  JsonArray arr = doc.as<JsonArray>();
+  if (arr.isNull() || arr.size() == 0) {
+    DBGLN("Cache: cloud personalities array empty");
+    return;
+  }
+
+  uint8_t slot = BOT_NUM_BUILTIN_PERSONALITIES;
+  for (JsonObject p : arr) {
+    if (slot >= MAX_RUNTIME_PERSONALITIES) break;
+
+    RuntimePersonality& rp = runtimePersonalities[slot];
+    memset(&rp, 0, sizeof(RuntimePersonality));
+
+    const char* name = p["name"] | "Cloud";
+    strncpy(rp.name, name, sizeof(rp.name) - 1);
+
+    const char* id = p["id"] | "";
+    strncpy(rp.cloudId, id, sizeof(rp.cloudId) - 1);
+
+    // Map cloud rate multipliers to firmware timer values
+    // Base values: exprMin=4000, exprMax=10000, sayMin=16000, sayMax=40000
+    float exprVariety  = p["expressionVariety"] | 1.0f;
+    float chatterFreq  = p["chatterFrequency"]  | 1.0f;
+
+    // Higher variety = shorter expression timers (more frequent changes)
+    rp.exprMinMs = (uint32_t)(4000.0f / max(exprVariety, 0.1f));
+    rp.exprMaxMs = (uint32_t)(10000.0f / max(exprVariety, 0.1f));
+
+    // Higher chatter = shorter saying timers
+    rp.sayMinMs = (uint32_t)(16000.0f / max(chatterFreq, 0.1f));
+    rp.sayMaxMs = (uint32_t)(40000.0f / max(chatterFreq, 0.1f));
+
+    rp.sayChancePercent = (uint8_t)min(90, (int)(30.0f * chatterFreq));
+
+    rp.idleTimeoutMs = p["sleepTimeoutMs"] | 90000;
+
+    // Favorite expressions
+    JsonArray favExprs = p["favoriteExpressions"];
+    if (favExprs) {
+      rp.favoriteExprCount = min((size_t)8, favExprs.size());
+      for (uint8_t i = 0; i < rp.favoriteExprCount; i++) {
+        rp.favoriteExprs[i] = favExprs[i] | 0;
+      }
+    }
+
+    // Favorite palettes
+    JsonArray favPals = p["favoritePalettes"];
+    if (favPals) {
+      rp.favoritePaletteCount = min((size_t)4, favPals.size());
+      for (uint8_t i = 0; i < rp.favoritePaletteCount; i++) {
+        rp.favoritePalettes[i] = favPals[i] | 0;
+      }
+    }
+
+    // Favorite effects
+    JsonArray favFx = p["favoriteEffects"];
+    if (favFx) {
+      rp.favoriteEffectCount = min((size_t)4, favFx.size());
+      for (uint8_t i = 0; i < rp.favoriteEffectCount; i++) {
+        rp.favoriteEffects[i] = favFx[i] | 0;
+      }
+    }
+
+    // Saying category bitmask
+    rp.sayingCategoryMask = p["sayingCategoryMask"] | 0;
+
+    DBG("Cache: loaded cloud personality [");
+    DBG(slot);
+    DBG("] ");
+    DBGLN(rp.name);
+
+    slot++;
+  }
+
+  runtimePersonalityCount = slot;
+  DBG("Cache: total personalities loaded: ");
+  DBGLN(runtimePersonalityCount);
+}
+
 void clearContentCache() {
   LittleFS.remove("/cloud/meta.json");
   LittleFS.remove("/cloud/sayings.json");

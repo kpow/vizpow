@@ -69,6 +69,7 @@ enum CommandType : uint8_t {
   CMD_AUTO_BRIGHTNESS,
   CMD_SLEEP,
   CMD_MESH_SCAN,
+  CMD_SET_PERSONALITY_LIST,
 };
 
 // ~64-byte command payload — fits all command types including multi-word phrases
@@ -86,6 +87,11 @@ struct Command {
       uint16_t freq;
       uint16_t duration;
     } sound;
+    struct {
+      uint8_t  list[12];   // personality indices for rotation
+      uint8_t  count;
+      uint32_t intervalMs;
+    } plist;
   };
 };
 
@@ -249,14 +255,15 @@ static bool deferredSayPending = false;
 static Command deferredSayCmd;
 
 // Mesh peer check (defined in esp_now_mesh.h, safe to read from Core 1)
-extern bool meshAnyPeerWledActive();
+extern bool meshAnyPeerWledActiveForIP(uint32_t);
+extern uint32_t wledGetIPAsU32();
 
 void drainCommandQueue() {
   if (cmdQueue == nullptr) return;
 
   // Check if a deferred say can now execute
   if (deferredSayPending) {
-    if (!meshAnyPeerWledActive()) {
+    if (!meshAnyPeerWledActiveForIP(wledGetIPAsU32())) {
       deferredSayPending = false;
       showBotSaying(deferredSayCmd.say.text, deferredSayCmd.say.duration);
     }
@@ -284,7 +291,7 @@ void drainCommandQueue() {
         break;
       case CMD_SAY_TEXT:
         // Defer speech if a mesh peer is currently using WLED
-        if (meshAnyPeerWledActive()) {
+        if (meshAnyPeerWledActiveForIP(wledGetIPAsU32())) {
           deferredSayPending = true;
           deferredSayCmd = cmd;
           DBGLN("Say deferred — mesh peer using WLED");
@@ -321,6 +328,17 @@ void drainCommandQueue() {
       }
       case CMD_SET_PERSONALITY:
         setBotPersonality(cmd.u8val);
+        // Setting single personality stops rotation
+        botMode.personalityListCount = 0;
+        botMode.personalityRotIntervalMs = 0;
+        break;
+      case CMD_SET_PERSONALITY_LIST:
+        botMode.personalityListCount = min((uint8_t)MAX_RUNTIME_PERSONALITIES, cmd.plist.count);
+        for (uint8_t i = 0; i < botMode.personalityListCount; i++) {
+          botMode.personalityList[i] = cmd.plist.list[i];
+        }
+        botMode.personalityRotIntervalMs = cmd.plist.intervalMs;
+        botMode.lastPersonalityRotMs = millis();
         break;
       case CMD_SET_AMBIENT_EFFECT:
         effectIndex = cmd.u8val % NUM_AMBIENT_EFFECTS;
@@ -417,6 +435,7 @@ void wifiServerTask(void* param) {
       pollCloudSync();                   // Cloud registration + sync (TLS)
       pollScheduledCommands();           // Execute scheduled commands at their target time
       #endif
+      pollScheduledContent();              // Periodic weather + emoji cycles
       pollMeshBroadcast();               // ESP-NOW mesh broadcast + stale eviction
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP

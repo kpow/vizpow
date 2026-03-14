@@ -5,20 +5,30 @@
 // Board Selection - JUST CHANGE THIS ONE LINE
 // ============================================================================
 // Uncomment ONE of these:
-#define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-// #define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
+// #define BOARD_ESP32S3_MATRIX       // Waveshare ESP32-S3-Matrix (8x8 LED)
+#define BOARD_ESP32S3_LCD_169         // Waveshare ESP32-S3-Touch-LCD-1.69
 
 // ============================================================================
-// Auto-configuration based on target
+// Auto-derive TARGET from BOARD
+// ============================================================================
+#if defined(BOARD_ESP32S3_MATRIX)
+  #define TARGET_LED
+#elif defined(BOARD_ESP32S3_LCD_169)
+  #define TARGET_LCD
+#else
+  #error "Select a board: BOARD_ESP32S3_MATRIX or BOARD_ESP32S3_LCD_169"
+#endif
+
+// ============================================================================
+// Target-level configuration (shared by all boards of same target)
 // ============================================================================
 #if defined(TARGET_LED)
-  #define BOARD_ESP32S3_MATRIX
   #define DISPLAY_LED_ONLY
   // Power-saving profile for battery-powered LED matrix
   #define POWER_SAVE_ENABLED
   #define AUTO_WIFI_USB_DETECT       // WiFi ON when USB host detected, OFF on battery
   #define USB_DETECT_DELAY_MS 1500   // Time to wait for USB host enumeration at boot
-  #define DEFAULT_BRIGHTNESS 10
+  #define DEFAULT_BRIGHTNESS 250
   #define MAX_LED_POWER_MA 200       // FastLED auto-scales to this limit
   #define WIFI_TX_POWER WIFI_POWER_8_5dBm  // Reduced TX - phone is nearby
   #define FRAME_DELAY_EMOJI_STATIC 100     // 10 FPS - static image
@@ -28,16 +38,13 @@
   #define INTRO_FADE_RATE 40
   #define INTRO_SPARKLE_BRIGHTNESS 180
 #elif defined(TARGET_LCD)
-  #define BOARD_ESP32S3_TOUCH_LCD
   #define DISPLAY_LCD_ONLY
   #define HIRES_ENABLED  // Hi-res ambient effects on LCD
   // Full power profile for USB-powered LCD board
-  #define DEFAULT_BRIGHTNESS 15
+  #define DEFAULT_BRIGHTNESS 250
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
   #define INTRO_SPARKLE_BRIGHTNESS 255
-#else
-  #error "Please define TARGET_LED or TARGET_LCD"
 #endif
 
 // Manual override: uncomment to enable both displays (if hardware supports)
@@ -53,8 +60,8 @@
   #define I2C_SDA 11
   #define I2C_SCL 12
 
-#elif defined(BOARD_ESP32S3_TOUCH_LCD)
-  // ESP32-S3-Touch-LCD-1.69 board pins
+#elif defined(BOARD_ESP32S3_LCD_169)
+  // Waveshare ESP32-S3-Touch-LCD-1.69 board pins
   #define DATA_PIN 14              // External LED matrix data pin (if used)
   #define I2C_SDA 11               // IMU/Touch I2C SDA
   #define I2C_SCL 10               // IMU/Touch I2C SCL
@@ -72,7 +79,7 @@
   #define TOUCH_ENABLED
 
 #else
-  #error "Please define a board: BOARD_ESP32S3_MATRIX or BOARD_ESP32S3_TOUCH_LCD"
+  #error "Select a board: BOARD_ESP32S3_MATRIX or BOARD_ESP32S3_LCD_169"
 #endif
 
 // ============================================================================

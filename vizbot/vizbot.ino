@@ -46,6 +46,7 @@
 #include "info_mode.h"
 #include "wled_display.h"
 #include "wled_weather_view.h"
+#include "wled_scheduled_content.h"
 #ifdef CLOUD_ENABLED
 #include <ArduinoJson.h>
 #include "content_cache.h"
@@ -153,6 +154,47 @@ uint8_t nextShuffledPalette() {
     resetPaletteShuffle();
   }
   return paletteShuffleBag[paletteShufflePos++];
+}
+
+// Personality-driven effect selection: 70% from favorites, 30% full shuffle
+uint8_t nextPersonalityEffect() {
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+  const RuntimePersonality* p = botMode.personality;
+  if (p && p->favoriteEffectCount > 0 && random(100) < 70) {
+    return p->favoriteEffects[random(p->favoriteEffectCount)];
+  }
+  #endif
+  return nextShuffledEffect();
+}
+
+// Personality-driven palette selection: 70% from favorites, 30% full shuffle
+uint8_t nextPersonalityPalette() {
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+  const RuntimePersonality* p = botMode.personality;
+  if (p && p->favoritePaletteCount > 0 && random(100) < 70) {
+    return p->favoritePalettes[random(p->favoritePaletteCount)];
+  }
+  #endif
+  return nextShuffledPalette();
+}
+
+// Pick a saying category from the personality's bitmask (for idle sayings)
+SayingCategory pickPersonalitySayCategory() {
+  #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
+  const RuntimePersonality* p = botMode.personality;
+  if (p && p->sayingCategoryMask != 0) {
+    // Collect enabled categories
+    SayingCategory cats[16];
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < SAY_CATEGORY_COUNT && count < 16; i++) {
+      if (p->sayingCategoryMask & (1 << i)) {
+        cats[count++] = (SayingCategory)i;
+      }
+    }
+    if (count > 0) return cats[random(count)];
+  }
+  #endif
+  return SAY_IDLE;
 }
 
 // Helper function to show output on configured displays
@@ -305,6 +347,7 @@ void setup() {
 
   // Load WLED display settings from NVS
   loadWledSettings();
+  loadScheduleSettings();
 
   // Apply loaded settings to hardware
   FastLED.setBrightness(brightness);
@@ -413,12 +456,12 @@ void loop() {
   if (!infoMode.active) {
     if (autoCycle && millis() - lastChange > 20000) {
       lastChange = millis();
-      effectIndex = nextShuffledEffect();
+      effectIndex = nextPersonalityEffect();
     }
     if (autoCycle && millis() - lastPaletteChange > 5000) {
       lastPaletteChange = millis();
       if (!wledIsSyncing()) {
-        paletteIndex = nextShuffledPalette();
+        paletteIndex = nextPersonalityPalette();
         currentPalette = palettes[paletteIndex];
       }
     }
