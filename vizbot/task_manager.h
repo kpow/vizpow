@@ -374,7 +374,6 @@ void drainCommandQueue() {
             infoMode.beginExitTransition();
           }
           // TODO: transition to BOT_SLEEPING state with duration
-          // For now just trigger idle-to-sleepy
         }
         break;
       case CMD_MESH_SCAN:

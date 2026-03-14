@@ -15,7 +15,7 @@
 // Bot Mode is the 4th display mode for TARGET_LCD. It renders an animated
 // desktop companion character on the 240x280 LCD using procedural geometry.
 //
-// States: ACTIVE -> IDLE -> SLEEPY -> SLEEPING
+// States: ACTIVE -> IDLE -> SLEEPING
 // Any interaction (touch, shake, motion) wakes the bot.
 // ============================================================================
 
@@ -36,7 +36,6 @@ void setBotPersonality(uint8_t index);
 enum BotState : uint8_t {
   BOT_ACTIVE = 0,    // Normal active state — expressions, look-around, reactions
   BOT_IDLE,          // Reduced movement after period of no interaction
-  BOT_SLEEPY,        // Transitioning to sleep (half-lidded, yawns)
   BOT_SLEEPING       // Asleep (eyes closed, Zzz animation)
 };
 
@@ -263,7 +262,7 @@ struct BotModeState {
 
   // Wake from any sleep/idle state
   void wake() {
-    if (state == BOT_SLEEPING || state == BOT_SLEEPY) {
+    if (state == BOT_SLEEPING) {
       // Wake-up: transition to surprised briefly, then neutral
       face.transitionTo(EXPR_SURPRISED, 200);
       shakeReacting = true;
@@ -391,14 +390,6 @@ void updateBotMode() {
       // Stay idle — no sleep transitions
       break;
 
-    case BOT_SLEEPY:
-      #ifdef TARGET_CORES3
-      // Play descending lullaby when entering sleepy state
-      if (botMode.stateEnteredTime == now) {
-        botSounds.play(SFX_SLEEP_DESCEND);
-      }
-      #endif
-      // fall through
     case BOT_SLEEPING:
       // If somehow in a sleep state, wake immediately
       botMode.wake();
@@ -477,9 +468,9 @@ void updateBotMode() {
       botMode.lastAudioReactionMs = now;
       botMode.registerInteraction();
     }
-    // Extended silence: sleepy expression
+    // Extended silence: chill expression
     else if (audioAnalysis.silenceExtended && botMode.state == BOT_IDLE) {
-      botMode.face.transitionTo(EXPR_SLEEPY, 500);
+      botMode.face.transitionTo(EXPR_CHILL, 500);
       botMode.lastAudioReactionMs = now;
     }
   }
@@ -728,12 +719,6 @@ void renderBotMode() {
         gfx->print("Z");
       }
     }
-  }
-
-  // ---- Sleepy: slow blink animation ----
-  if (botMode.state == BOT_SLEEPY) {
-    float t = (float)(millis() % 4000) / 4000.0f;
-    botMode.face.blinkAmount = 0.3f + 0.4f * (sinf(t * TWO_PI) * 0.5f + 0.5f);
   }
 
   // ---- Render overlays (on top of face) ----
