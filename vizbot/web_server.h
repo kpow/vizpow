@@ -30,218 +30,256 @@ const char webpage[] PROGMEM = R"rawliteral(
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>VizBot</title>
-  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;min-height:100vh;padding:20px}h1{text-align:center;margin-bottom:12px;font-size:24px}h2{font-size:14px;color:#888;margin-bottom:10px;text-transform:uppercase}.card{background:rgba(255,255,255,.1);border-radius:16px;padding:20px;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}button{background:rgba(255,255,255,.15);border:none;color:#fff;padding:14px 10px;border-radius:12px;font-size:13px;cursor:pointer}button.active{background:#6366f1}.slider-container{margin:15px 0}.slider-label{display:flex;justify-content:space-between;margin-bottom:8px}input[type=range]{width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,.2);-webkit-appearance:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:#6366f1;cursor:pointer}.toggle-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0}.toggle{width:52px;height:32px;background:rgba(255,255,255,.2);border-radius:16px;position:relative;cursor:pointer}.toggle.on{background:#6366f1}.toggle::after{content:'';position:absolute;width:26px;height:26px;background:#fff;border-radius:50%;top:3px;left:3px;transition:transform .3s}.toggle.on::after{transform:translateX(20px)}.status{text-align:center;color:#888;font-size:12px;margin-top:10px}.tabs{display:flex;gap:4px;margin-bottom:16px;justify-content:center}.tab{background:rgba(255,255,255,.1);border:none;color:#fff;padding:10px 20px;border-radius:12px 12px 0 0;font-size:14px;cursor:pointer;flex:1;max-width:180px}.tab.active{background:rgba(99,102,241,.5)}.tab-panel{display:none}.tab-panel.active{display:block}@media(min-width:900px){body{padding:30px 40px;max-width:1200px;margin:0 auto}.tab-panel.active{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}.card{margin-bottom:0}.grid4{grid-template-columns:repeat(5,1fr)}}</style>
+  <style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:#e8e4dc;color:#000;min-height:100vh}
+.hdr{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#FFD23F;border:3px solid #000;box-shadow:0 5px 0 0 #000}
+.logo{font-size:20px;font-weight:800;color:#000;letter-spacing:-0.5px}
+.dev-name{color:#333;font-size:12px;margin-left:10px;font-weight:600}
+.hdr-r{display:flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%;border:2px solid #000;background:#ddd;display:inline-block}
+.dot.on{background:#88D498}
+.dot.err{background:#FF6B6B}
+.sl{color:#333;font-size:11px;margin-right:8px;font-weight:600}
+.layout{display:grid;grid-template-columns:1fr;gap:12px;padding:16px;max-width:1400px;margin:0 auto}
+@media(min-width:768px){.layout{grid-template-columns:1fr 1fr;padding:20px;gap:14px}}
+@media(min-width:1200px){.layout{grid-template-columns:3fr 2fr;padding:24px}}
+.card{background:#fffdf5;border:3px solid #000;box-shadow:5px 5px 0 0 #000;padding:16px;margin-bottom:0}
+h2{font-size:13px;color:#000;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;font-weight:800}
+.shdr{cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:0;padding:0}
+.shdr:not(.shut){margin-bottom:12px}
+.shdr:hover{color:#555}
+.chv{font-size:10px;transition:transform .2s;display:inline-block}
+.shdr.shut .chv{transform:rotate(-90deg)}
+.sbody{overflow:hidden;transition:max-height .3s ease;max-height:2000px}
+.sbody.shut{max-height:0}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+@media(max-width:767px){.grid5{grid-template-columns:repeat(3,1fr)}}
+button{background:#e8e8e8;border:2px solid #000;box-shadow:3px 3px 0 0 #000;color:#000;padding:10px 8px;border-radius:0;font-size:12px;font-weight:600;cursor:pointer;transition:transform .1s,box-shadow .1s}
+button:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 0 #000}
+button:active{transform:translate(2px,2px);box-shadow:none}
+button.active{background:#FFD23F;border-color:#000}
+.btn-send{background:#FFA552;border-color:#000;font-weight:700}
+.btn-send:hover{background:#ffb76b}
+.btn-full{width:100%}
+.btn-danger{background:#fdd;border-color:#000;color:#c00;box-shadow:3px 3px 0 0 #c00}
+.btn-danger:hover{background:#fcc;transform:translate(-1px,-1px);box-shadow:4px 4px 0 0 #c00}
+.btn-danger:active{transform:translate(2px,2px);box-shadow:none}
+.btn-start{background:#B8A9FA;border-color:#000}
+.btn-start.on{background:#FFD23F}
+.inp,.sel{width:100%;padding:10px 12px;border:2px solid #000;box-shadow:3px 3px 0 0 #000;background:#fff;color:#000;font-size:14px;border-radius:0;font-family:inherit}
+.inp:focus,.sel:focus{outline:none;box-shadow:3px 3px 0 0 #74B9FF}
+.inp-sm{width:56px;padding:6px 8px;border:2px solid #000;box-shadow:2px 2px 0 0 #000;background:#fff;color:#000;font-size:13px;text-align:center;border-radius:0}
+.flex1{flex:1}
+.row{display:flex;gap:8px;align-items:center}
+.srow{display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px;color:#555;font-weight:600}
+input[type=range]{width:100%;height:6px;background:#ddd;border:1px solid #000;-webkit-appearance:none;border-radius:0;margin-bottom:12px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;background:#B8A9FA;border:2px solid #000;box-shadow:2px 2px 0 0 #000;cursor:pointer;border-radius:0}
+.trow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:14px;font-weight:500}
+.tog{width:44px;height:24px;background:#ddd;border:2px solid #000;box-shadow:2px 2px 0 0 #000;position:relative;cursor:pointer;transition:background .2s;border-radius:0}
+.tog.on{background:#B8A9FA}
+.tog::after{content:'';position:absolute;width:16px;height:16px;background:#fff;border:2px solid #000;top:2px;left:2px;transition:transform .2s;border-radius:0}
+.tog.on::after{transform:translateX(20px)}
+.lbl{font-size:13px;color:#555;font-weight:600}
+.hint{font-size:12px;color:#888;margin-top:4px}
+.status{text-align:center;color:#555;font-size:11px;padding:12px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border-top:3px solid #000;background:#fffdf5}
+  </style>
 </head>
 <body>
-  <h1>VizBot Control</h1>
-
-  <div class="tabs">
-    <button class="tab active" onclick="showTab(0)">Face</button>
-    <button class="tab" onclick="showTab(1)">Settings</button>
-    <button class="tab" onclick="showTab(2)">Network</button>
-  </div>
-
-  <!-- Tab 0: Face -->
-  <div class="tab-panel active" id="tab0">
-    <div class="card">
-      <h2>Expressions</h2>
-      <div class="grid4" id="botExpressions"></div>
+  <header class="hdr">
+    <div style="display:flex;align-items:center">
+      <span class="logo">VizBot</span>
+      <span class="dev-name" id="deviceLabel"></span>
     </div>
-
-    <div class="card">
-      <h2>Say Something</h2>
-      <div style="display:flex;gap:8px">
-        <input type="text" id="botSayInput" placeholder="Type a message..."
-          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="60">
-        <button onclick="sendBotSay()" style="padding:10px 16px">Say</button>
-      </div>
+    <div class="hdr-r">
+      <span class="dot on" id="connDot"></span><span class="sl">Connected</span>
+      <span class="dot" id="wledDot"></span><span class="sl">WLED</span>
     </div>
+  </header>
 
-    <div class="card">
-      <h2>Personality</h2>
-      <select id="personalitySelect" onchange="setPersonality(this.value)"
-        style="width:100%;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px;margin-bottom:8px">
-      </select>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-        <label style="font-size:13px;opacity:0.8">Rotate:</label>
-        <input type="checkbox" id="rotateCheck" onchange="toggleRotation()">
-        <label style="font-size:13px;opacity:0.8">every</label>
-        <input type="number" id="rotateMin" value="5" min="1" max="60"
-          style="width:50px;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:13px">
-        <label style="font-size:13px;opacity:0.8">min</label>
+  <div class="layout">
+    <div class="col-main">
+      <div class="card">
+        <h2>Expressions</h2>
+        <div class="grid5" id="botExpressions"></div>
       </div>
-    </div>
 
-    <div class="card">
-      <h2>Face Color</h2>
-      <div class="grid4" id="botColors"></div>
-      <h2 style="margin-top:15px">Background</h2>
-      <div class="grid" id="botBgStyles"></div>
-      <div id="ambientSection" style="display:none;margin-top:15px">
-        <h2>Ambient Animation</h2>
-        <div class="grid" id="ambientEffects"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Tab 1: Settings -->
-  <div class="tab-panel" id="tab1">
-    <div class="card">
-      <h2>Settings</h2>
-      <div class="slider-container">
-        <div class="slider-label"><span>Brightness</span><span id="brightnessVal">15</span></div>
-        <input type="range" id="brightness" min="1" max="50" value="15">
-      </div>
-      <div class="slider-container">
-        <div class="slider-label"><span>Volume</span><span id="volumeVal">120</span></div>
-        <input type="range" id="volume" min="0" max="255" value="120">
-      </div>
-      <div class="toggle-row">
-        <span>Time Overlay</span>
-        <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
-      </div>
-      <div class="toggle-row">
-        <span>Hi-Res Background</span>
-        <div class="toggle" id="hiResToggle" onclick="toggleHiRes()"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Info Mode</h2>
-      <div class="toggle-row">
-        <span>Show Weather</span>
-        <div class="toggle" id="infoToggle" onclick="toggleInfo()"></div>
-      </div>
-      <div style="margin-top:12px">
-        <div style="color:#aaa;font-size:13px;margin-bottom:6px">Location</div>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="weatherZip" placeholder="Zip code or city name"
-            style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
-          <button onclick="setLocationZip()" id="zipBtn" style="padding:10px 16px">Set</button>
-        </div>
-        <div id="locationInfo" style="color:#6b7;font-size:12px;margin-top:6px"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Scheduled Content</h2>
-      <div class="toggle-row">
-        <span>Auto Weather + Emoji</span>
-        <div class="toggle" id="schedToggle" onclick="toggleSched()"></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-        <label style="font-size:13px;opacity:0.8">Cycle every</label>
-        <input type="number" id="schedMin" value="30" min="1" max="120"
-          style="width:60px;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:13px"
-          onchange="updateSched()">
-        <label style="font-size:13px;opacity:0.8">min</label>
-      </div>
-      <div id="schedStatus" style="font-size:12px;color:#aaa;margin-top:6px"></div>
-    </div>
-  </div>
-
-  <!-- Tab 2: Network -->
-  <div class="tab-panel" id="tab2">
-    <div class="card">
-      <h2>WiFi Setup</h2>
-      <div style="margin-bottom:12px">
-        <div style="color:#aaa;font-size:12px;margin-bottom:6px">Device Name &mdash; sets AP name and .local hostname (restart to apply)</div>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="deviceNameInput" placeholder="e.g. vizbot-desk"
-            style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="23">
-          <button onclick="setDeviceName()" id="deviceNameBtn" style="padding:10px 16px">Set</button>
-        </div>
-        <div id="deviceNameStatus" style="font-size:12px;color:#aaa;margin-top:4px"></div>
-      </div>
-      <div id="wifiStatus"></div>
-      <div id="wifiScan" style="margin-top:10px">
-        <button onclick="wifiDoScan()" id="scanBtn">Scan Networks</button>
-      </div>
-      <div id="wifiNetworks" style="margin-top:10px"></div>
-      <div id="wifiConnect" style="display:none;margin-top:10px">
-        <div style="margin-bottom:8px;color:#aaa" id="wifiSelectedSSID"></div>
-        <div style="display:flex;gap:8px">
-          <input type="password" id="wifiPass" placeholder="Password"
-            style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="63">
-          <button onclick="wifiDoConnect()" id="connectBtn" style="padding:10px 16px">Connect</button>
+      <div class="card">
+        <h2>Say Something</h2>
+        <div class="row">
+          <input type="text" id="botSayInput" placeholder="Type a message..." maxlength="60" class="inp flex1">
+          <button onclick="sendBotSay()" class="btn-send">Send</button>
         </div>
       </div>
-      <div id="wifiForget" style="margin-top:12px;display:none">
-        <button onclick="wifiDoReset()" style="background:rgba(248,113,113,0.3)">Forget Network</button>
+
+      <div class="card">
+        <h2 class="shdr" onclick="tgl('secPers')">Personality <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secPers">
+          <select id="personalitySelect" onchange="setPersonality(this.value)" class="sel"></select>
+          <div class="row" style="margin-top:8px">
+            <span class="lbl">Rotate:</span>
+            <input type="checkbox" id="rotateCheck" onchange="toggleRotation()">
+            <span class="lbl">every</span>
+            <input type="number" id="rotateMin" value="5" min="1" max="60" class="inp-sm">
+            <span class="lbl">min</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="shdr" onclick="tgl('secAppear')">Appearance <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secAppear">
+          <span class="lbl">Face Color</span>
+          <div class="grid5" id="botColors" style="margin-top:6px"></div>
+          <span class="lbl" style="display:block;margin-top:12px">Background</span>
+          <div class="row" id="botBgStyles" style="margin-top:6px;gap:6px"></div>
+          <div id="ambientSection" style="display:none;margin-top:12px">
+            <span class="lbl">Ambient Effect</span>
+            <div class="grid3" id="ambientEffects" style="margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="shdr" onclick="tgl('secSprites')">WLED Sprites <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secSprites">
+          <div class="grid4" id="emojiGrid"></div>
+          <div id="emojiQueue" style="margin-top:8px;min-height:20px"></div>
+          <div class="row" style="margin-top:8px">
+            <button onclick="clearWledEmoji()" class="flex1">Clear</button>
+            <button onclick="toggleWledEmoji()" id="emojiToggleBtn" class="btn-start flex1">Start</button>
+          </div>
+          <div class="srow" style="margin-top:8px"><span>Cycle Time</span><span id="emojiCycleVal">4s</span></div>
+          <input type="range" id="emojiCycle" min="1" max="10" value="4">
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>WLED Display</h2>
-      <div id="wledStatus"></div>
-      <div style="margin-top:10px">
-        <div class="toggle-row">
-          <span>Forward Speech to WLED</span>
-          <div class="toggle" id="wledToggle" onclick="toggleWled()"></div>
-        </div>
-        <div class="toggle-row" style="margin-top:8px">
-          <span>Hologram Mode</span>
-          <div class="toggle" id="hologramToggle" onclick="toggleHologram()"></div>
-        </div>
-      </div>
-      <div style="margin-top:10px">
-        <div style="display:flex;gap:8px">
-          <input type="text" id="wledIP" placeholder="WLED IP (e.g. 192.168.1.100)"
-            style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="15">
-          <button onclick="setWledIP()" style="padding:10px 16px">Set</button>
-        </div>
-      </div>
-      <div style="margin-top:10px">
-        <button onclick="testWled()">Test</button>
-      </div>
-    </div>
+    <div class="col-side">
 
-    <div class="card">
-      <h2>WLED Sprites</h2>
-      <div class="grid4" id="emojiGrid"></div>
-      <div id="emojiQueue" style="margin-top:12px;min-height:20px"></div>
-      <div style="margin-top:10px;display:flex;gap:8px">
-        <button onclick="clearWledEmoji()" style="flex:1">Clear</button>
-        <button onclick="toggleWledEmoji()" id="emojiToggleBtn" style="flex:1;background:rgba(99,102,241,0.6)">Start</button>
+      <div class="card">
+        <h2 class="shdr" onclick="tgl('secDev')">Device <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secDev">
+          <div class="srow"><span>Brightness</span><span id="brightnessVal">15</span></div>
+          <input type="range" id="brightness" min="1" max="50" value="15">
+          <div class="srow"><span>Volume</span><span id="volumeVal">120</span></div>
+          <input type="range" id="volume" min="0" max="255" value="120">
+          <div class="trow"><span>Time Overlay</span><div class="tog" id="botTimeToggle" onclick="toggleBotTime()"></div></div>
+          <div class="trow"><span>Hi-Res Background</span><div class="tog" id="hiResToggle" onclick="toggleHiRes()"></div></div>
+        </div>
       </div>
-      <div class="slider-container" style="margin-top:12px">
-        <div class="slider-label"><span>Cycle Time</span><span id="emojiCycleVal">4s</span></div>
-        <input type="range" id="emojiCycle" min="1" max="10" value="4">
+
+      <div class="card">
+        <h2 class="shdr" onclick="tgl('secInfo')">Weather &amp; Info <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secInfo">
+          <div class="trow"><span>Show Weather</span><div class="tog" id="infoToggle" onclick="toggleInfo()"></div></div>
+          <span class="lbl">Location</span>
+          <div class="row" style="margin-top:4px">
+            <input type="text" id="weatherZip" placeholder="Zip or city" class="inp flex1" maxlength="30">
+            <button onclick="setLocationZip()" id="zipBtn">Set</button>
+          </div>
+          <div id="locationInfo" class="hint"></div>
+          <div class="trow" style="margin-top:10px"><span>Scheduled Content</span><div class="tog" id="schedToggle" onclick="toggleSched()"></div></div>
+          <div class="row">
+            <span class="lbl">Cycle every</span>
+            <input type="number" id="schedMin" value="30" min="1" max="120" class="inp-sm" onchange="updateSched()">
+            <span class="lbl">min</span>
+          </div>
+          <div id="schedStatus" class="hint"></div>
+        </div>
       </div>
+
+      <div class="card">
+        <h2 class="shdr" onclick="tgl('secWifi')">WiFi <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secWifi">
+          <span class="lbl">Device Name</span>
+          <div class="row" style="margin-top:4px">
+            <input type="text" id="deviceNameInput" placeholder="e.g. vizbot-desk" class="inp flex1" maxlength="23">
+            <button onclick="setDeviceName()" id="deviceNameBtn">Set</button>
+          </div>
+          <div id="deviceNameStatus" class="hint"></div>
+          <div id="wifiStatus" style="margin-top:8px"></div>
+          <button onclick="wifiDoScan()" id="scanBtn" class="btn-full" style="margin-top:8px">Scan Networks</button>
+          <div id="wifiNetworks" style="margin-top:8px"></div>
+          <div id="wifiConnect" style="display:none;margin-top:8px">
+            <div class="hint" id="wifiSelectedSSID"></div>
+            <div class="row" style="margin-top:4px">
+              <input type="password" id="wifiPass" placeholder="Password" class="inp flex1" maxlength="63">
+              <button onclick="wifiDoConnect()" id="connectBtn">Connect</button>
+            </div>
+          </div>
+          <div id="wifiForget" style="margin-top:8px;display:none">
+            <button onclick="wifiDoReset()" class="btn-danger btn-full">Forget Network</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="shdr" onclick="tgl('secWled')">WLED Display <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secWled">
+          <div id="wledStatus"></div>
+          <div class="trow"><span>Forward Speech</span><div class="tog" id="wledToggle" onclick="toggleWled()"></div></div>
+          <div class="trow"><span>Hologram Mode</span><div class="tog" id="hologramToggle" onclick="toggleHologram()"></div></div>
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="wledIP" placeholder="WLED IP" class="inp flex1" maxlength="15">
+            <button onclick="setWledIP()">Set</button>
+          </div>
+          <button onclick="testWled()" class="btn-full" style="margin-top:8px">Test Connection</button>
+        </div>
+      </div>
+
     </div>
   </div>
 
-  <div class="status">Connected to VizBot &middot; vizbot.local</div>
+  <div class="status" id="statusBar">Connected to VizBot</div>
 
   <script>
-    function showTab(n) {
-      document.querySelectorAll('.tab-panel').forEach((p,i) => { p.classList.toggle('active', i===n); });
-      document.querySelectorAll('.tab').forEach((t,i) => { t.classList.toggle('active', i===n); });
+    function tgl(id) {
+      const b = document.getElementById(id);
+      const h = b.previousElementSibling;
+      b.classList.toggle('shut');
+      h.classList.toggle('shut');
+      const states = JSON.parse(localStorage.getItem('vb_sections') || '{}');
+      states[id] = b.classList.contains('shut');
+      localStorage.setItem('vb_sections', JSON.stringify(states));
     }
+    (function restoreSections() {
+      const states = JSON.parse(localStorage.getItem('vb_sections') || '{}');
+      for (const [id, shut] of Object.entries(states)) {
+        if (shut) {
+          const b = document.getElementById(id);
+          if (b) { b.classList.add('shut'); b.previousElementSibling.classList.add('shut'); }
+        }
+      }
+    })();
 
-    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Chill", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Focused", "Winking", "Devious", "Shocked", "Kissing", "Nervous", "Glitching", "Sassy"];
-    const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
+    const botExprNames = ["Neutral","Happy","Sad","Surprised","Chill","Angry","Love","Dizzy","Thinking","Excited","Mischief","Skeptical","Worried","Confused","Proud","Shy","Annoyed","Focused","Winking","Devious","Shocked","Kissing","Nervous","Glitching","Sassy"];
+    const botColorNames = ["White","Cyan","Green","Pink","Yellow"];
     const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
     const ambientNames = ["Plasma","Rainbow","Fire","Ocean","Matrix","Lava","Aurora","Confetti","Galaxy","Heart","Donut"];
     let curBgStyle = 4;
     let curAmbient = 0;
+    let curExpr = 0;
+    let curColor = 0;
     let wifiSelectedSSID = '';
     let wifiPollTimer = null;
 
     function render() {
       document.getElementById('botExpressions').innerHTML = botExprNames.map((name, i) =>
-        `<button onclick="setBotExpr(${i})">${name}</button>`
+        `<button class="${curExpr===i?'active':''}" onclick="setBotExpr(${i})">${name}</button>`
       ).join('');
       document.getElementById('botColors').innerHTML = botColorNames.map((name, i) =>
-        `<button onclick="setBotColor(${i})">${name}</button>`
+        `<button class="${curColor===i?'active':''}" onclick="setBotColor(${i})">${name}</button>`
       ).join('');
       document.getElementById('botBgStyles').innerHTML = botBgStyles.map(s =>
-        `<button class="${curBgStyle === s.v ? 'active' : ''}" onclick="setBotBgStyle(${s.v})">${s.n}</button>`
+        `<button class="${curBgStyle===s.v?'active':''}" onclick="setBotBgStyle(${s.v})">${s.n}</button>`
       ).join('');
       const ambSec = document.getElementById('ambientSection');
       ambSec.style.display = curBgStyle === 4 ? 'block' : 'none';
       document.getElementById('ambientEffects').innerHTML = ambientNames.map((name, i) =>
-        `<button class="${curAmbient === i ? 'active' : ''}" onclick="setAmbient(${i})">${name}</button>`
+        `<button class="${curAmbient===i?'active':''}" onclick="setAmbient(${i})">${name}</button>`
       ).join('');
     }
 
@@ -249,7 +287,7 @@ const char webpage[] PROGMEM = R"rawliteral(
       try { return await fetch(endpoint); } catch(e) { return null; }
     }
 
-    function setBotExpr(i) { api('/bot/expression?v=' + i); }
+    function setBotExpr(i) { curExpr=i; render(); api('/bot/expression?v=' + i); }
     function setPersonality(i) { api('/bot/personality?v=' + i); }
     function toggleRotation() {
       const on = document.getElementById('rotateCheck').checked;
@@ -292,19 +330,19 @@ const char webpage[] PROGMEM = R"rawliteral(
     let botTimeOn = false;
     function toggleBotTime() {
       botTimeOn = !botTimeOn;
-      document.getElementById('botTimeToggle').className = 'toggle ' + (botTimeOn ? 'on' : '');
+      document.getElementById('botTimeToggle').className = 'tog ' + (botTimeOn ? 'on' : '');
       api('/bot/time?v=' + (botTimeOn ? 1 : 0));
     }
     let hiResOn = false;
     function toggleHiRes() {
       hiResOn = !hiResOn;
-      document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
+      document.getElementById('hiResToggle').className = 'tog ' + (hiResOn ? 'on' : '');
       api('/bot/hires?v=' + (hiResOn ? 1 : 0));
     }
     let schedOn = false;
     function toggleSched() {
       schedOn = !schedOn;
-      document.getElementById('schedToggle').className = 'toggle ' + (schedOn ? 'on' : '');
+      document.getElementById('schedToggle').className = 'tog ' + (schedOn ? 'on' : '');
       api('/schedule?enabled=' + (schedOn ? 1 : 0));
     }
     function updateSched() {
@@ -316,7 +354,7 @@ const char webpage[] PROGMEM = R"rawliteral(
         const r = await fetch('/schedule');
         const d = await r.json();
         schedOn = d.enabled;
-        document.getElementById('schedToggle').className = 'toggle ' + (schedOn ? 'on' : '');
+        document.getElementById('schedToggle').className = 'tog ' + (schedOn ? 'on' : '');
         document.getElementById('schedMin').value = d.intervalMin;
         const phases = ['Idle','Weather','Gap','Emoji'];
         document.getElementById('schedStatus').textContent =
@@ -328,7 +366,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     let infoOn = false;
     function toggleInfo() {
       infoOn = !infoOn;
-      document.getElementById('infoToggle').className = 'toggle ' + (infoOn ? 'on' : '');
+      document.getElementById('infoToggle').className = 'tog ' + (infoOn ? 'on' : '');
       api('/info/toggle');
     }
     async function setLocationZip() {
@@ -344,7 +382,7 @@ const char webpage[] PROGMEM = R"rawliteral(
         document.getElementById('locationInfo').textContent = 'Location not found';
       }
     }
-    function setBotColor(i) { api('/bot/background?v=' + i); }
+    function setBotColor(i) { curColor=i; render(); api('/bot/background?v=' + i); }
     function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
     function setAmbient(i) { curAmbient = i; render(); api('/bot/ambient?v=' + i); }
 
@@ -368,11 +406,11 @@ const char webpage[] PROGMEM = R"rawliteral(
         document.getElementById('brightnessVal').textContent = state.brightness;
         if (state.timeOverlay !== undefined) {
           botTimeOn = state.timeOverlay;
-          document.getElementById('botTimeToggle').className = 'toggle ' + (botTimeOn ? 'on' : '');
+          document.getElementById('botTimeToggle').className = 'tog ' + (botTimeOn ? 'on' : '');
         }
         if (state.hiRes !== undefined) {
           hiResOn = state.hiRes;
-          document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
+          document.getElementById('hiResToggle').className = 'tog ' + (hiResOn ? 'on' : '');
         }
         if (state.sensors && state.sensors.soundVolume !== undefined) {
           document.getElementById('volume').value = state.sensors.soundVolume;
@@ -380,17 +418,17 @@ const char webpage[] PROGMEM = R"rawliteral(
         }
         if (state.ambientEffect !== undefined) {
           curAmbient = state.ambientEffect;
-          render();
         }
         if (state.infoActive !== undefined) {
           infoOn = state.infoActive;
-          document.getElementById('infoToggle').className = 'toggle ' + (infoOn ? 'on' : '');
+          document.getElementById('infoToggle').className = 'tog ' + (infoOn ? 'on' : '');
         }
         if (state.weatherLat && state.weatherLon) {
           document.getElementById('locationInfo').textContent = 'Current: ' + state.weatherLat + ', ' + state.weatherLon;
         }
         if (state.device) {
-          document.querySelector('.status').textContent = 'Connected to ' + state.device + ' \u00B7 ' + state.hostname;
+          document.getElementById('deviceLabel').textContent = state.device;
+          document.getElementById('statusBar').textContent = 'Connected to ' + state.device + ' \u00B7 ' + state.hostname;
         }
         if (state.deviceName) {
           document.getElementById('deviceNameInput').value = state.deviceName;
@@ -399,7 +437,7 @@ const char webpage[] PROGMEM = R"rawliteral(
           emojiQueue = state.wledEmoji.queue || [];
           emojiActive = state.wledEmoji.active || false;
           document.getElementById('emojiToggleBtn').textContent = emojiActive ? 'Stop' : 'Start';
-          document.getElementById('emojiToggleBtn').style.background = emojiActive ? '#6366f1' : 'rgba(99,102,241,0.6)';
+          document.getElementById('emojiToggleBtn').className = 'btn-start flex1' + (emojiActive ? ' on' : '');
           if (state.wledEmoji.cycleTime) {
             const sec = Math.round(state.wledEmoji.cycleTime / 1000);
             document.getElementById('emojiCycle').value = sec;
@@ -408,6 +446,7 @@ const char webpage[] PROGMEM = R"rawliteral(
           renderEmojiGrid();
           renderEmojiQueue();
         }
+        render();
       } catch(e) {}
     }
 
@@ -423,7 +462,6 @@ const char webpage[] PROGMEM = R"rawliteral(
         (r && r.ok) ? 'Saved \u2014 restart device to apply.' : 'Error saving name.';
     }
 
-    // WiFi provisioning UI
     function rssiIcon(rssi) {
       if (rssi > -50) return '||||';
       if (rssi > -65) return '||| ';
@@ -435,7 +473,6 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('scanBtn').textContent = 'Scanning...';
       document.getElementById('scanBtn').disabled = true;
       await api('/wifi/scan');
-      // Poll for scan results
       wifiPollScan();
     }
 
@@ -443,19 +480,16 @@ const char webpage[] PROGMEM = R"rawliteral(
       const r = await api('/wifi/status');
       if (!r) { setTimeout(wifiPollScan, 1000); return; }
       const d = await r.json();
-      if (d.state === 'scanning') {
-        setTimeout(wifiPollScan, 500);
-        return;
-      }
+      if (d.state === 'scanning') { setTimeout(wifiPollScan, 500); return; }
       document.getElementById('scanBtn').textContent = 'Scan Networks';
       document.getElementById('scanBtn').disabled = false;
       if (d.state === 'scan_done' && d.networks) {
         let html = '';
         d.networks.forEach(n => {
-          html += '<button style="display:block;width:100%;text-align:left;margin-bottom:6px;padding:10px 12px" onclick="wifiSelectNet(\'' +
+          html += '<button class="btn-full" style="text-align:left;margin-bottom:6px" onclick="wifiSelectNet(\'' +
             n.ssid.replace(/'/g, "\\'") + '\',' + (n.open?'true':'false') + ')">' +
             '<span style="font-family:monospace;margin-right:8px;font-size:11px">' + rssiIcon(n.rssi) + '</span>' +
-            n.ssid + (n.open ? ' <span style="color:#4ade80;font-size:11px">OPEN</span>' : '') +
+            n.ssid + (n.open ? ' <span style="color:#88D498;font-size:11px;font-weight:800">OPEN</span>' : '') +
             '</button>';
         });
         document.getElementById('wifiNetworks').innerHTML = html;
@@ -479,7 +513,6 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('connectBtn').textContent = 'Connecting...';
       document.getElementById('connectBtn').disabled = true;
       await api('/wifi/connect?ssid=' + encodeURIComponent(wifiSelectedSSID) + '&pass=' + encodeURIComponent(pass));
-      // Start polling for connection status
       wifiStartStatusPoll();
     }
 
@@ -494,12 +527,12 @@ const char webpage[] PROGMEM = R"rawliteral(
       const d = await r.json();
       const el = document.getElementById('wifiStatus');
       if (d.state === 'connecting') {
-        el.innerHTML = '<div style="color:#facc15;padding:10px">Connecting to ' + (d.ssid||'') + '...</div>';
+        el.innerHTML = '<div style="color:#FFA552;padding:8px;font-weight:600">Connecting to ' + (d.ssid||'') + '...</div>';
       } else if (d.state === 'connected' || d.state === 'sta_active') {
         clearInterval(wifiPollTimer);
-        el.innerHTML = '<div style="color:#4ade80;padding:10px">Connected to ' + (d.ssid||'') +
+        el.innerHTML = '<div style="color:#88D498;padding:8px;font-weight:600">Connected to ' + (d.ssid||'') +
           '<br>IP: <strong>' + (d.ip||'') + '</strong>' +
-          '<br><span style="color:#aaa;font-size:12px">Switch to your home WiFi and visit ' + (d.ip||'') + '</span></div>';
+          '<br><span style="color:#888;font-size:12px">Switch to your home WiFi and visit ' + (d.ip||'') + '</span></div>';
         document.getElementById('connectBtn').textContent = 'Connect';
         document.getElementById('connectBtn').disabled = false;
         document.getElementById('wifiConnect').style.display = 'none';
@@ -507,7 +540,7 @@ const char webpage[] PROGMEM = R"rawliteral(
         document.getElementById('wifiForget').style.display = 'block';
       } else if (d.state === 'failed') {
         clearInterval(wifiPollTimer);
-        el.innerHTML = '<div style="color:#f87171;padding:10px">Failed: ' + (d.reason||'Unknown error') + '</div>';
+        el.innerHTML = '<div style="color:#FF6B6B;padding:8px;font-weight:600">Failed: ' + (d.reason||'Unknown error') + '</div>';
         document.getElementById('connectBtn').textContent = 'Connect';
         document.getElementById('connectBtn').disabled = false;
       }
@@ -515,17 +548,16 @@ const char webpage[] PROGMEM = R"rawliteral(
 
     async function wifiDoReset() {
       await api('/wifi/reset');
-      document.getElementById('wifiStatus').innerHTML = '<div style="color:#aaa;padding:10px">Credentials cleared. Back to AP mode.</div>';
+      document.getElementById('wifiStatus').innerHTML = '<div style="color:#888;padding:8px">Credentials cleared. Back to AP mode.</div>';
       document.getElementById('wifiForget').style.display = 'none';
     }
 
-    // On load, check WiFi status
     async function wifiInitCheck() {
       const r = await api('/wifi/status');
       if (!r) return;
       const d = await r.json();
       if (d.state === 'connected' || d.state === 'sta_active') {
-        document.getElementById('wifiStatus').innerHTML = '<div style="color:#4ade80;padding:10px">Connected to ' +
+        document.getElementById('wifiStatus').innerHTML = '<div style="color:#88D498;padding:8px;font-weight:600">Connected to ' +
           (d.ssid||'') + ' &middot; IP: ' + (d.ip||'') + '</div>';
         document.getElementById('wifiForget').style.display = 'block';
       } else if (d.state === 'connecting') {
@@ -533,25 +565,21 @@ const char webpage[] PROGMEM = R"rawliteral(
       }
     }
 
-    // WLED display controls
     let wledOn = false;
     let hologramOn = false;
     function toggleWled() {
       wledOn = !wledOn;
-      document.getElementById('wledToggle').className = 'toggle ' + (wledOn ? 'on' : '');
+      document.getElementById('wledToggle').className = 'tog ' + (wledOn ? 'on' : '');
       api('/wled/config?on=' + (wledOn ? 1 : 0));
     }
     function toggleHologram() {
       hologramOn = !hologramOn;
-      document.getElementById('hologramToggle').className = 'toggle ' + (hologramOn ? 'on' : '');
+      document.getElementById('hologramToggle').className = 'tog ' + (hologramOn ? 'on' : '');
       api('/wled/config?hologram=' + (hologramOn ? 1 : 0));
     }
     function setWledIP() {
       const ip = document.getElementById('wledIP').value.trim();
-      if (ip) {
-        api('/wled/config?ip=' + encodeURIComponent(ip));
-        wledUpdateStatus();
-      }
+      if (ip) { api('/wled/config?ip=' + encodeURIComponent(ip)); wledUpdateStatus(); }
     }
     function testWled() { api('/wled/test'); }
     async function wledUpdateStatus() {
@@ -559,20 +587,21 @@ const char webpage[] PROGMEM = R"rawliteral(
       if (!r) return;
       const d = await r.json();
       wledOn = d.enabled;
-      document.getElementById('wledToggle').className = 'toggle ' + (wledOn ? 'on' : '');
+      document.getElementById('wledToggle').className = 'tog ' + (wledOn ? 'on' : '');
       hologramOn = !!d.hologram;
-      document.getElementById('hologramToggle').className = 'toggle ' + (hologramOn ? 'on' : '');
+      document.getElementById('hologramToggle').className = 'tog ' + (hologramOn ? 'on' : '');
       if (d.ip) document.getElementById('wledIP').value = d.ip;
+      const dot = document.getElementById('wledDot');
+      if (d.enabled && d.reachable) dot.className = 'dot on';
+      else if (d.enabled) dot.className = 'dot err';
+      else dot.className = 'dot';
       const el = document.getElementById('wledStatus');
       if (d.ip && d.enabled) {
-        el.innerHTML = '<div style="color:' + (d.reachable ? '#4ade80' : '#f87171') +
-          ';padding:4px;font-size:12px">' + (d.reachable ? 'Reachable' : 'Unreachable') + ' (' + d.ip + ')</div>';
-      } else {
-        el.innerHTML = '';
-      }
+        el.innerHTML = '<div style="color:' + (d.reachable ? '#88D498' : '#FF6B6B') +
+          ';font-size:12px;font-weight:700;margin-bottom:8px">' + (d.reachable ? 'Reachable' : 'Unreachable') + ' (' + d.ip + ')</div>';
+      } else { el.innerHTML = ''; }
     }
 
-    // WLED Emoji sprite controls
     const emojiNames=["Heart","Star","Check","X","Fire","Potion","Sword","Shield","ArrowUp","ArrowDn","ArrowL","ArrowR","Skull","Ghost","Alien","Pacman","PacGhost","ShyGuy","Music","WiFi","Rainbow","Mushroom","Skelly","Chicken","Invader","Dragon","TwnklHrt","Popsicle"];
     let emojiQueue=[];
     let emojiActive=false;
@@ -580,48 +609,44 @@ const char webpage[] PROGMEM = R"rawliteral(
     function renderEmojiGrid() {
       document.getElementById('emojiGrid').innerHTML = emojiNames.map((n,i) => {
         const inQ = emojiQueue.indexOf(i) >= 0;
-        return `<button class="${inQ?'active':''}" onclick="addWledEmoji(${i})" style="font-size:11px;padding:10px 4px">${n}</button>`;
+        return `<button class="${inQ?'active':''}" onclick="addWledEmoji(${i})" style="font-size:11px;padding:8px 4px">${n}</button>`;
       }).join('');
     }
 
     function renderEmojiQueue() {
       const el = document.getElementById('emojiQueue');
       if (emojiQueue.length === 0) {
-        el.innerHTML = '<div style="color:#666;font-size:12px">No sprites selected</div>';
+        el.innerHTML = '<div class="hint">No sprites selected</div>';
         return;
       }
       el.innerHTML = emojiQueue.map((idx,pos) =>
-        `<span onclick="removeWledEmoji(${pos})" style="display:inline-block;background:rgba(99,102,241,0.4);border-radius:8px;padding:4px 10px;margin:2px 4px 2px 0;font-size:12px;cursor:pointer">${emojiNames[idx]} &times;</span>`
+        `<span onclick="removeWledEmoji(${pos})" style="display:inline-block;background:#FFD23F;border:2px solid #000;padding:3px 8px;margin:2px 4px 2px 0;font-size:11px;font-weight:700;cursor:pointer">${emojiNames[idx]} &times;</span>`
       ).join('');
     }
 
     function addWledEmoji(i) {
       if (emojiQueue.indexOf(i) < 0) emojiQueue.push(i);
       api('/wled/emoji/add?v=' + i);
-      renderEmojiGrid();
-      renderEmojiQueue();
+      renderEmojiGrid(); renderEmojiQueue();
     }
 
     function removeWledEmoji(pos) {
       emojiQueue.splice(pos, 1);
       api('/wled/emoji/remove?v=' + pos);
-      renderEmojiGrid();
-      renderEmojiQueue();
+      renderEmojiGrid(); renderEmojiQueue();
     }
 
     function clearWledEmoji() {
       emojiQueue = [];
       api('/wled/emoji/clear');
-      renderEmojiGrid();
-      renderEmojiQueue();
+      renderEmojiGrid(); renderEmojiQueue();
     }
 
     function toggleWledEmoji() {
       emojiActive = !emojiActive;
       api('/wled/emoji/toggle');
       document.getElementById('emojiToggleBtn').textContent = emojiActive ? 'Stop' : 'Start';
-      document.getElementById('emojiToggleBtn').className = emojiActive ? 'active' : '';
-      document.getElementById('emojiToggleBtn').style.background = emojiActive ? '#6366f1' : 'rgba(99,102,241,0.6)';
+      document.getElementById('emojiToggleBtn').className = 'btn-start flex1' + (emojiActive ? ' on' : '');
     }
 
     document.getElementById('emojiCycle').oninput = function() {
