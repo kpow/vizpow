@@ -2,13 +2,13 @@
 
 A motion-reactive display controller platform for wearable/portable/alternate displays. Supports three firmware targets across multiple hardware boards:
 
-- **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, info mode, and 20 facial expressions
+- **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, vizCloud connectivity, ESP-NOW mesh, info mode, and 25 facial expressions
 - **vizPow** (ESP32-S3) — Full-featured LED controller with IMU, LCD display, touch control, and 4 display modes
 - **vizPow 8266** (ESP8266) — Lightweight WiFi-only port with 2 display modes (ambient + emoji)
 
-Supported boards: Waveshare ESP32-S3-Touch-LCD-1.69, Waveshare ESP32-S3-Matrix, M5Stack Core S3, and ESP8266 (NodeMCU/Wemos D1 Mini).
+Supported boards: Waveshare ESP32-S3-Touch-LCD-1.69, Waveshare ESP32-S3-LCD-1.3, Waveshare ESP32-S3-Matrix, M5Stack Core S3, and ESP8266 (NodeMCU/Wemos D1 Mini).
 
-All platforms drive an 8x8 WS2812B LED matrix (64 LEDs) with a web interface for control from any phone or browser. LCD targets render to their full screen resolution (240x280 ST7789, 320x240 IPS on M5Stack). Each vizBot device gets a unique network identity (SSID and mDNS hostname) derived from its MAC address, with optional user-settable custom names.
+All platforms drive an 8x8 WS2812B LED matrix (64 LEDs) with a neo-brutalist web control panel for control from any phone or browser. LCD targets render to their full screen resolution (240x280 ST7789, 240x240 ST7789VW on LCD 1.3, 320x240 IPS on M5Stack). Each vizBot device gets a unique network identity (SSID and mDNS hostname) derived from its MAC address, with optional user-settable custom names.
 
 ## Architecture Overview
 
@@ -118,12 +118,12 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 
 ## Features
 
-### vizBot (ESP32-S3-Touch-LCD-1.69 / M5Stack Core S3)
-- **20 Facial Expressions**: Neutral, Happy, Sad, Surprised, Sleepy, Angry, Love, Dizzy, Thinking, Excited, Mischievous, Dead, Skeptical, Worried, Confused, Proud, Shy, Annoyed, Bliss, Focused
-- **4 Personalities**: Chill, Hyper, Grumpy, Sleepy — each with distinct idle behavior and speech patterns
+### vizBot (ESP32-S3-Touch-LCD-1.69 / ESP32-S3-LCD-1.3 / M5Stack Core S3)
+- **25 Facial Expressions**: Neutral, Happy, Sad, Surprised, Chill, Angry, Love, Dizzy, Thinking, Excited, Mischievous, Skeptical, Worried, Confused, Proud, Shy, Annoyed, Focused, Winking, Devious, Shocked, Kissing, Nervous, Glitching, Sassy
+- **3 Built-in Personalities** (+ cloud-managed): Chill, Hyper, Grumpy — each with distinct idle behavior, favorite expressions, and speech patterns. Additional personalities can be synced from vizCloud.
 - **Ambient Overlay**: Hi-res animated effects (plasma, fire, ocean, aurora, etc.) render behind the bot face
 - **Speech Bubbles**: 30+ contextual phrases, reactions, greetings
-- **Activity States**: Active -> Idle -> Sleepy -> Sleeping (interaction wakes)
+- **Activity States**: Active -> Idle (interaction wakes)
 - **Info Mode**: Shake to toggle a weather dashboard with mini eyes, current conditions, and 3-day forecast bar graph
 - **Overlays**: Time (NTP-synced), weather (Open-Meteo API), notifications
 - **WLED Integration**: Forward bot speech and weather data to a WLED-controlled LED matrix via DDP protocol, with palette sync
@@ -135,13 +135,15 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Dual-Core Architecture**: WiFi on Core 0, rendering on Core 1 — no frame drops or connection timeouts
 - **Touch Menu**: Long-press for settings (effects, palettes, brightness, speed, hi-res toggle)
 - **Shake Reactions**: IMU-driven dizzy expression and random utterances
-- **Multi-Board Support**: Runs on Waveshare ESP32-S3-Touch-LCD-1.69, ESP32-S3-Matrix, and M5Stack Core S3 — select target in `config.h`
+- **vizCloud Integration**: Cloud server connectivity for remote control, content sync, scheduled commands, and fleet management via DigitalOcean App Platform with TLS-pinned HTTPS
+- **ESP-NOW Mesh**: Peer-to-peer mesh networking between vizBot devices for coordinated WLED display and state sharing
+- **Multi-Board Support**: Runs on Waveshare ESP32-S3-Touch-LCD-1.69, ESP32-S3-LCD-1.3, ESP32-S3-Matrix, and M5Stack Core S3 — select target in `config.h`
 - **Resolution-Independent Effects**: Hi-res ambient effects adapt to any LCD size (240x280 or 320x240)
 
 ### vizPow (ESP32-S3)
 - **4 Display Modes**: Motion-reactive, ambient, emoji, and bot companion
-- **38 LED Effects**: 12 motion-reactive + 13 ambient + 13 hi-res LCD effects
-- **Bot Mode**: Animated companion face with 20 expressions, 4 personalities, speech bubbles, weather, and time overlays
+- **34 LED Effects**: 12 motion-reactive + 11 ambient + 11 hi-res LCD effects
+- **Bot Mode**: Animated companion face with 25 expressions, 3 personalities, speech bubbles, weather, and time overlays
 - **28 Emoji Sprites**: Palette-indexed compression with fade transitions
 - **Shake to Change Mode**: Shake 3 times to cycle through modes
 - **Hi-Res LCD Rendering**: Full 240x280 resolution effects on the touch LCD
@@ -178,6 +180,27 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 | LCD DC | 4 |
 | LCD RST | 8 |
 | LCD BL | 15 |
+
+### ESP32-S3-LCD-1.3 (vizBot TARGET_LCD)
+
+- **Board**: [Waveshare ESP32-S3-LCD-1.3](https://www.waveshare.com/esp32-s3-lcd-1.3.htm)
+- **MCU**: ESP32-S3 (dual-core 240MHz, WiFi, BLE)
+- **Displays**: 240x240 ST7789VW LCD (square, no touch)
+- **Sensors**: QMI8658 6-axis IMU
+- **Power**: USB-C with battery charging circuit
+- **No touch controller** — bot mode operates via web UI and shake gestures only
+
+| Function | GPIO |
+|----------|------|
+| LED Data | 14 |
+| I2C SDA | 47 |
+| I2C SCL | 48 |
+| LCD SCK | 40 |
+| LCD MOSI | 41 |
+| LCD CS | 39 |
+| LCD DC | 38 |
+| LCD RST | 42 |
+| LCD BL | 20 |
 
 ### ESP32-S3-Matrix (vizPow TARGET_LED)
 
@@ -250,18 +273,20 @@ The vizPow ESP32-S3 firmware supports two board targets via `config.h`:
 
 ### vizBot (ESP32-S3)
 
-vizBot supports three board targets via `config.h`:
+vizBot supports four board targets via `config.h`:
 
 ```cpp
 // Uncomment ONE of these:
-// #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-#define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
-// #define TARGET_CORES3 // M5Stack Core S3 (320x240 IPS, touch, BMI270)
+// #define BOARD_ESP32S3_MATRIX       // Waveshare ESP32-S3-Matrix (8x8 LED)
+// #define BOARD_ESP32S3_LCD_169      // Waveshare ESP32-S3-Touch-LCD-1.69
+// #define BOARD_ESP32S3_LCD_13       // Waveshare ESP32-S3-LCD-1.3 (no touch, battery)
+ #define BOARD_M5CORES3              // M5Stack Core S3
 ```
 
-- **TARGET_LCD**: Primary target. Waveshare ESP32-S3-Touch-LCD-1.69 with 240x280 ST7789 LCD.
-- **TARGET_LED**: LED matrix only, no LCD or touch.
-- **TARGET_CORES3**: M5Stack Core S3 with 320x240 IPS LCD. Uses M5Unified library with a DisplayProxy wrapper for API compatibility. 16MB flash — no custom partition table needed.
+- **BOARD_ESP32S3_LCD_169** (TARGET_LCD): Waveshare ESP32-S3-Touch-LCD-1.69 with 240x280 ST7789 LCD and CST816 touch.
+- **BOARD_ESP32S3_LCD_13** (TARGET_LCD): Waveshare ESP32-S3-LCD-1.3 with 240x240 ST7789VW LCD, no touch, battery powered.
+- **BOARD_M5CORES3** (TARGET_CORES3): M5Stack Core S3 with 320x240 IPS LCD. Uses M5Unified library with a DisplayProxy wrapper for API compatibility. 16MB flash — no custom partition table needed.
+- **BOARD_ESP32S3_MATRIX** (TARGET_LED): LED matrix only, no LCD or touch.
 
 A `layout.h` abstraction derives all UI positions from `LCD_WIDTH` and `LCD_HEIGHT` at compile time, so effects, overlays, and UI elements automatically scale to any screen size.
 
@@ -283,8 +308,10 @@ Install via Arduino Library Manager:
 
 - **FastLED** — LED control
 - **SensorLib** by Lewis He — QMI8658 IMU driver
-- **Arduino_GFX_Library** — LCD display rendering (TARGET_LCD)
+- **LovyanGFX** — LCD display rendering (TARGET_LCD)
 - **M5Unified** — Hardware abstraction for M5Stack Core S3 (TARGET_CORES3 only)
+- **ArduinoJson** — JSON parsing for cloud/weather APIs
+- **LittleFS** — Flash filesystem for cloud content caching
 
 Built-in (no install needed):
 
@@ -374,6 +401,8 @@ Long-press the touch screen to open the settings menu:
 
 ### Web Interface
 
+vizBot features a **neo-brutalist** web control panel — thick black borders, hard offset shadows, saturated accent colors, and flat card surfaces on a warm cream background. The two-column dashboard layout shows all controls at once with collapsible sections and localStorage persistence for collapse state.
+
 - **Mode tabs**: Switch between modes
 - **Effect buttons**: Select current effect
 - **Palette buttons**: Choose color scheme
@@ -410,19 +439,17 @@ Long-press the touch screen to open the settings menu:
 | Rainbow | Diagonal rainbow wave |
 | Fire | Rising flames |
 | Ocean | Perlin noise water |
-| Sparkle | Random twinkles |
 | Matrix | Falling rain drops |
 | Lava | Flowing lava lamp |
 | Aurora | Northern lights |
 | Confetti | Colorful bursts |
-| Comet | Traveling dot |
 | Galaxy | Spinning galaxy |
 | Heart | Pulsing heart animation |
 | Donut | Rotating donut shape |
 
 ### Hi-Res LCD Effects (LCD targets)
 
-When hi-res mode is enabled, ambient effects render at full 240x280 LCD resolution instead of the 8x8 LED grid. All 13 ambient effects have hi-res variants.
+When hi-res mode is enabled, ambient effects render at full 240x280 LCD resolution instead of the 8x8 LED grid. All 11 ambient effects have hi-res variants.
 
 ### Emoji Mode (vizPow only)
 
@@ -439,22 +466,23 @@ Heart, Star, Smiley, Check, X, Question, Exclaim, Sun, Moon, Cloud, Rain, Lightn
 
 An animated desktop companion character rendered on the 240x280 LCD. The bot has a full face with eyes, eyebrows, pupils, and mouth — all procedurally drawn and smoothly animated.
 
-#### Expressions (20 total)
+#### Expressions (25 total)
 
-Neutral, Happy, Sad, Surprised, Sleepy, Angry, Love (heart eyes), Dizzy (spiral eyes), Thinking, Excited (star eyes), Mischievous, Dead (X eyes), Skeptical, Worried, Confused, Proud, Shy, Annoyed, Bliss, Focused
+Neutral, Happy, Sad, Surprised, Chill, Angry, Love (heart eyes), Dizzy (spiral eyes), Thinking, Excited (star eyes), Mischievous, Skeptical, Worried, Confused, Proud, Shy, Annoyed, Focused, Winking, Devious, Shocked, Kissing, Nervous, Glitching, Sassy
 
-#### Personalities (4 presets)
+#### Personalities (3 built-in + cloud-managed)
 
 | Personality | Behavior |
 |-------------|----------|
 | **Chill** | Lively and expressive, balanced idle behavior (default) |
 | **Hyper** | Constant expression changes and chatter, never sits still |
 | **Grumpy** | Annoyed and sarcastic, still chatty |
-| **Sleepy** | Drowsy, falls asleep quickly |
+
+Additional personalities can be synced from vizCloud and cached in LittleFS (up to 12 total runtime slots).
 
 #### Activity States
 
-**Active** -> **Idle** -> **Sleepy** -> **Sleeping**
+**Active** -> **Idle**
 
 - Any interaction (touch, shake, motion) wakes the bot
 - Shake triggers dizzy reaction, tap triggers random expressions
@@ -552,9 +580,9 @@ When running multiple vizbots, each device needs a unique network identity. vizB
 
 | Endpoint | Description |
 |----------|-------------|
-| `/bot/expression?v=N` | Set bot expression (0-19) |
+| `/bot/expression?v=N` | Set bot expression (0-24) |
 | `/bot/say?v=text` | Show speech bubble with custom text |
-| `/bot/personality?v=N` | Set personality (0=Chill, 1=Hyper, 2=Grumpy, 3=Sleepy) |
+| `/bot/personality?v=N` | Set personality (0=Chill, 1=Hyper, 2=Grumpy, 3+=cloud) |
 | `/bot/background?v=N` | Set face color (0-4) |
 | `/bot/background?style=N` | Set background style (0-4, 4=ambient overlay) |
 | `/bot/time?v=1\|0` | Enable/disable time overlay |
@@ -623,33 +651,41 @@ vizpow/
 │   ├── settings.h               # NVS persistence layer (debounced writes)
 │   ├── web_server.h             # Web UI HTML + API handlers + captive portal endpoints
 │   ├── bot_mode.h               # Bot state machine, personality system, update/render
-│   ├── bot_faces.h              # 20 expression definitions + interpolation
+│   ├── bot_faces.h              # 25 expression definitions + interpolation
 │   ├── bot_eyes.h               # Eye/pupil/brow/mouth rendering, look-around, blink
 │   ├── bot_sayings.h            # Categorized speech bubble phrase pools
 │   ├── bot_overlays.h           # Speech bubbles, time, weather, notification overlays
 │   ├── info_mode.h              # Info mode — weather dashboard with mini eyes
 │   ├── weather_data.h           # Open-Meteo API client, geocoding, forecast parsing
 │   ├── weather_icons.h          # Weather condition icons (44px sprites)
+│   ├── cloud_client.h           # vizCloud HTTPS client — registration, sync, command dispatch
+│   ├── content_cache.h          # LittleFS cloud content caching (sayings, personalities)
+│   ├── esp_now_mesh.h           # ESP-NOW peer-to-peer mesh networking
 │   ├── wled_display.h           # WLED integration — DDP pixel control, state management
-│   ├── wled_font.h              # 5x7 pixel font for WLED text rendering
+│   ├── wled_emoji.h             # WLED emoji sprite slideshow mode
+│   ├── wled_font.h              # 3x5 pixel font for WLED text rendering
 │   ├── wled_weather_view.h      # Weather card cycling on WLED display
+│   ├── wled_scheduled_content.h # Periodic weather/emoji content cycling on WLED
 │   ├── touch_control.h          # Touch menu gestures and UI (shared I2C mutex)
-│   ├── effects_ambient.h        # 13 ambient effects (resolution-independent hi-res variants)
+│   ├── audio_analysis.h         # Microphone audio analysis (Core S3 — spike, speech, silence)
+│   ├── proximity_light.h        # Proximity/light sensor (Core S3 — peek-a-boo, cover detection)
+│   ├── effects_ambient.h        # 11 ambient effects (resolution-independent hi-res variants)
 │   ├── palettes.h               # 15 color palette definitions
-│   ├── display_lcd.h            # LCD rendering + GFX initialization
-│   ├── partitions.csv           # Custom partition table (+2MB app space on 4MB boards)
-│   └── SensorQMI8658.hpp        # IMU driver
+│   ├── emoji_sprites.h          # Pixel art sprite data for WLED emoji display
+│   ├── display_lcd.h            # LovyanGFX LCD rendering + DisplayProxy initialization
+│   ├── tween.h                  # TweenManager — 16-slot animation engine with 8 easing functions
+│   └── partitions.csv           # Custom partition table (+2MB app space on 4MB boards)
 ├── vizpow/                      # ESP32-S3 version (full-featured, single-threaded)
 │   ├── vizpow.ino               # Main sketch — setup(), loop(), shake detection
 │   ├── config.h                 # Hardware pins, constants, board selection
 │   ├── palettes.h               # 15 color palette definitions
 │   ├── effects_motion.h         # 12 motion-reactive effects
-│   ├── effects_ambient.h        # 13 ambient effects + 13 hi-res LCD variants
+│   ├── effects_ambient.h        # 11 ambient effects + 11 hi-res LCD variants
 │   ├── effects_emoji.h          # Emoji queue, display, transitions, random fill
 │   ├── emoji_sprites.h          # 28 pixel art sprites (palette-indexed compression)
 │   ├── display_lcd.h            # LCD rendering (8x8 simulation + hi-res mode)
 │   ├── bot_mode.h               # Bot mode state machine, update/render pipeline
-│   ├── bot_faces.h              # 20 expression definitions + interpolation
+│   ├── bot_faces.h              # 25 expression definitions + interpolation
 │   ├── bot_eyes.h               # Eye/pupil/brow/mouth rendering, look-around, blink
 │   ├── bot_sayings.h            # Categorized speech bubble phrase pools
 │   ├── bot_overlays.h           # Speech bubbles, time, weather, notification overlays
@@ -660,7 +696,7 @@ vizpow/
 │   ├── vizpow_8266.ino          # Main sketch — 2 modes, no IMU/LCD/touch
 │   ├── config.h                 # ESP8266 pin config (GPIO2)
 │   ├── palettes.h               # Same 15 palettes
-│   ├── effects_ambient.h        # 13 ambient effects
+│   ├── effects_ambient.h        # 11 ambient effects
 │   ├── effects_emoji.h          # Emoji queue and display
 │   ├── emoji_sprites.h          # 41 sprites (PROGMEM optimized)
 │   └── web_server.h             # Web UI (2-mode variant)
@@ -694,7 +730,7 @@ The boot sequence populates a `SystemStatus` struct. If a subsystem fails (IMU, 
 - [x] Hi-res LCD rendering mode
 - [x] Touch menu control
 - [x] ESP8266 lightweight port
-- [x] Bot companion mode with 20 expressions and 4 personalities
+- [x] Bot companion mode with 25 expressions and 3 personalities (+ cloud-managed)
 - [x] Ambient overlay — bot face over animated backgrounds
 - [x] NTP time sync with web-configurable WiFi
 - [x] Live weather overlay via Open-Meteo API
@@ -714,10 +750,16 @@ The boot sequence populates a `SystemStatus` struct. If a subsystem fails (IMU, 
 - [x] Custom partition table — +2MB app space on 4MB flash boards
 - [x] WLED weather view cycling with fade transitions
 - [x] WLED palette sync — harmonize bot LCD background with LED matrix
+- [x] vizCloud integration — remote control, content sync, scheduled commands, fleet management
+- [x] ESP-NOW mesh networking — peer-to-peer state sharing and coordinated WLED display
+- [x] LovyanGFX migration — replaces Arduino_GFX for TARGET_LCD with DMA SPI
+- [x] Tween animation engine — 16-slot TweenManager with 8 easing functions
+- [x] Audio-reactive expressions (Core S3) — spike/speech/silence detection via built-in mic
+- [x] Proximity-reactive expressions (Core S3) — peek-a-boo, hand wave, cover detection
+- [x] Neo-brutalist web control panel — two-column dashboard with collapsible sections
+- [x] LCD 1.3 board support (Waveshare ESP32-S3-LCD-1.3, 240x240, no touch, battery)
 - [ ] Bluetooth Low Energy control
 - [ ] Custom effect creator
-- [ ] Sound reactivity (external mic)
-- [ ] Multiple device sync
 - [ ] Enclosure design for wearable medallion
 - [ ] Battery level indicator
 - [ ] OTA firmware updates
@@ -734,5 +776,5 @@ MIT License - see [LICENSE](LICENSE) file.
 
 - [FastLED](https://github.com/FastLED/FastLED) — LED animation library
 - [SensorLib](https://github.com/lewisxhe/SensorLib) — IMU driver
-- [Arduino_GFX](https://github.com/moononournation/Arduino_GFX) — LCD graphics library
+- [LovyanGFX](https://github.com/lovyan03/LovyanGFX) — LCD graphics library (DMA SPI)
 - [Waveshare](https://www.waveshare.com/) — Hardware
