@@ -221,7 +221,7 @@ public:
       cfg.panel_width  = LCD_WIDTH;  // 240
       cfg.panel_height = LCD_HEIGHT; // 280
       cfg.offset_x    = 0;
-      cfg.offset_y    = 20;          // ST7789V2 row offset for 280px height
+      cfg.offset_y    = LCD_OFFSET_Y; // ST7789 row offset (board-specific, from config.h)
       cfg.offset_rotation = 0;
       cfg.invert      = true;        // IPS panel needs inversion
       cfg.rgb_order   = false;
@@ -344,28 +344,30 @@ struct DisplayProxy {
   void flushCanvas() {
     if (_dp_canvas && _dp_canvas_active) {
       if (hologramMirrorLCD) {
-        // Horizontal flip in-place: swap pixels left↔right per row
+        // Vertical flip for Pepper's ghost prism: swap rows top↔bottom
         uint16_t w = _dp_canvas->width();
         uint16_t h = _dp_canvas->height();
-        uint16_t half = w >> 1;
+        uint16_t halfH = h >> 1;
         if (_dp_canvas->getColorDepth() > 8) {
           uint16_t* buf = (uint16_t*)_dp_canvas->getBuffer();
-          for (uint16_t y = 0; y < h; y++) {
-            uint16_t* row = buf + y * w;
-            for (uint16_t x = 0; x < half; x++) {
-              uint16_t tmp = row[x];
-              row[x] = row[w - 1 - x];
-              row[w - 1 - x] = tmp;
+          for (uint16_t y = 0; y < halfH; y++) {
+            uint16_t* topRow = buf + y * w;
+            uint16_t* botRow = buf + (h - 1 - y) * w;
+            for (uint16_t x = 0; x < w; x++) {
+              uint16_t tmp = topRow[x];
+              topRow[x] = botRow[x];
+              botRow[x] = tmp;
             }
           }
         } else {
           uint8_t* buf = (uint8_t*)_dp_canvas->getBuffer();
-          for (uint16_t y = 0; y < h; y++) {
-            uint8_t* row = buf + y * w;
-            for (uint16_t x = 0; x < half; x++) {
-              uint8_t tmp = row[x];
-              row[x] = row[w - 1 - x];
-              row[w - 1 - x] = tmp;
+          for (uint16_t y = 0; y < halfH; y++) {
+            uint8_t* topRow = buf + y * w;
+            uint8_t* botRow = buf + (h - 1 - y) * w;
+            for (uint16_t x = 0; x < w; x++) {
+              uint8_t tmp = topRow[x];
+              topRow[x] = botRow[x];
+              botRow[x] = tmp;
             }
           }
         }

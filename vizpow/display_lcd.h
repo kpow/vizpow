@@ -104,13 +104,15 @@ void renderToLCD() {
     return;
   }
 
-  extern CRGB leds[];  // Reference the global leds array from vizpow.ino
+  extern CRGB leds[];      // Reference the global leds array from vizpow.ino
+  extern uint8_t brightness; // Reference brightness for LCD scaling
 
   for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
     for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
       // Get the LED color using the XY mapping
       uint16_t ledIndex = XY(x, y);
       CRGB color = leds[ledIndex];
+      color.nscale8_video(brightness);  // Apply brightness scaling for LCD
 
       // Convert to RGB565
       uint16_t color565 = crgbToRgb565(color);

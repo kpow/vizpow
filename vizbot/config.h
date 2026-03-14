@@ -5,15 +5,28 @@
 // Board Selection - JUST CHANGE THIS ONE LINE
 // ============================================================================
 // Uncomment ONE of these:
-// #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-#define TARGET_LCD    // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
-// #define TARGET_CORES3    // M5Stack Core S3 (320x240 IPS, touch, BMI270)
+// #define BOARD_ESP32S3_MATRIX       // Waveshare ESP32-S3-Matrix (8x8 LED)
+// #define BOARD_ESP32S3_LCD_169       // Waveshare ESP32-S3-Touch-LCD-1.69
+// #define BOARD_ESP32S3_LCD_13       // Waveshare ESP32-S3-LCD-1.3 (no touch, battery)
+ #define BOARD_M5CORES3             // M5Stack Core S3
 
 // ============================================================================
-// Auto-configuration based on target
+// Auto-derive TARGET from BOARD
+// ============================================================================
+#if defined(BOARD_ESP32S3_MATRIX)
+  #define TARGET_LED
+#elif defined(BOARD_ESP32S3_LCD_169) || defined(BOARD_ESP32S3_LCD_13)
+  #define TARGET_LCD
+#elif defined(BOARD_M5CORES3)
+  #define TARGET_CORES3
+#else
+  #error "Select a board: BOARD_ESP32S3_MATRIX, BOARD_ESP32S3_LCD_169, BOARD_ESP32S3_LCD_13, or BOARD_M5CORES3"
+#endif
+
+// ============================================================================
+// Target-level configuration (shared by all boards of same target)
 // ============================================================================
 #if defined(TARGET_LED)
-  #define BOARD_ESP32S3_MATRIX
   #define DISPLAY_LED_ONLY
   // Power-saving profile for battery-powered LED matrix
   #define POWER_SAVE_ENABLED
@@ -31,12 +44,10 @@
   // No LCD — GfxDevice is a stub (declared but never used)
   typedef void GfxDevice;
 #elif defined(TARGET_LCD)
-  #define BOARD_ESP32S3_TOUCH_LCD
   #define DISPLAY_LCD_ONLY
   #define HIRES_ENABLED  // Hi-res ambient effects (PSRAM provides heap headroom)
   // Full power profile for USB-powered LCD board
   #define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Full TX — USB powered, needs range
-  #define OVERLAY_BUBBLE_Y 182              // Closer to mouth, taller bubble (default LCD_HEIGHT-68)
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
@@ -46,7 +57,6 @@
   struct DisplayProxy;
   typedef DisplayProxy GfxDevice;
 #elif defined(TARGET_CORES3)
-  #define BOARD_M5CORES3
   #define DISPLAY_LCD_ONLY
   #define HIRES_ENABLED  // Hi-res ambient for bot background overlay
   #define TOUCH_ENABLED
@@ -60,8 +70,6 @@
   // Forward-declared here so headers can use 'extern GfxDevice *gfx;'
   struct DisplayProxy;
   typedef DisplayProxy GfxDevice;
-#else
-  #error "Please define TARGET_LED, TARGET_LCD, or TARGET_CORES3"
 #endif
 
 // Manual override: uncomment to enable both displays (if hardware supports)
@@ -77,8 +85,8 @@
   #define I2C_SDA 11
   #define I2C_SCL 12
 
-#elif defined(BOARD_ESP32S3_TOUCH_LCD)
-  // ESP32-S3-Touch-LCD-1.69 board pins
+#elif defined(BOARD_ESP32S3_LCD_169)
+  // Waveshare ESP32-S3-Touch-LCD-1.69 board pins
   #define DATA_PIN 14              // External LED matrix data pin (if used)
   #define I2C_SDA 11               // IMU/Touch I2C SDA
   #define I2C_SCL 10               // IMU/Touch I2C SCL
@@ -94,10 +102,35 @@
   // LCD dimensions
   #define LCD_WIDTH 240
   #define LCD_HEIGHT 280
+  #define LCD_OFFSET_Y 20          // ST7789V2 row offset for 280px panel height
+
+  // Speech bubble position (below face on taller 280px display)
+  #define OVERLAY_BUBBLE_Y 210
 
   // Touch controller (CST816T) - shares I2C bus with IMU
   #define TOUCH_I2C_ADDR 0x15
   #define TOUCH_ENABLED
+
+#elif defined(BOARD_ESP32S3_LCD_13)
+  // Waveshare ESP32-S3-LCD-1.3 board pins (no touch, battery powered)
+  #define DATA_PIN 14              // External LED matrix data pin (if used)
+  #define I2C_SDA 47               // IMU I2C SDA
+  #define I2C_SCL 48               // IMU I2C SCL
+
+  // LCD pins (ST7789VW)
+  #define LCD_SCK 40
+  #define LCD_MOSI 41
+  #define LCD_CS 39
+  #define LCD_DC 38
+  #define LCD_RST 42
+  #define LCD_BL 20
+
+  // LCD dimensions (square 1.3" display)
+  #define LCD_WIDTH 240
+  #define LCD_HEIGHT 240
+  #define LCD_OFFSET_Y 0           // No row offset for 240x240 panel
+
+  // No touch controller on this board
 
 #elif defined(BOARD_M5CORES3)
   // M5Stack Core S3 - LCD, touch, and IMU managed by M5Unified
@@ -118,7 +151,12 @@
   #define BOT_FACE_CY 105
 
 #else
-  #error "Please define a board: BOARD_ESP32S3_MATRIX, BOARD_ESP32S3_TOUCH_LCD, or BOARD_M5CORES3"
+  #error "Unknown board — add pin definitions for your board above"
+#endif
+
+// Default LCD_OFFSET_Y for boards that don't define it (e.g. Core S3 uses M5Unified)
+#ifndef LCD_OFFSET_Y
+  #define LCD_OFFSET_Y 0
 #endif
 
 // ============================================================================

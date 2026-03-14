@@ -82,8 +82,8 @@ const char webpage[] PROGMEM = R"rawliteral(
   <div class="card">
     <h2>Settings</h2>
     <div class="slider-container">
-      <div class="slider-label"><span>Brightness</span><span id="brightnessVal">15</span></div>
-      <input type="range" id="brightness" min="1" max="50" value="15">
+      <div class="slider-label"><span>Brightness</span><span id="brightnessVal">250</span></div>
+      <input type="range" id="brightness" min="1" max="255" value="250">
     </div>
     <div class="slider-container">
       <div class="slider-label"><span>Speed</span><span id="speedVal">20</span></div>
@@ -101,7 +101,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     const motionEffects = ["Tilt Ball", "Motion Plasma", "Shake Sparkle", "Tilt Wave", "Tilt Ripple", "Gyro Swirl", "Shake Explode"];
     const ambientEffects = ["Plasma", "Rainbow", "Fire", "Ocean", "Matrix", "Lava", "Aurora", "Confetti", "Galaxy", "Heart", "Donut"];
     const palettes = ["Rainbow", "Ocean", "Lava", "Forest", "Party", "Heat", "Cloud", "Sunset", "Cyber", "Toxic", "Ice", "Blood", "Vaporwave", "Forest2", "Gold"];
-    let state = { effect: 0, palette: 0, brightness: 15, speed: 20, autoCycle: false, currentMode: 0 };
+    let state = { effect: 0, palette: 0, brightness: 250, speed: 20, autoCycle: false, currentMode: 0 };
     let emojiQueue = [];
     let emojiAutoCycle = true;
 
@@ -299,7 +299,7 @@ void handlePalette() {
 
 void handleBrightness() {
   if (server.hasArg("v")) {
-    brightness = constrain(server.arg("v").toInt(), 1, 50);
+    brightness = constrain(server.arg("v").toInt(), 1, 255);
     FastLED.setBrightness(brightness);
   }
   server.send(200, "text/plain", "OK");

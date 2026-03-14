@@ -50,6 +50,21 @@ const char webpage[] PROGMEM = R"rawliteral(
   </div>
 
   <div class="card">
+    <h2>Personality</h2>
+    <select id="personalitySelect" onchange="setPersonality(this.value)"
+      style="width:100%;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px;margin-bottom:8px">
+    </select>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+      <label style="font-size:13px;opacity:0.8">Rotate:</label>
+      <input type="checkbox" id="rotateCheck" onchange="toggleRotation()">
+      <label style="font-size:13px;opacity:0.8">every</label>
+      <input type="number" id="rotateMin" value="5" min="1" max="60"
+        style="width:50px;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:13px">
+      <label style="font-size:13px;opacity:0.8">min</label>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Face Color</h2>
     <div class="grid4" id="botColors"></div>
     <h2 style="margin-top:15px">Background</h2>
@@ -95,6 +110,22 @@ const char webpage[] PROGMEM = R"rawliteral(
       </div>
       <div id="locationInfo" style="color:#6b7;font-size:12px;margin-top:6px"></div>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Scheduled Content</h2>
+    <div class="toggle-row">
+      <span>Auto Weather + Emoji</span>
+      <div class="toggle" id="schedToggle" onclick="toggleSched()"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+      <label style="font-size:13px;opacity:0.8">Cycle every</label>
+      <input type="number" id="schedMin" value="30" min="1" max="120"
+        style="width:60px;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:13px"
+        onchange="updateSched()">
+      <label style="font-size:13px;opacity:0.8">min</label>
+    </div>
+    <div id="schedStatus" style="font-size:12px;color:#aaa;margin-top:6px"></div>
   </div>
 
   <div class="card">
@@ -199,6 +230,38 @@ const char webpage[] PROGMEM = R"rawliteral(
     }
 
     function setBotExpr(i) { api('/bot/expression?v=' + i); }
+    function setPersonality(i) { api('/bot/personality?v=' + i); }
+    function toggleRotation() {
+      const on = document.getElementById('rotateCheck').checked;
+      const min = parseInt(document.getElementById('rotateMin').value) || 5;
+      if (on) {
+        const sel = document.getElementById('personalitySelect');
+        const all = [];
+        for (let j = 0; j < sel.options.length; j++) all.push(parseInt(sel.options[j].value));
+        fetch('/bot/personality/rotation', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({list: all, interval: min * 60000})
+        });
+      } else {
+        const cur = document.getElementById('personalitySelect').value;
+        api('/bot/personality?v=' + cur);
+      }
+    }
+    async function loadPersonalities() {
+      try {
+        const r = await fetch('/bot/personality');
+        const d = await r.json();
+        const sel = document.getElementById('personalitySelect');
+        sel.innerHTML = d.personalities.map(p =>
+          '<option value="' + p.index + '"' + (p.index === d.current ? ' selected' : '') + '>'
+          + p.name + (p.cloud ? ' (cloud)' : '') + '</option>').join('');
+        document.getElementById('rotateCheck').checked = d.rotInterval > 0;
+        if (d.rotInterval > 0) {
+          document.getElementById('rotateMin').value = Math.round(d.rotInterval / 60000);
+        }
+      } catch(e) {}
+    }
+    loadPersonalities();
     function sendBotSay() {
       const input = document.getElementById('botSayInput');
       if (input.value.trim()) {
@@ -218,6 +281,30 @@ const char webpage[] PROGMEM = R"rawliteral(
       document.getElementById('hiResToggle').className = 'toggle ' + (hiResOn ? 'on' : '');
       api('/bot/hires?v=' + (hiResOn ? 1 : 0));
     }
+    let schedOn = false;
+    function toggleSched() {
+      schedOn = !schedOn;
+      document.getElementById('schedToggle').className = 'toggle ' + (schedOn ? 'on' : '');
+      api('/schedule?enabled=' + (schedOn ? 1 : 0));
+    }
+    function updateSched() {
+      const min = document.getElementById('schedMin').value;
+      api('/schedule?intervalMin=' + min);
+    }
+    async function loadSchedule() {
+      try {
+        const r = await fetch('/schedule');
+        const d = await r.json();
+        schedOn = d.enabled;
+        document.getElementById('schedToggle').className = 'toggle ' + (schedOn ? 'on' : '');
+        document.getElementById('schedMin').value = d.intervalMin;
+        const phases = ['Idle','Weather','Gap','Emoji'];
+        document.getElementById('schedStatus').textContent =
+          d.isOwner ? 'Owner \u2022 Phase: ' + (phases[d.phase] || 'Idle') : (d.enabled ? 'Deferred to another bot' : '');
+      } catch(e) {}
+    }
+    loadSchedule();
+
     let infoOn = false;
     function toggleInfo() {
       infoOn = !infoOn;
@@ -705,6 +792,75 @@ void handleBotAmbient() {
 }
 
 // ============================================================================
+// Personality Handlers
+// ============================================================================
+
+extern void setBotPersonality(uint8_t index);
+extern uint8_t getBotPersonality();
+extern RuntimePersonality runtimePersonalities[];
+extern uint8_t runtimePersonalityCount;
+
+void handleBotPersonality() {
+  if (server.method() == HTTP_GET) {
+    // Return current personality + list of all loaded
+    String json = "{\"current\":";
+    json += botMode.personalityIndex;
+    json += ",\"rotInterval\":";
+    json += botMode.personalityRotIntervalMs;
+    json += ",\"rotList\":[";
+    for (uint8_t i = 0; i < botMode.personalityListCount; i++) {
+      if (i > 0) json += ",";
+      json += botMode.personalityList[i];
+    }
+    json += "],\"personalities\":[";
+    for (uint8_t i = 0; i < runtimePersonalityCount; i++) {
+      if (i > 0) json += ",";
+      json += "{\"index\":";
+      json += i;
+      json += ",\"name\":\"";
+      json += runtimePersonalities[i].name;
+      json += "\",\"cloud\":";
+      json += (runtimePersonalities[i].cloudId[0] != '\0') ? "true" : "false";
+      json += "}";
+    }
+    json += "]}";
+    server.send(200, "application/json", json);
+  } else {
+    // POST: set single personality (stops rotation)
+    if (server.hasArg("v")) {
+      uint8_t idx = constrain(server.arg("v").toInt(), 0, runtimePersonalityCount - 1);
+      cmdSetPersonality(idx);
+    }
+    server.send(200, "text/plain", "OK");
+  }
+}
+
+void handleBotPersonalityRotation() {
+  // POST body: JSON with list[] and interval
+  if (server.hasArg("plain")) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (err) {
+      server.send(400, "text/plain", "Invalid JSON");
+      return;
+    }
+
+    uint32_t interval = doc["interval"] | 300000;
+    botMode.personalityRotIntervalMs = interval;
+    botMode.lastPersonalityRotMs = millis();
+    botMode.personalityListCount = 0;
+
+    JsonArray list = doc["list"];
+    if (list) {
+      for (size_t i = 0; i < list.size() && i < MAX_RUNTIME_PERSONALITIES; i++) {
+        botMode.personalityList[botMode.personalityListCount++] = list[i] | 0;
+      }
+    }
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+// ============================================================================
 // Info Mode Handlers
 // ============================================================================
 
@@ -1031,6 +1187,38 @@ void handleBotMic() {
 // ALL domains to 192.168.4.1 (us). We return a 302 redirect so the OS
 // detects "captive portal" and auto-opens the control page.
 
+// ============================================================================
+// Schedule Handlers
+// ============================================================================
+
+extern ScheduledContentState schedContent;
+extern void saveScheduleSettings();
+
+void handleSchedule() {
+  if (server.method() == HTTP_GET) {
+    String json = "{\"enabled\":";
+    json += schedContent.enabled ? "true" : "false";
+    json += ",\"intervalMin\":";
+    json += schedContent.cycleIntervalMs / 60000;
+    json += ",\"phase\":";
+    json += (uint8_t)schedContent.phase;
+    json += ",\"isOwner\":";
+    json += schedContent.isOwner ? "true" : "false";
+    json += "}";
+    server.send(200, "application/json", json);
+  } else {
+    if (server.hasArg("enabled")) {
+      schedContent.enabled = server.arg("enabled") == "1";
+    }
+    if (server.hasArg("intervalMin")) {
+      uint32_t min = constrain(server.arg("intervalMin").toInt(), 1, 120);
+      schedContent.cycleIntervalMs = min * 60000;
+    }
+    saveScheduleSettings();
+    server.send(200, "text/plain", "OK");
+  }
+}
+
 void handleCaptiveRedirect() {
   // In STA-only mode, no captive portal — just serve root
   String ip = sysStatus.staConnected ? sysStatus.staIP.toString() : WiFi.softAPIP().toString();
@@ -1050,6 +1238,8 @@ void setupWebServer() {
   server.on("/bot/hires", handleBotHiRes);
   server.on("/bot/background", handleBotBackground);
   server.on("/bot/ambient", handleBotAmbient);
+  server.on("/bot/personality", handleBotPersonality);
+  server.on("/bot/personality/rotation", handleBotPersonalityRotation);
 
   // Info mode endpoints
   server.on("/info/toggle", handleInfoToggle);
@@ -1087,6 +1277,9 @@ void setupWebServer() {
   server.on("/cloud/status", handleCloudStatus);
   server.on("/cloud/sync", handleCloudSync);
   #endif
+
+  // Schedule endpoints
+  server.on("/schedule", handleSchedule);
 
   // Captive portal detection endpoints — all redirect to root
   server.on("/generate_204", handleCaptiveRedirect);          // Android

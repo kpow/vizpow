@@ -76,7 +76,7 @@ static uint8_t menuPage = 0;  // 0 = main, 1 = settings
 #define LONG_PRESS_MS 600  // Hold for 600ms to open menu
 
 // LCD backlight brightness (0-255)
-static uint8_t lcdBrightness = 200;
+static uint8_t lcdBrightness = 255;
 
 // Speed control (external from main sketch)
 extern uint8_t speed;
