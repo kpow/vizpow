@@ -110,7 +110,7 @@ struct BotExpression {
 #define EXPR_HAPPY      1
 #define EXPR_SAD        2
 #define EXPR_SURPRISED  3
-#define EXPR_SLEEPY     4
+#define EXPR_CHILL      4
 #define EXPR_ANGRY      5
 #define EXPR_LOVE       6
 #define EXPR_DIZZY      7
@@ -179,15 +179,15 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .transitionMs = 150
   },
 
-  // 4: SLEEPY — closed eyes with horizontal line, slight open mouth
+  // 4: CHILL — relaxed half-lidded eyes, gentle smile
   {
-    .eyeWhiteW = 50, .eyeWhiteH = 22, .eyeSpacing = 44,
-    .pupilRadius = 12, .pupilOffsetX = 0, .pupilOffsetY = 4,
-    .browOffsetY = -6, .browLength = 30, .browThickness = 6,
-    .browAngleL = -5, .browAngleR = -5, .browVisible = true,
-    .mouthType = MOUTH_OPEN_O, .mouthWidth = 8, .mouthOffsetY = 58, .mouthCurve = 6,
-    .eyeMode = EYE_CLOSED,
-    .transitionMs = 500
+    .eyeWhiteW = 48, .eyeWhiteH = 38, .eyeSpacing = 44,
+    .pupilRadius = 14, .pupilOffsetX = 0, .pupilOffsetY = 2,
+    .browOffsetY = -8, .browLength = 28, .browThickness = 5,
+    .browAngleL = -3, .browAngleR = -3, .browVisible = true,
+    .mouthType = MOUTH_SMILE, .mouthWidth = 22, .mouthOffsetY = 56, .mouthCurve = 10,
+    .eyeMode = EYE_HALF,
+    .transitionMs = 400
   },
 
   // 5: ANGRY — narrowed sharp eyes, V-brows, gritting mouth

@@ -30,176 +30,196 @@ const char webpage[] PROGMEM = R"rawliteral(
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>VizBot</title>
-  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;min-height:100vh;padding:20px}h1{text-align:center;margin-bottom:20px;font-size:24px}h2{font-size:14px;color:#888;margin-bottom:10px;text-transform:uppercase}.card{background:rgba(255,255,255,.1);border-radius:16px;padding:20px;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}button{background:rgba(255,255,255,.15);border:none;color:#fff;padding:14px 10px;border-radius:12px;font-size:13px;cursor:pointer}button.active{background:#6366f1}.slider-container{margin:15px 0}.slider-label{display:flex;justify-content:space-between;margin-bottom:8px}input[type=range]{width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,.2);-webkit-appearance:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:#6366f1;cursor:pointer}.toggle-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0}.toggle{width:52px;height:32px;background:rgba(255,255,255,.2);border-radius:16px;position:relative;cursor:pointer}.toggle.on{background:#6366f1}.toggle::after{content:'';position:absolute;width:26px;height:26px;background:#fff;border-radius:50%;top:3px;left:3px;transition:transform .3s}.toggle.on::after{transform:translateX(20px)}.status{text-align:center;color:#888;font-size:12px;margin-top:10px}</style>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;min-height:100vh;padding:20px}h1{text-align:center;margin-bottom:12px;font-size:24px}h2{font-size:14px;color:#888;margin-bottom:10px;text-transform:uppercase}.card{background:rgba(255,255,255,.1);border-radius:16px;padding:20px;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}button{background:rgba(255,255,255,.15);border:none;color:#fff;padding:14px 10px;border-radius:12px;font-size:13px;cursor:pointer}button.active{background:#6366f1}.slider-container{margin:15px 0}.slider-label{display:flex;justify-content:space-between;margin-bottom:8px}input[type=range]{width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,.2);-webkit-appearance:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:#6366f1;cursor:pointer}.toggle-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0}.toggle{width:52px;height:32px;background:rgba(255,255,255,.2);border-radius:16px;position:relative;cursor:pointer}.toggle.on{background:#6366f1}.toggle::after{content:'';position:absolute;width:26px;height:26px;background:#fff;border-radius:50%;top:3px;left:3px;transition:transform .3s}.toggle.on::after{transform:translateX(20px)}.status{text-align:center;color:#888;font-size:12px;margin-top:10px}.tabs{display:flex;gap:4px;margin-bottom:16px;justify-content:center}.tab{background:rgba(255,255,255,.1);border:none;color:#fff;padding:10px 20px;border-radius:12px 12px 0 0;font-size:14px;cursor:pointer;flex:1;max-width:180px}.tab.active{background:rgba(99,102,241,.5)}.tab-panel{display:none}.tab-panel.active{display:block}@media(min-width:900px){body{padding:30px 40px;max-width:1200px;margin:0 auto}.tab-panel.active{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}.card{margin-bottom:0}.grid4{grid-template-columns:repeat(5,1fr)}}</style>
 </head>
 <body>
   <h1>VizBot Control</h1>
 
-  <div class="card">
-    <h2>Expressions</h2>
-    <div class="grid4" id="botExpressions"></div>
+  <div class="tabs">
+    <button class="tab active" onclick="showTab(0)">Face</button>
+    <button class="tab" onclick="showTab(1)">Settings</button>
+    <button class="tab" onclick="showTab(2)">Network</button>
   </div>
 
-  <div class="card">
-    <h2>Say Something</h2>
-    <div style="display:flex;gap:8px">
-      <input type="text" id="botSayInput" placeholder="Type a message..."
-        style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="60">
-      <button onclick="sendBotSay()" style="padding:10px 16px">Say</button>
+  <!-- Tab 0: Face -->
+  <div class="tab-panel active" id="tab0">
+    <div class="card">
+      <h2>Expressions</h2>
+      <div class="grid4" id="botExpressions"></div>
     </div>
-  </div>
 
-  <div class="card">
-    <h2>Personality</h2>
-    <select id="personalitySelect" onchange="setPersonality(this.value)"
-      style="width:100%;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px;margin-bottom:8px">
-    </select>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-      <label style="font-size:13px;opacity:0.8">Rotate:</label>
-      <input type="checkbox" id="rotateCheck" onchange="toggleRotation()">
-      <label style="font-size:13px;opacity:0.8">every</label>
-      <input type="number" id="rotateMin" value="5" min="1" max="60"
-        style="width:50px;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:13px">
-      <label style="font-size:13px;opacity:0.8">min</label>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Face Color</h2>
-    <div class="grid4" id="botColors"></div>
-    <h2 style="margin-top:15px">Background</h2>
-    <div class="grid" id="botBgStyles"></div>
-    <div id="ambientSection" style="display:none;margin-top:15px">
-      <h2>Ambient Animation</h2>
-      <div class="grid" id="ambientEffects"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Settings</h2>
-    <div class="slider-container">
-      <div class="slider-label"><span>Brightness</span><span id="brightnessVal">15</span></div>
-      <input type="range" id="brightness" min="1" max="50" value="15">
-    </div>
-    <div class="slider-container">
-      <div class="slider-label"><span>Volume</span><span id="volumeVal">120</span></div>
-      <input type="range" id="volume" min="0" max="255" value="120">
-    </div>
-    <div class="toggle-row">
-      <span>Time Overlay</span>
-      <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
-    </div>
-    <div class="toggle-row">
-      <span>Hi-Res Background</span>
-      <div class="toggle" id="hiResToggle" onclick="toggleHiRes()"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Info Mode</h2>
-    <div class="toggle-row">
-      <span>Show Weather</span>
-      <div class="toggle" id="infoToggle" onclick="toggleInfo()"></div>
-    </div>
-    <div style="margin-top:12px">
-      <div style="color:#aaa;font-size:13px;margin-bottom:6px">Location</div>
+    <div class="card">
+      <h2>Say Something</h2>
       <div style="display:flex;gap:8px">
-        <input type="text" id="weatherZip" placeholder="Zip code or city name"
-          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
-        <button onclick="setLocationZip()" id="zipBtn" style="padding:10px 16px">Set</button>
-      </div>
-      <div id="locationInfo" style="color:#6b7;font-size:12px;margin-top:6px"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Scheduled Content</h2>
-    <div class="toggle-row">
-      <span>Auto Weather + Emoji</span>
-      <div class="toggle" id="schedToggle" onclick="toggleSched()"></div>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-      <label style="font-size:13px;opacity:0.8">Cycle every</label>
-      <input type="number" id="schedMin" value="30" min="1" max="120"
-        style="width:60px;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:13px"
-        onchange="updateSched()">
-      <label style="font-size:13px;opacity:0.8">min</label>
-    </div>
-    <div id="schedStatus" style="font-size:12px;color:#aaa;margin-top:6px"></div>
-  </div>
-
-  <div class="card">
-    <h2>WiFi Setup</h2>
-    <div style="margin-bottom:12px">
-      <div style="color:#aaa;font-size:12px;margin-bottom:6px">Device Name &mdash; sets AP name and .local hostname (restart to apply)</div>
-      <div style="display:flex;gap:8px">
-        <input type="text" id="deviceNameInput" placeholder="e.g. vizbot-desk"
-          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="23">
-        <button onclick="setDeviceName()" id="deviceNameBtn" style="padding:10px 16px">Set</button>
-      </div>
-      <div id="deviceNameStatus" style="font-size:12px;color:#aaa;margin-top:4px"></div>
-    </div>
-    <div id="wifiStatus"></div>
-    <div id="wifiScan" style="margin-top:10px">
-      <button onclick="wifiDoScan()" id="scanBtn">Scan Networks</button>
-    </div>
-    <div id="wifiNetworks" style="margin-top:10px"></div>
-    <div id="wifiConnect" style="display:none;margin-top:10px">
-      <div style="margin-bottom:8px;color:#aaa" id="wifiSelectedSSID"></div>
-      <div style="display:flex;gap:8px">
-        <input type="password" id="wifiPass" placeholder="Password"
-          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="63">
-        <button onclick="wifiDoConnect()" id="connectBtn" style="padding:10px 16px">Connect</button>
+        <input type="text" id="botSayInput" placeholder="Type a message..."
+          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="60">
+        <button onclick="sendBotSay()" style="padding:10px 16px">Say</button>
       </div>
     </div>
-    <div id="wifiForget" style="margin-top:12px;display:none">
-      <button onclick="wifiDoReset()" style="background:rgba(248,113,113,0.3)">Forget Network</button>
+
+    <div class="card">
+      <h2>Personality</h2>
+      <select id="personalitySelect" onchange="setPersonality(this.value)"
+        style="width:100%;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px;margin-bottom:8px">
+      </select>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <label style="font-size:13px;opacity:0.8">Rotate:</label>
+        <input type="checkbox" id="rotateCheck" onchange="toggleRotation()">
+        <label style="font-size:13px;opacity:0.8">every</label>
+        <input type="number" id="rotateMin" value="5" min="1" max="60"
+          style="width:50px;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:13px">
+        <label style="font-size:13px;opacity:0.8">min</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Face Color</h2>
+      <div class="grid4" id="botColors"></div>
+      <h2 style="margin-top:15px">Background</h2>
+      <div class="grid" id="botBgStyles"></div>
+      <div id="ambientSection" style="display:none;margin-top:15px">
+        <h2>Ambient Animation</h2>
+        <div class="grid" id="ambientEffects"></div>
+      </div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>WLED Display</h2>
-    <div id="wledStatus"></div>
-    <div style="margin-top:10px">
+  <!-- Tab 1: Settings -->
+  <div class="tab-panel" id="tab1">
+    <div class="card">
+      <h2>Settings</h2>
+      <div class="slider-container">
+        <div class="slider-label"><span>Brightness</span><span id="brightnessVal">15</span></div>
+        <input type="range" id="brightness" min="1" max="50" value="15">
+      </div>
+      <div class="slider-container">
+        <div class="slider-label"><span>Volume</span><span id="volumeVal">120</span></div>
+        <input type="range" id="volume" min="0" max="255" value="120">
+      </div>
       <div class="toggle-row">
-        <span>Forward Speech to WLED</span>
-        <div class="toggle" id="wledToggle" onclick="toggleWled()"></div>
+        <span>Time Overlay</span>
+        <div class="toggle" id="botTimeToggle" onclick="toggleBotTime()"></div>
       </div>
-      <div class="toggle-row" style="margin-top:8px">
-        <span>Hologram Mode</span>
-        <div class="toggle" id="hologramToggle" onclick="toggleHologram()"></div>
-      </div>
-    </div>
-    <div style="margin-top:10px">
-      <div style="display:flex;gap:8px">
-        <input type="text" id="wledIP" placeholder="WLED IP (e.g. 192.168.1.100)"
-          style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="15">
-        <button onclick="setWledIP()" style="padding:10px 16px">Set</button>
+      <div class="toggle-row">
+        <span>Hi-Res Background</span>
+        <div class="toggle" id="hiResToggle" onclick="toggleHiRes()"></div>
       </div>
     </div>
-    <div style="margin-top:10px">
-      <button onclick="testWled()">Test</button>
+
+    <div class="card">
+      <h2>Info Mode</h2>
+      <div class="toggle-row">
+        <span>Show Weather</span>
+        <div class="toggle" id="infoToggle" onclick="toggleInfo()"></div>
+      </div>
+      <div style="margin-top:12px">
+        <div style="color:#aaa;font-size:13px;margin-bottom:6px">Location</div>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="weatherZip" placeholder="Zip code or city name"
+            style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="30">
+          <button onclick="setLocationZip()" id="zipBtn" style="padding:10px 16px">Set</button>
+        </div>
+        <div id="locationInfo" style="color:#6b7;font-size:12px;margin-top:6px"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Scheduled Content</h2>
+      <div class="toggle-row">
+        <span>Auto Weather + Emoji</span>
+        <div class="toggle" id="schedToggle" onclick="toggleSched()"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <label style="font-size:13px;opacity:0.8">Cycle every</label>
+        <input type="number" id="schedMin" value="30" min="1" max="120"
+          style="width:60px;padding:6px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:13px"
+          onchange="updateSched()">
+        <label style="font-size:13px;opacity:0.8">min</label>
+      </div>
+      <div id="schedStatus" style="font-size:12px;color:#aaa;margin-top:6px"></div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>WLED Sprites</h2>
-    <div class="grid4" id="emojiGrid"></div>
-    <div id="emojiQueue" style="margin-top:12px;min-height:20px"></div>
-    <div style="margin-top:10px;display:flex;gap:8px">
-      <button onclick="clearWledEmoji()" style="flex:1">Clear</button>
-      <button onclick="toggleWledEmoji()" id="emojiToggleBtn" style="flex:1;background:rgba(99,102,241,0.6)">Start</button>
+  <!-- Tab 2: Network -->
+  <div class="tab-panel" id="tab2">
+    <div class="card">
+      <h2>WiFi Setup</h2>
+      <div style="margin-bottom:12px">
+        <div style="color:#aaa;font-size:12px;margin-bottom:6px">Device Name &mdash; sets AP name and .local hostname (restart to apply)</div>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="deviceNameInput" placeholder="e.g. vizbot-desk"
+            style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="23">
+          <button onclick="setDeviceName()" id="deviceNameBtn" style="padding:10px 16px">Set</button>
+        </div>
+        <div id="deviceNameStatus" style="font-size:12px;color:#aaa;margin-top:4px"></div>
+      </div>
+      <div id="wifiStatus"></div>
+      <div id="wifiScan" style="margin-top:10px">
+        <button onclick="wifiDoScan()" id="scanBtn">Scan Networks</button>
+      </div>
+      <div id="wifiNetworks" style="margin-top:10px"></div>
+      <div id="wifiConnect" style="display:none;margin-top:10px">
+        <div style="margin-bottom:8px;color:#aaa" id="wifiSelectedSSID"></div>
+        <div style="display:flex;gap:8px">
+          <input type="password" id="wifiPass" placeholder="Password"
+            style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="63">
+          <button onclick="wifiDoConnect()" id="connectBtn" style="padding:10px 16px">Connect</button>
+        </div>
+      </div>
+      <div id="wifiForget" style="margin-top:12px;display:none">
+        <button onclick="wifiDoReset()" style="background:rgba(248,113,113,0.3)">Forget Network</button>
+      </div>
     </div>
-    <div class="slider-container" style="margin-top:12px">
-      <div class="slider-label"><span>Cycle Time</span><span id="emojiCycleVal">4s</span></div>
-      <input type="range" id="emojiCycle" min="1" max="10" value="4">
+
+    <div class="card">
+      <h2>WLED Display</h2>
+      <div id="wledStatus"></div>
+      <div style="margin-top:10px">
+        <div class="toggle-row">
+          <span>Forward Speech to WLED</span>
+          <div class="toggle" id="wledToggle" onclick="toggleWled()"></div>
+        </div>
+        <div class="toggle-row" style="margin-top:8px">
+          <span>Hologram Mode</span>
+          <div class="toggle" id="hologramToggle" onclick="toggleHologram()"></div>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <div style="display:flex;gap:8px">
+          <input type="text" id="wledIP" placeholder="WLED IP (e.g. 192.168.1.100)"
+            style="flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.15);color:#fff;font-size:14px" maxlength="15">
+          <button onclick="setWledIP()" style="padding:10px 16px">Set</button>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <button onclick="testWled()">Test</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>WLED Sprites</h2>
+      <div class="grid4" id="emojiGrid"></div>
+      <div id="emojiQueue" style="margin-top:12px;min-height:20px"></div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button onclick="clearWledEmoji()" style="flex:1">Clear</button>
+        <button onclick="toggleWledEmoji()" id="emojiToggleBtn" style="flex:1;background:rgba(99,102,241,0.6)">Start</button>
+      </div>
+      <div class="slider-container" style="margin-top:12px">
+        <div class="slider-label"><span>Cycle Time</span><span id="emojiCycleVal">4s</span></div>
+        <input type="range" id="emojiCycle" min="1" max="10" value="4">
+      </div>
     </div>
   </div>
 
   <div class="status">Connected to VizBot &middot; vizbot.local</div>
 
   <script>
-    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Sleepy", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Focused", "Winking", "Devious", "Shocked", "Kissing", "Nervous", "Glitching", "Sassy"];
+    function showTab(n) {
+      document.querySelectorAll('.tab-panel').forEach((p,i) => { p.classList.toggle('active', i===n); });
+      document.querySelectorAll('.tab').forEach((t,i) => { t.classList.toggle('active', i===n); });
+    }
+
+    const botExprNames = ["Neutral", "Happy", "Sad", "Surprised", "Chill", "Angry", "Love", "Dizzy", "Thinking", "Excited", "Mischief", "Skeptical", "Worried", "Confused", "Proud", "Shy", "Annoyed", "Focused", "Winking", "Devious", "Shocked", "Kissing", "Nervous", "Glitching", "Sassy"];
     const botColorNames = ["White", "Cyan", "Green", "Pink", "Yellow"];
     const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
     const ambientNames = ["Plasma","Rainbow","Fire","Ocean","Matrix","Lava","Aurora","Confetti","Galaxy","Heart","Donut"];

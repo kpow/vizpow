@@ -35,11 +35,13 @@
 #define TOUCH_COOLDOWN_MS 400
 #define MENU_TIMEOUT_MS 8000  // Hide menu after 8 seconds of no touch
 
-// Full screen menu layout
-#define BTN_WIDTH 110        // Button width (2 per row with gap)
-#define BTN_HEIGHT 42        // Button height
-#define BTN_GAP 8            // Gap between buttons
-#define BTN_START_Y 66       // Y start for buttons (after header)
+// Full screen menu layout — computed from display dimensions
+#define MENU_COLS    2
+#define MENU_ROWS    4
+#define BTN_GAP      8
+#define BTN_START_Y  (LCD_HEIGHT <= 240 ? 48 : 66)
+#define BTN_WIDTH    ((LCD_WIDTH - (MENU_COLS + 1) * BTN_GAP) / MENU_COLS)
+#define BTN_HEIGHT   ((LCD_HEIGHT - BTN_START_Y - BTN_GAP) / MENU_ROWS - BTN_GAP)
 
 // External variables
 extern uint8_t effectIndex;
@@ -224,17 +226,53 @@ void drawButton(int16_t x, int16_t y, int16_t w, int16_t h, const char* label, u
   uint16_t borderColor = selected ? 0x07E0 : 0xFFFF;
   gfx->drawRect(x, y, w, h, borderColor);
   gfx->drawRect(x + 1, y + 1, w - 2, h - 2, borderColor);
-  int16_t textW = strlen(label) * 12;
+  uint8_t textSz = (h >= 40) ? 2 : 1;
+  int16_t charW = textSz * 6;
+  int16_t charH = textSz * 8;
+  int16_t textW = strlen(label) * charW;
   int16_t textX = x + (w - textW) / 2;
-  int16_t textY = y + (h - 16) / 2;
+  int16_t textY = y + (h - charH) / 2;
   gfx->setCursor(textX, textY);
   gfx->setTextColor(0xFFFF);
-  gfx->setTextSize(2);
+  gfx->setTextSize(textSz);
   gfx->print(label);
 }
 
-// Draw the header
+// Draw the header — compact (2-line) for short displays, 3-line otherwise
 void drawMenuHeader() {
+#if LCD_HEIGHT <= 240
+  // Compact header: 2 lines for Core S3 / LCD 1.3
+  gfx->setTextSize(1);
+
+  // Line 1: Mode + brightness + auto
+  gfx->setCursor(4, 4);
+  gfx->setTextColor(0x07FF);  // Cyan
+  #if defined(HIRES_ENABLED)
+  gfx->print(hiResMode ? "Bot HR" : "Bot PX");
+  #else
+  gfx->print("Bot");
+  #endif
+  gfx->setTextColor(0xFFE0);  // Yellow
+  gfx->print("  ");
+  gfx->print(lcdBrightness * 100 / 255);
+  gfx->print("%");
+  gfx->setTextColor(autoCycle ? 0x07E0 : 0xF800);
+  gfx->print(autoCycle ? "  AUTO" : "  MAN");
+
+  // Line 2: Effect + palette
+  gfx->setCursor(4, 18);
+  gfx->setTextColor(0xFFFF);
+  if (getBotBackgroundStyle() == 4) {
+    gfx->print(ambientEffectNames[effectIndex % NUM_AMBIENT_EFFECTS]);
+  } else {
+    gfx->print("Black");
+  }
+  gfx->setTextColor(0xF81F);  // Magenta
+  gfx->print("  ");
+  gfx->print(paletteNames[paletteIndex % NUM_PALETTES]);
+
+#else
+  // Full header: 3 lines for taller displays (LCD 1.69 at 280px)
   gfx->setTextSize(2);
 
   gfx->setCursor(10, 6);
@@ -268,6 +306,7 @@ void drawMenuHeader() {
   gfx->setCursor(LCD_WIDTH - 58, 24);
   gfx->setTextColor(autoCycle ? 0x07E0 : 0xF800);
   gfx->print(autoCycle ? "AUTO" : "MAN");
+#endif
 }
 
 // Draw full-screen menu
