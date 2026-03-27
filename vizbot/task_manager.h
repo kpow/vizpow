@@ -275,8 +275,12 @@ void drainCommandQueue() {
   while (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) {
     switch (cmd.type) {
       case CMD_SET_BRIGHTNESS:
-        brightness = constrain(cmd.u8val, 1, 50);
+        brightness = constrain(cmd.u8val, 1, 255);
         FastLED.setBrightness(brightness);
+        #if defined(TARGET_LCD) || defined(TARGET_CORES3)
+        lcdBrightness = brightness;
+        setLCDBacklight(lcdBrightness);
+        #endif
         markSettingsDirty();
         break;
       case CMD_SET_EXPRESSION:
