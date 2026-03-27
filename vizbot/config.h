@@ -160,6 +160,24 @@
 #endif
 
 // ============================================================================
+// Firmware Identity (used for OTA validation + cloud reporting)
+// ============================================================================
+#define FIRMWARE_VERSION "2.1.0"
+
+#if defined(BOARD_ESP32S3_MATRIX)
+  #define BOARD_TYPE "esp32s3-matrix"
+#elif defined(BOARD_ESP32S3_LCD_169)
+  #define BOARD_TYPE "esp32s3-lcd169"
+#elif defined(BOARD_ESP32S3_LCD_13)
+  #define BOARD_TYPE "esp32s3-lcd13"
+#elif defined(BOARD_M5CORES3)
+  #define BOARD_TYPE "m5cores3"
+#endif
+
+// GitHub repo for OTA update checks
+#define OTA_GITHUB_REPO "kpow/esp32-led-matrix"
+
+// ============================================================================
 // Common Configuration
 // ============================================================================
 #define NUM_LEDS 64
@@ -211,7 +229,6 @@
   #define CLOUD_RESPONSE_TIMEOUT 15000
   #define CLOUD_BOOT_TIMEOUT     5000
   #define CLOUD_NVS_NAMESPACE    "vizcloud"
-  #define FIRMWARE_VERSION       "2.0.0"
 #endif
 
 // Debug serial output (comment out to save ~700 bytes of flash)
