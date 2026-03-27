@@ -7,6 +7,7 @@
 #include <FastLED.h>
 #include "config.h"
 #include "palettes.h"
+#include "ota_update.h"
 
 // External references to globals
 extern WebServer server;
@@ -91,6 +92,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
   <header class="hdr">
     <div style="display:flex;align-items:center">
       <span class="logo">VizBot</span>
+      <span class="dev-name" id="hdrVer"></span>
       <span class="dev-name" id="deviceLabel"></span>
     </div>
     <div class="hdr-r">
@@ -163,11 +165,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         <h2 class="shdr" onclick="tgl('secDev')">Device <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secDev">
           <div class="srow"><span>Brightness</span><span id="brightnessVal">15</span></div>
-          <input type="range" id="brightness" min="1" max="50" value="15">
+          <input type="range" id="brightness" min="1" max="255" value="15">
           <div class="srow"><span>Volume</span><span id="volumeVal">120</span></div>
           <input type="range" id="volume" min="0" max="255" value="120">
           <div class="trow"><span>Time Overlay</span><div class="tog" id="botTimeToggle" onclick="toggleBotTime()"></div></div>
           <div class="trow"><span>Hi-Res Background</span><div class="tog" id="hiResToggle" onclick="toggleHiRes()"></div></div>
+          <div style="border-top:1px solid #eee;margin-top:10px;padding-top:10px">
+            <div class="trow"><span>Firmware <span id="fwVer" style="font-weight:700"></span></span><a href="/update" style="display:inline-block;padding:5px 12px;background:#FFD23F;border:2px solid #000;box-shadow:2px 2px 0 0 #000;font-weight:700;font-size:11px;text-transform:uppercase;color:#000;text-decoration:none">Update</a></div>
+            <div id="updateBanner" style="display:none;margin-top:8px;padding:8px;background:#d4edda;border:2px solid #2d7d46;font-size:12px;font-weight:600;color:#2d7d46"></div>
+          </div>
         </div>
       </div>
 
@@ -426,6 +432,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         if (state.weatherLat && state.weatherLon) {
           document.getElementById('locationInfo').textContent = 'Current: ' + state.weatherLat + ', ' + state.weatherLon;
         }
+        if (state.firmwareVersion) {
+          document.getElementById('fwVer').textContent = 'v' + state.firmwareVersion;
+          document.getElementById('hdrVer').textContent = 'v' + state.firmwareVersion;
+        }
+        if (state.updateAvailable && state.updateVersion) {
+          var banner = document.getElementById('updateBanner');
+          banner.style.display = 'block';
+          banner.innerHTML = 'Update available: ' + state.updateVersion + ' &mdash; <a href="/update" style="color:#2d7d46;font-weight:800">Update Now</a>';
+        }
         if (state.device) {
           document.getElementById('deviceLabel').textContent = state.device;
           document.getElementById('statusBar').textContent = 'Connected to ' + state.device + ' \u00B7 ' + state.hostname;
@@ -675,7 +690,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 // applied atomically between frames on Core 1.
 
 void handleRoot() {
-  server.send(200, "text/html", webpage);
+  // Send PROGMEM page in chunks to avoid 32KB heap allocation.
+  // With OTA + cloud + ArduinoJson loaded, free heap can be <45KB
+  // on 4MB boards — too tight for a single server.send() of the full page.
+  size_t len = strlen_P(webpage);
+  server.setContentLength(len);
+  server.send(200, "text/html", "");
+  const size_t CHUNK = 1024;
+  for (size_t i = 0; i < len; i += CHUNK) {
+    char buf[CHUNK + 1];
+    size_t n = min(CHUNK, len - i);
+    memcpy_P(buf, webpage + i, n);
+    buf[n] = '\0';
+    server.sendContent(buf);
+  }
 }
 
 extern bool isBotTimeOverlayEnabled();
@@ -724,6 +752,10 @@ void handleState() {
                 ",\"device\":\"" + String(apSSID) + "\"" +
                 ",\"hostname\":\"" + String(mdnsHostname) + ".local\"" +
                 ",\"deviceName\":\"" + String(apSSID) + "\"" +
+                ",\"firmwareVersion\":\"" FIRMWARE_VERSION "\"" +
+                ",\"boardType\":\"" BOARD_TYPE "\"" +
+                ",\"updateAvailable\":" + (otaState.updateAvailable ? "true" : "false") +
+                (otaState.updateAvailable ? ",\"updateVersion\":\"" + String(otaState.remoteVersion) + "\"" : "") +
 #ifdef TARGET_CORES3
                 ",\"sensors\":{" +
                   "\"speaker\":" + (sysStatus.speakerReady ? "true" : "false") +
@@ -768,7 +800,7 @@ extern void cmdSetVolume(uint8_t vol);
 
 void handleBrightness() {
   if (server.hasArg("v")) {
-    uint8_t val = constrain(server.arg("v").toInt(), 1, 50);
+    uint8_t val = constrain(server.arg("v").toInt(), 1, 255);
     cmdSetBrightness(val);
   }
   server.send(200, "text/plain", "OK");
@@ -1240,28 +1272,33 @@ extern ScheduledContentState schedContent;
 extern void saveScheduleSettings();
 
 void handleSchedule() {
-  if (server.method() == HTTP_GET) {
-    String json = "{\"enabled\":";
-    json += schedContent.enabled ? "true" : "false";
-    json += ",\"intervalMin\":";
-    json += schedContent.cycleIntervalMs / 60000;
-    json += ",\"phase\":";
-    json += (uint8_t)schedContent.phase;
-    json += ",\"isOwner\":";
-    json += schedContent.isOwner ? "true" : "false";
-    json += "}";
-    server.send(200, "application/json", json);
-  } else {
-    if (server.hasArg("enabled")) {
-      schedContent.enabled = server.arg("enabled") == "1";
+  bool changed = false;
+  if (server.hasArg("enabled")) {
+    bool wasEnabled = schedContent.enabled;
+    schedContent.enabled = server.arg("enabled") == "1";
+    changed = true;
+    // First enable: trigger first cycle in ~1 minute instead of waiting full interval
+    if (schedContent.enabled && !wasEnabled) {
+      schedContent.lastCycleStartMs = millis() - schedContent.cycleIntervalMs + 60000;
     }
-    if (server.hasArg("intervalMin")) {
-      uint32_t min = constrain(server.arg("intervalMin").toInt(), 1, 120);
-      schedContent.cycleIntervalMs = min * 60000;
-    }
-    saveScheduleSettings();
-    server.send(200, "text/plain", "OK");
   }
+  if (server.hasArg("intervalMin")) {
+    uint32_t min = constrain(server.arg("intervalMin").toInt(), 1, 120);
+    schedContent.cycleIntervalMs = min * 60000;
+    changed = true;
+  }
+  if (changed) saveScheduleSettings();
+
+  String json = "{\"enabled\":";
+  json += schedContent.enabled ? "true" : "false";
+  json += ",\"intervalMin\":";
+  json += schedContent.cycleIntervalMs / 60000;
+  json += ",\"phase\":";
+  json += (uint8_t)schedContent.phase;
+  json += ",\"isOwner\":";
+  json += schedContent.isOwner ? "true" : "false";
+  json += "}";
+  server.send(200, "application/json", json);
 }
 
 void handleCaptiveRedirect() {
@@ -1325,6 +1362,13 @@ void setupWebServer() {
 
   // Schedule endpoints
   server.on("/schedule", handleSchedule);
+
+  // OTA firmware update endpoints
+  server.on("/update", HTTP_GET, handleOTAPage);
+  server.on("/update", HTTP_POST, handleOTAResult, handleOTAUpload);
+  server.on("/update/check", HTTP_GET, handleUpdateCheck);
+  server.on("/update/start", HTTP_GET, handleUpdateStart);
+  server.on("/update/progress", HTTP_GET, handleUpdateProgress);
 
   // Captive portal detection endpoints — all redirect to root
   server.on("/generate_204", handleCaptiveRedirect);          // Android

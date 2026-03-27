@@ -302,6 +302,7 @@ void setup() {
 
   DBGLN("\n=== vizBot starting ===");
   initDeviceID();   // Compute unique apSSID / mdnsHostname from eFuse MAC
+  otaMarkBootValid(); // Tell bootloader this firmware is OK (prevents OTA rollback)
 
   // Memory baseline — logged early before any allocations fragment the heap
   DBG("Internal heap: ");
