@@ -92,6 +92,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
   <header class="hdr">
     <div style="display:flex;align-items:center">
       <span class="logo">VizBot</span>
+      <span class="dev-name" id="hdrVer"></span>
       <span class="dev-name" id="deviceLabel"></span>
     </div>
     <div class="hdr-r">
@@ -433,6 +434,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         }
         if (state.firmwareVersion) {
           document.getElementById('fwVer').textContent = 'v' + state.firmwareVersion;
+          document.getElementById('hdrVer').textContent = 'v' + state.firmwareVersion;
         }
         if (state.updateAvailable && state.updateVersion) {
           var banner = document.getElementById('updateBanner');
