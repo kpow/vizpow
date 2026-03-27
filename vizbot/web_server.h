@@ -165,7 +165,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         <h2 class="shdr" onclick="tgl('secDev')">Device <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secDev">
           <div class="srow"><span>Brightness</span><span id="brightnessVal">15</span></div>
-          <input type="range" id="brightness" min="1" max="50" value="15">
+          <input type="range" id="brightness" min="1" max="255" value="15">
           <div class="srow"><span>Volume</span><span id="volumeVal">120</span></div>
           <input type="range" id="volume" min="0" max="255" value="120">
           <div class="trow"><span>Time Overlay</span><div class="tog" id="botTimeToggle" onclick="toggleBotTime()"></div></div>
@@ -690,7 +690,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 // applied atomically between frames on Core 1.
 
 void handleRoot() {
-  server.send(200, "text/html", webpage);
+  // Send PROGMEM page in chunks to avoid 32KB heap allocation.
+  // With OTA + cloud + ArduinoJson loaded, free heap can be <45KB
+  // on 4MB boards — too tight for a single server.send() of the full page.
+  size_t len = strlen_P(webpage);
+  server.setContentLength(len);
+  server.send(200, "text/html", "");
+  const size_t CHUNK = 1024;
+  for (size_t i = 0; i < len; i += CHUNK) {
+    char buf[CHUNK + 1];
+    size_t n = min(CHUNK, len - i);
+    memcpy_P(buf, webpage + i, n);
+    buf[n] = '\0';
+    server.sendContent(buf);
+  }
 }
 
 extern bool isBotTimeOverlayEnabled();
@@ -787,7 +800,7 @@ extern void cmdSetVolume(uint8_t vol);
 
 void handleBrightness() {
   if (server.hasArg("v")) {
-    uint8_t val = constrain(server.arg("v").toInt(), 1, 50);
+    uint8_t val = constrain(server.arg("v").toInt(), 1, 255);
     cmdSetBrightness(val);
   }
   server.send(200, "text/plain", "OK");

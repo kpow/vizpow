@@ -162,7 +162,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "2.1.1"
+#define FIRMWARE_VERSION "2.1.2"
 
 #if defined(BOARD_ESP32S3_MATRIX)
   #define BOARD_TYPE "esp32s3-matrix"
