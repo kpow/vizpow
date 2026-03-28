@@ -172,7 +172,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           <div class="trow"><span>Hi-Res Background</span><div class="tog" id="hiResToggle" onclick="toggleHiRes()"></div></div>
           <div style="border-top:1px solid #eee;margin-top:10px;padding-top:10px">
             <div class="trow"><span>Firmware <span id="fwVer" style="font-weight:700"></span></span><a href="/update" style="display:inline-block;padding:5px 12px;background:#FFD23F;border:2px solid #000;box-shadow:2px 2px 0 0 #000;font-weight:700;font-size:11px;text-transform:uppercase;color:#000;text-decoration:none">Update</a></div>
-            <div id="updateBanner" style="display:none;margin-top:8px;padding:8px;background:#d4edda;border:2px solid #2d7d46;font-size:12px;font-weight:600;color:#2d7d46"></div>
           </div>
         </div>
       </div>
@@ -435,11 +434,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         if (state.firmwareVersion) {
           document.getElementById('fwVer').textContent = 'v' + state.firmwareVersion;
           document.getElementById('hdrVer').textContent = 'v' + state.firmwareVersion;
-        }
-        if (state.updateAvailable && state.updateVersion) {
-          var banner = document.getElementById('updateBanner');
-          banner.style.display = 'block';
-          banner.innerHTML = 'Update available: ' + state.updateVersion + ' &mdash; <a href="/update" style="color:#2d7d46;font-weight:800">Update Now</a>';
         }
         if (state.device) {
           document.getElementById('deviceLabel').textContent = state.device;
@@ -754,8 +748,6 @@ void handleState() {
                 ",\"deviceName\":\"" + String(apSSID) + "\"" +
                 ",\"firmwareVersion\":\"" FIRMWARE_VERSION "\"" +
                 ",\"boardType\":\"" BOARD_TYPE "\"" +
-                ",\"updateAvailable\":" + (otaState.updateAvailable ? "true" : "false") +
-                (otaState.updateAvailable ? ",\"updateVersion\":\"" + String(otaState.remoteVersion) + "\"" : "") +
 #ifdef TARGET_CORES3
                 ",\"sensors\":{" +
                   "\"speaker\":" + (sysStatus.speakerReady ? "true" : "false") +
@@ -1366,9 +1358,6 @@ void setupWebServer() {
   // OTA firmware update endpoints
   server.on("/update", HTTP_GET, handleOTAPage);
   server.on("/update", HTTP_POST, handleOTAResult, handleOTAUpload);
-  server.on("/update/check", HTTP_GET, handleUpdateCheck);
-  server.on("/update/start", HTTP_GET, handleUpdateStart);
-  server.on("/update/progress", HTTP_GET, handleUpdateProgress);
 
   // Captive portal detection endpoints — all redirect to root
   server.on("/generate_204", handleCaptiveRedirect);          // Android
