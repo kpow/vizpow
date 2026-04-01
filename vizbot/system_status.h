@@ -23,6 +23,7 @@ struct SystemStatus {
   bool littlefsReady;    // LittleFS mounted successfully
   bool cloudRegistered;  // Registered with vizCloud
   bool speakerReady;     // Core S3 speaker initialized
+  bool midiReady;        // SAM2695 MIDI synth initialized (Core S3 Grove Port C)
   bool micReady;         // Core S3 microphone initialized
   bool proxLightReady;   // Core S3 proximity/light sensor initialized
   bool psramAvailable;   // PSRAM detected at boot

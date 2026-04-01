@@ -214,6 +214,16 @@
 #define WEATHER_LON_DEFAULT         "-77.43"
 
 // ============================================================================
+// MIDI Synthesizer (SAM2695 via Grove Port C)
+// ============================================================================
+#ifdef TARGET_CORES3
+  #define MIDI_SYNTH_ENABLED
+  #define MIDI_TX_PIN  17   // Grove Port C — data to SAM2695 RXD
+  #define MIDI_RX_PIN  18   // Grove Port C — data from SAM2695 TXD (unused)
+  #define MIDI_BAUD    31250
+#endif
+
+// ============================================================================
 // Cloud Integration (vizCloud)
 // ============================================================================
 // Cloud integration — pinned CA cert (no esp_crt_bundle dependency)

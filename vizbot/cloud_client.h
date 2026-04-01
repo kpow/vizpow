@@ -53,6 +53,7 @@ extern void cmdSetBgStyle(uint8_t val);
 extern void cmdSetPersonality(uint8_t val);
 extern void cmdSetAmbientEffect(uint8_t val);
 extern void cmdPlaySound(uint16_t freq, uint16_t duration);
+extern void cmdPlaySequence(uint8_t seqId);
 extern void cmdSetVolume(uint8_t vol);
 
 // Forward declarations from bot_mode.h
@@ -471,6 +472,12 @@ static void dispatchCloudCommand(const char* type, JsonObject& payload) {
     DBG(freq);
     DBG(" dur=");
     DBGLN(dur);
+
+  } else if (strcmp(type, "play_sequence") == 0) {
+    uint8_t seqId = payload["sequenceId"] | 0;
+    cmdPlaySequence(seqId);
+    DBG("Cloud cmd: play_sequence=");
+    DBGLN(seqId);
 
   } else if (strcmp(type, "set_volume") == 0) {
     uint8_t vol = payload["value"] | 200;
