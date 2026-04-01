@@ -162,7 +162,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "2.1.3"
+#define FIRMWARE_VERSION "2.1.11"
 
 #if defined(BOARD_ESP32S3_MATRIX)
   #define BOARD_TYPE "esp32s3-matrix"
@@ -175,7 +175,7 @@
 #endif
 
 // GitHub repo for OTA update checks
-#define OTA_GITHUB_REPO "kpow/esp32-led-matrix"
+#define OTA_GITHUB_REPO "kpow/vizpow"
 
 // ============================================================================
 // Common Configuration
