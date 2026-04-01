@@ -2,11 +2,10 @@
 #define CONFIG_H
 
 // ============================================================================
-// Board Selection - JUST CHANGE THIS ONE LINE
+// Board Selection — defined by PlatformIO build_flags, do not uncomment here
 // ============================================================================
-// Uncomment ONE of these:
 // #define BOARD_ESP32S3_MATRIX       // Waveshare ESP32-S3-Matrix (8x8 LED)
-#define BOARD_ESP32S3_LCD_169         // Waveshare ESP32-S3-Touch-LCD-1.69
+// #define BOARD_ESP32S3_LCD_169      // Waveshare ESP32-S3-Touch-LCD-1.69
 
 // ============================================================================
 // Auto-derive TARGET from BOARD
