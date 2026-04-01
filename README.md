@@ -137,7 +137,7 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Shake Reactions**: IMU-driven dizzy expression and random utterances
 - **vizCloud Integration**: Cloud server connectivity for remote control, content sync, scheduled commands, and fleet management via DigitalOcean App Platform with TLS-pinned HTTPS
 - **ESP-NOW Mesh**: Peer-to-peer mesh networking between vizBot devices for coordinated WLED display and state sharing
-- **Multi-Board Support**: Runs on Waveshare ESP32-S3-Touch-LCD-1.69, ESP32-S3-LCD-1.3, ESP32-S3-Matrix, and M5Stack Core S3 — select target in `config.h`
+- **Multi-Board Support**: Runs on Waveshare ESP32-S3-Touch-LCD-1.69, ESP32-S3-LCD-1.3, ESP32-S3-Matrix, and M5Stack Core S3 — select target via PlatformIO environment
 - **Resolution-Independent Effects**: Hi-res ambient effects adapt to any LCD size (240x280 or 320x240)
 
 ### vizPow (ESP32-S3)
@@ -224,7 +224,7 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Display**: 320x240 IPS LCD (ILI9342C, landscape)
 - **Touch**: FT6336 capacitive touch
 - **Sensors**: BMI270 6-axis IMU
-- **Notes**: LCD reset/backlight via AW9523 I2C expander, all managed by M5Unified library. A `DisplayProxy` wrapper provides Arduino_GFX-compatible API so all existing rendering code works unchanged.
+- **Notes**: LCD reset/backlight via AW9523 I2C expander, all managed by M5Unified library. A `DisplayProxy` wrapper provides a unified API so all existing rendering code works unchanged.
 
 ### ESP8266 (NodeMCU/Wemos D1 Mini)
 
@@ -258,116 +258,88 @@ On failure, the subsystem shows RED and the firmware continues in degraded mode 
 
 ## Board Configuration
 
-### vizPow (ESP32-S3)
+Board selection is handled by PlatformIO build environments — each environment passes the correct `-DBOARD_*` flag via `build_flags` in `platformio.ini`. No manual `#define` editing needed.
 
-The vizPow ESP32-S3 firmware supports two board targets via `config.h`:
+### vizBot Environments
 
-```cpp
-// Uncomment ONE of these:
-// #define TARGET_LED    // Waveshare ESP32-S3-Matrix (LED only)
-#define TARGET_LCD       // ESP32-S3-Touch-LCD-1.69 (LCD + Touch)
-```
+| Environment | Board | Target | Notes |
+|-------------|-------|--------|-------|
+| `lcd-169` | Waveshare ESP32-S3-Touch-LCD-1.69 | TARGET_LCD | 240x280 ST7789, CST816 touch, 16MB flash, OPI PSRAM |
+| `lcd-13` | Waveshare ESP32-S3-LCD-1.3 | TARGET_LCD | 240x240 ST7789VW, no touch, battery, 16MB flash, OPI PSRAM |
+| `m5cores3` | M5Stack Core S3 | TARGET_CORES3 | 320x240 IPS, FT6336 touch, 16MB flash, QSPI PSRAM |
+| `matrix` | Waveshare ESP32-S3-Matrix | TARGET_LED | 8x8 LED only, 4MB flash, custom partitions |
 
-- **TARGET_LED**: LED matrix only, no LCD or touch. Battery-optimized with power-save mode.
-- **TARGET_LCD**: Enables LCD display, touch menu, and hi-res effects.
+### vizPow Environments
 
-### vizBot (ESP32-S3)
-
-vizBot supports four board targets via `config.h`:
-
-```cpp
-// Uncomment ONE of these:
-// #define BOARD_ESP32S3_MATRIX       // Waveshare ESP32-S3-Matrix (8x8 LED)
-// #define BOARD_ESP32S3_LCD_169      // Waveshare ESP32-S3-Touch-LCD-1.69
-// #define BOARD_ESP32S3_LCD_13       // Waveshare ESP32-S3-LCD-1.3 (no touch, battery)
- #define BOARD_M5CORES3              // M5Stack Core S3
-```
-
-- **BOARD_ESP32S3_LCD_169** (TARGET_LCD): Waveshare ESP32-S3-Touch-LCD-1.69 with 240x280 ST7789 LCD and CST816 touch.
-- **BOARD_ESP32S3_LCD_13** (TARGET_LCD): Waveshare ESP32-S3-LCD-1.3 with 240x240 ST7789VW LCD, no touch, battery powered.
-- **BOARD_M5CORES3** (TARGET_CORES3): M5Stack Core S3 with 320x240 IPS LCD. Uses M5Unified library with a DisplayProxy wrapper for API compatibility. 16MB flash — no custom partition table needed.
-- **BOARD_ESP32S3_MATRIX** (TARGET_LED): LED matrix only, no LCD or touch.
+| Environment | Board | Target | Notes |
+|-------------|-------|--------|-------|
+| `target-led` | Waveshare ESP32-S3-Matrix | TARGET_LED | LED matrix only, battery-optimized, 4MB flash |
+| `target-lcd` | Waveshare ESP32-S3-Touch-LCD-1.69 | TARGET_LCD | LCD + touch + hi-res effects, 16MB flash, OPI PSRAM |
 
 A `layout.h` abstraction derives all UI positions from `LCD_WIDTH` and `LCD_HEIGHT` at compile time, so effects, overlays, and UI elements automatically scale to any screen size.
 
 ## Installation
 
-### vizBot (ESP32-S3)
+### Prerequisites
 
-#### Prerequisites
+1. [PlatformIO Core CLI](https://docs.platformio.org/en/latest/core/installation/index.html) — install via `brew install platformio` (macOS) or `pip install platformio`
+2. USB-C cable for flashing
 
-1. [Arduino IDE](https://www.arduino.cc/en/software) (2.0+ recommended)
-2. ESP32 Board Support:
-   - Arduino IDE -> Settings -> Additional Board Manager URLs
-   - Add: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-   - Tools -> Board -> Boards Manager -> Install "esp32 by Espressif Systems"
+All library dependencies and board configurations are pinned in each project's `platformio.ini` — PlatformIO downloads them automatically on first build.
 
-#### Libraries Required
+### Build and Flash
 
-Install via Arduino Library Manager:
+```bash
+# Build only (no flash)
+cd vizbot && pio run -e lcd-169
 
-- **FastLED** — LED control
-- **SensorLib** by Lewis He — QMI8658 IMU driver
-- **LovyanGFX** — LCD display rendering (TARGET_LCD)
-- **M5Unified** — Hardware abstraction for M5Stack Core S3 (TARGET_CORES3 only)
-- **ArduinoJson** — JSON parsing for cloud/weather APIs
-- **LittleFS** — Flash filesystem for cloud content caching
+# Build and flash
+cd vizbot && pio run -e lcd-169 -t upload
 
-Built-in (no install needed):
+# Serial monitor
+cd vizbot && pio device monitor
+```
 
-- **DNSServer** — captive portal DNS
-- **ESPmDNS** — `.local` hostname resolution
-- **Preferences** — NVS persistent storage
-- **WebServer** — HTTP server
+#### vizBot Environments
 
-#### Upload
+```bash
+pio run -e lcd-169 -t upload    # Waveshare LCD 1.69 (touch)
+pio run -e lcd-13 -t upload     # Waveshare LCD 1.3 (no touch, battery)
+pio run -e m5cores3 -t upload   # M5Stack Core S3
+pio run -e matrix -t upload     # Waveshare Matrix (LED only)
+```
 
-1. Connect ESP32-S3 board via USB-C
-2. Select Board: `ESP32S3 Dev Module`
-3. Enable: `USB CDC On Boot -> Enabled`
-4. For 4MB flash boards: `Tools > Partition Scheme > Custom` and select `vizbot/partitions.csv`
-5. Select Port
-6. Upload `vizbot/vizbot.ino`
+#### vizPow Environments
 
-### vizPow (ESP32-S3)
+```bash
+cd vizpow
+pio run -e target-led -t upload   # Waveshare Matrix (LED only)
+pio run -e target-lcd -t upload   # Waveshare LCD 1.69 (LCD + touch)
+```
 
-#### Prerequisites
+### Library Dependencies
 
-Same as vizBot above.
+All versions pinned in `platformio.ini` — no manual installation needed.
 
-#### Libraries Required
+| Library | Version | Used By |
+|---------|---------|---------|
+| FastLED | 3.10.3 | vizbot, vizpow |
+| SensorLib | 0.4.0 | vizbot, vizpow |
+| LovyanGFX | 1.2.19 | vizbot (LCD targets) |
+| M5Unified | 0.2.13 | vizbot (CoreS3 only) |
+| ArduinoJson | 7.4.3 | vizbot |
+| GFX Library for Arduino | 1.6.5 | vizpow (LCD target) |
 
-- **FastLED** — LED control
-- **SensorLib** by Lewis He — QMI8658 IMU driver
+**Platform:** [pioarduino](https://github.com/pioarduino/platform-espressif32) v55.03.37 (Arduino ESP32 core 3.3.7, ESP-IDF 5.5.2)
 
-#### Upload
+### Versioned Firmware Binaries
 
-1. Connect ESP32-S3 board via USB-C
-2. Select Board: `ESP32S3 Dev Module`
-3. Enable: `USB CDC On Boot -> Enabled`
-4. Select Port
-5. Upload `vizpow/vizpow.ino`
+Builds produce versioned `.bin` files alongside the standard `firmware.bin`:
 
-### vizPow 8266 (ESP8266)
+- vizbot: `vizbot-<env>-v<version>.bin` (e.g. `vizbot-lcd-169-v2.1.11.bin`)
+- vizpow: `vizpow-<env>-<git-describe>.bin` (e.g. `vizpow-target-led-v2.1.10.bin`)
 
-#### Prerequisites
-
-1. [Arduino IDE](https://www.arduino.cc/en/software) (2.0+ recommended)
-2. ESP8266 Board Support:
-   - Arduino IDE -> Settings -> Additional Board Manager URLs
-   - Add: `http://arduino.esp8266.com/stable/package_esp8266com_index.json`
-   - Tools -> Board -> Boards Manager -> Install "esp8266 by ESP8266 Community"
-
-#### Libraries Required
-
-- **FastLED** — LED control
-
-#### Upload
-
-1. Connect ESP8266 board via USB
-2. Select Board: `NodeMCU 1.0 (ESP-12E Module)` (or your board variant)
-3. Select Port
-4. Upload `vizpow_8266/vizpow_8266.ino`
+Binaries are in each project's `.pio/build/<env>/` directory.
 
 ## Usage
 
