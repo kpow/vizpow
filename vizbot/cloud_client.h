@@ -392,9 +392,10 @@ static int cloudPost(const char* url, const String& body, String& response) {
 // ============================================================================
 
 static void processContent(JsonObject& content) {
-  // Serialize sayings and personalities separately for cache
+  // Serialize content types separately for cache
   String sayingsStr;
   String personalitiesStr;
+  String sequencesStr;
 
   if (content["sayings"].is<JsonArray>()) {
     serializeJson(content["sayings"], sayingsStr);
@@ -402,18 +403,29 @@ static void processContent(JsonObject& content) {
   if (content["personalities"].is<JsonArray>()) {
     serializeJson(content["personalities"], personalitiesStr);
   }
+  if (content["sequences"].is<JsonArray>()) {
+    serializeJson(content["sequences"], sequencesStr);
+  }
 
   if (sysStatus.littlefsReady) {
     writeCloudContent(sayingsStr, personalitiesStr);
+    if (sequencesStr.length() > 0) {
+      writeCloudSequences(sequencesStr);
+    }
     saveCloudMeta(cloudMeta);
-    applyCloudPersonalities();  // Load cloud personalities into runtime array
+    applyCloudPersonalities();
+#ifdef MIDI_SYNTH_ENABLED
+    applyCloudSequences();
+#endif
   }
 
   DBG("Cloud: cached ");
   DBG(sayingsStr.length());
   DBG("B sayings, ");
   DBG(personalitiesStr.length());
-  DBGLN("B personalities");
+  DBG("B personalities, ");
+  DBG(sequencesStr.length());
+  DBGLN("B sequences");
 }
 
 // ============================================================================

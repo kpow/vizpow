@@ -302,9 +302,9 @@ static const MidiSequenceDef builtinSequences[] = {
 
 #define MAX_CLOUD_SEQUENCES 20
 
-static MidiEvent  cloudSeqEvents[MAX_CLOUD_SEQUENCES][SEQ_MAX_EVENTS];
-static MidiSequenceDef cloudSequences[MAX_CLOUD_SEQUENCES];
-static uint8_t cloudSequenceCount = 0;
+MidiEvent  cloudSeqEvents[MAX_CLOUD_SEQUENCES][SEQ_MAX_EVENTS];
+MidiSequenceDef cloudSequences[MAX_CLOUD_SEQUENCES];
+uint8_t cloudSequenceCount = 0;
 
 // ============================================================================
 // Sine-wave fallback (M5.Speaker) — used when MIDI synth not available
