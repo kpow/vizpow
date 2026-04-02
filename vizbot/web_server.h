@@ -709,9 +709,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 // applied atomically between frames on Core 1.
 
 void handleRoot() {
-  // Send PROGMEM page in chunks to avoid 32KB heap allocation.
-  // With OTA + cloud + ArduinoJson loaded, free heap can be <45KB
-  // on 4MB boards — too tight for a single server.send() of the full page.
   size_t len = strlen_P(webpage);
   server.setContentLength(len);
   server.send(200, "text/html", "");
