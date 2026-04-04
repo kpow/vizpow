@@ -2,6 +2,8 @@
 build/
 vizbot/build/
 
+builds/
+
 # PlatformIO
 .pio/
 .vscode/.browse.c_cpp.db*
