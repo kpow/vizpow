@@ -38,7 +38,8 @@
 #include "tween.h"          // Tween animation system (must come before bot_mode.h)
 #include "effects_ambient.h"
 #ifdef TARGET_CORES3
-#include "bot_sounds.h"     // Core S3 speaker sound effects (must come before bot_mode.h)
+#include "midi_synth.h"     // SAM2695 MIDI synth driver (must come before bot_sounds.h)
+#include "bot_sounds.h"     // MIDI sequence engine + M5.Speaker fallback (must come before bot_mode.h)
 #include "audio_analysis.h" // Core S3 mic audio analysis
 #include "proximity_light.h" // Core S3 proximity & ambient light sensor
 #endif
@@ -390,8 +391,6 @@ void setup() {
 }
 
 void loop() {
-  // Web server runs in its own FreeRTOS task on Core 0 — no handleClient() here
-
   // Only read IMU if it initialized successfully
   if (sysStatus.imuReady) {
     readIMU();

@@ -177,6 +177,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       </div>
 
       <div class="card">
+        <h2 class="shdr" onclick="tgl('secSounds')">Sounds <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secSounds">
+          <div class="trow"><span>MIDI Synth</span><span id="midiStatus" style="font-size:12px;font-weight:700;color:#888">---</span></div>
+          <div class="grid4" id="soundGrid" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+      <div class="card">
         <h2 class="shdr" onclick="tgl('secInfo')">Weather &amp; Info <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secInfo">
           <div class="trow"><span>Show Weather</span><div class="tog" id="infoToggle" onclick="toggleInfo()"></div></div>
@@ -409,6 +417,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         const state = await r.json();
         document.getElementById('brightness').value = state.brightness;
         document.getElementById('brightnessVal').textContent = state.brightness;
+        if (state.sensors) {
+          var ms = document.getElementById('midiStatus');
+          if (state.sensors.useMidi) { ms.textContent = 'MIDI Active'; ms.style.color = '#88D498'; }
+          else if (state.sensors.speaker) { ms.textContent = 'Speaker'; ms.style.color = '#FFA552'; }
+          else { ms.textContent = 'Off'; ms.style.color = '#FF6B6B'; }
+        }
         if (state.timeOverlay !== undefined) {
           botTimeOn = state.timeOverlay;
           document.getElementById('botTimeToggle').className = 'tog ' + (botTimeOn ? 'on' : '');
@@ -667,11 +681,22 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 
     function initEmoji() { renderEmojiGrid(); renderEmojiQueue(); }
 
+    async function loadSounds() {
+      try {
+        const r = await fetch('/bot/sequences');
+        const seqs = await r.json();
+        document.getElementById('soundGrid').innerHTML = seqs.map(s =>
+          `<button onclick="api('/bot/sound?seq=${s.id}')" style="font-size:11px;padding:8px 4px">${s.name}</button>`
+        ).join('');
+      } catch(e) {}
+    }
+
     getState();
     render();
     wifiInitCheck();
     wledUpdateStatus();
     initEmoji();
+    loadSounds();
   </script>
 </body>
 </html>
@@ -684,9 +709,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 // applied atomically between frames on Core 1.
 
 void handleRoot() {
-  // Send PROGMEM page in chunks to avoid 32KB heap allocation.
-  // With OTA + cloud + ArduinoJson loaded, free heap can be <45KB
-  // on 4MB boards — too tight for a single server.send() of the full page.
   size_t len = strlen_P(webpage);
   server.setContentLength(len);
   server.send(200, "text/html", "");
@@ -751,6 +773,8 @@ void handleState() {
 #ifdef TARGET_CORES3
                 ",\"sensors\":{" +
                   "\"speaker\":" + (sysStatus.speakerReady ? "true" : "false") +
+                  ",\"midiSynth\":" + (sysStatus.midiReady ? "true" : "false") +
+                  ",\"useMidi\":" + (botSounds.useMidi ? "true" : "false") +
                   ",\"mic\":" + (sysStatus.micReady ? "true" : "false") +
                   ",\"proxLight\":" + (sysStatus.proxLightReady ? "true" : "false") +
                   ",\"soundEnabled\":" + (botSounds.enabled ? "true" : "false") +
@@ -788,6 +812,7 @@ extern void cmdSetTimeOverlay(bool enabled);
 extern void cmdToggleTimeOverlay();
 extern void cmdSetAmbientEffect(uint8_t val);
 extern void cmdPlaySound(uint16_t freq, uint16_t duration);
+extern void cmdPlaySequence(uint8_t seqId);
 extern void cmdSetVolume(uint8_t vol);
 
 void handleBrightness() {
@@ -1219,12 +1244,28 @@ extern struct AudioAnalysis audioAnalysis;
 extern struct ProxLightState proxLight;
 
 void handleBotSound() {
-  if (server.hasArg("freq") && server.hasArg("dur")) {
+  if (server.hasArg("seq")) {
+    uint8_t seqId = constrain(server.arg("seq").toInt(), 0, 255);
+    cmdPlaySequence(seqId);
+  } else if (server.hasArg("freq") && server.hasArg("dur")) {
     uint16_t freq = constrain(server.arg("freq").toInt(), 100, 8000);
     uint16_t dur = constrain(server.arg("dur").toInt(), 10, 5000);
     cmdPlaySound(freq, dur);
   }
   server.send(200, "text/plain", "OK");
+}
+
+void handleBotSequences() {
+  String json = "[";
+  for (uint8_t i = 1; i < BUILTIN_SEQ_COUNT; i++) {
+    if (i > 1) json += ",";
+    json += "{\"id\":" + String(i) + ",\"name\":\"" + String(builtinSequences[i].name) + "\"}";
+  }
+  for (uint8_t i = 0; i < cloudSequenceCount; i++) {
+    json += ",{\"id\":" + String(SEQ_CLOUD_BASE + i) + ",\"name\":\"" + String(cloudSequences[i].name) + "\",\"cloud\":true}";
+  }
+  json += "]";
+  server.send(200, "application/json", json);
 }
 
 void handleBotVolume() {
@@ -1343,6 +1384,7 @@ void setupWebServer() {
   #ifdef TARGET_CORES3
   server.on("/bot/sound", handleBotSound);
   server.on("/bot/volume", handleBotVolume);
+  server.on("/bot/sequences", handleBotSequences);
   server.on("/bot/mic", handleBotMic);
   #endif
 

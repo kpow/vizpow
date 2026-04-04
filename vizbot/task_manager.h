@@ -70,6 +70,7 @@ enum CommandType : uint8_t {
   CMD_SLEEP,
   CMD_MESH_SCAN,
   CMD_SET_PERSONALITY_LIST,
+  CMD_PLAY_SEQUENCE,
 };
 
 // ~64-byte command payload — fits all command types including multi-word phrases
@@ -210,6 +211,13 @@ void cmdSetVolume(uint8_t vol) {
   Command cmd;
   cmd.type = CMD_SET_VOLUME;
   cmd.u8val = vol;
+  pushCommand(cmd);
+}
+
+void cmdPlaySequence(uint8_t seqId) {
+  Command cmd;
+  cmd.type = CMD_PLAY_SEQUENCE;
+  cmd.u8val = seqId;
   pushCommand(cmd);
 }
 
@@ -362,6 +370,14 @@ void drainCommandQueue() {
           extern BotSounds botSounds;
           botSounds.setVolume(cmd.u8val);
           markSettingsDirty();
+        }
+        #endif
+        break;
+      case CMD_PLAY_SEQUENCE:
+        #ifdef TARGET_CORES3
+        {
+          extern BotSounds botSounds;
+          botSounds.play((MidiSequenceId)cmd.u8val);
         }
         #endif
         break;

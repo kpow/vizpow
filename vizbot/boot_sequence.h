@@ -17,7 +17,7 @@
 #endif
 
 // Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, 0, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
+SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, 0, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
@@ -433,7 +433,12 @@ void runBootSequence() {
   #ifdef TARGET_CORES3
   {
     bootDrawStage("Sensors");
-    // Speaker init
+    // MIDI synth init (SAM2695 via Grove Port C)
+    #ifdef MIDI_SYNTH_ENABLED
+    midiSynth.init();
+    sysStatus.midiReady = midiSynth.ready;
+    #endif
+    // Speaker/sound init (uses MIDI if available, else M5.Speaker fallback)
     botSounds.init();
     sysStatus.speakerReady = true;
     // Mic init
@@ -442,12 +447,10 @@ void runBootSequence() {
     // Proximity/light init
     proxLight.init();
     sysStatus.proxLightReady = proxLight.initialized;
-    char detail[32];
-    if (proxLight.initialized) {
-      snprintf(detail, sizeof(detail), "Spkr+Mic+Prox");
-    } else {
-      snprintf(detail, sizeof(detail), "Spkr+Mic (no prox)");
-    }
+    char detail[48];
+    snprintf(detail, sizeof(detail), "%s+Mic%s",
+      botSounds.useMidi ? "MIDI" : "Spkr",
+      proxLight.initialized ? "+Prox" : "");
     bootDrawResult(true, detail);
     delay(80);
   }
@@ -557,6 +560,7 @@ void runBootSequence() {
   DBGLN("ms");
   DBG("Failures: ");
   DBGLN(sysStatus.failCount);
+
 }
 
 #else

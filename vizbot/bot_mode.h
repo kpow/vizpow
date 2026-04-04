@@ -274,7 +274,7 @@ struct BotModeState {
       speechBubble.show(buf, 2000);
 
       #ifdef TARGET_CORES3
-      botSounds.play(SFX_WAKE_CHIME);
+      botSounds.play(SEQ_WAKE_CHIME);
       #endif
     }
     state = BOT_ACTIVE;
@@ -294,7 +294,7 @@ struct BotModeState {
     face.transitionTo(pick, 150);
 
     #ifdef TARGET_CORES3
-    botSounds.play(SFX_TAP_BOOP);
+    botSounds.play(SEQ_TAP_BOOP);
     #endif
 
     // Maybe show a tap saying
@@ -315,7 +315,7 @@ struct BotModeState {
     face.transitionTo(EXPR_DIZZY, 150);
 
     #ifdef TARGET_CORES3
-    botSounds.play(SFX_SHAKE_RATTLE);
+    botSounds.play(SEQ_SHAKE_RATTLE);
     #endif
 
     // Show shake saying
@@ -453,7 +453,7 @@ void updateBotMode() {
     // Spike (clap/bang): SURPRISED + sound + saying
     if (audioAnalysis.spikeDetected) {
       botMode.face.transitionTo(EXPR_SURPRISED, 100);
-      botSounds.play(SFX_CLAP_REACT);
+      botSounds.play(SEQ_CLAP_REACT);
       char buf[MAX_SAY_LEN];
       getRandomSayingText(SAY_REACT_SOUND, buf, sizeof(buf));
       botMode.speechBubble.show(buf, 2000);
@@ -738,10 +738,14 @@ void enterBotMode() {
   prevFrame.invalidate();
 
   if (!botMode.initialized) {
+    #ifdef MIDI_SYNTH_ENABLED
+    midiSynth.reinit();  // UART2 gets hijacked during boot — reclaim it
+    #endif
+
     botMode.init();
 
     #ifdef TARGET_CORES3
-    botSounds.play(SFX_BOOT_CHIME);
+    botSounds.play(SEQ_BOOT_CHIME);
     #endif
 
     // Show greeting on first entry

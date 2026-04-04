@@ -135,7 +135,8 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Dual-Core Architecture**: WiFi on Core 0, rendering on Core 1 — no frame drops or connection timeouts
 - **Touch Menu**: Long-press for settings (effects, palettes, brightness, speed, hi-res toggle)
 - **Shake Reactions**: IMU-driven dizzy expression and random utterances
-- **vizCloud Integration**: Cloud server connectivity for remote control, content sync, scheduled commands, and fleet management via DigitalOcean App Platform with TLS-pinned HTTPS
+- **MIDI Synthesizer**: SAM2695 MIDI synth module on M5 Core S3 (Grove Port C) — 24 built-in multi-voice sequences with GM instruments and percussion, cloud-managed custom sequences via vizCloud, M5.Speaker fallback when module unplugged
+- **vizCloud Integration**: Cloud server connectivity for remote control, content sync, MIDI sequence management, scheduled commands, and fleet management via DigitalOcean App Platform with TLS-pinned HTTPS
 - **ESP-NOW Mesh**: Peer-to-peer mesh networking between vizBot devices for coordinated WLED display and state sharing
 - **Multi-Board Support**: Runs on Waveshare ESP32-S3-Touch-LCD-1.69, ESP32-S3-LCD-1.3, ESP32-S3-Matrix, and M5Stack Core S3 — select target via PlatformIO environment
 - **Resolution-Independent Effects**: Hi-res ambient effects adapt to any LCD size (240x280 or 320x240)
@@ -223,8 +224,9 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **MCU**: ESP32-S3 (dual-core 240MHz, WiFi, BLE, 16MB flash)
 - **Display**: 320x240 IPS LCD (ILI9342C, landscape)
 - **Touch**: FT6336 capacitive touch
-- **Sensors**: BMI270 6-axis IMU
-- **Notes**: LCD reset/backlight via AW9523 I2C expander, all managed by M5Unified library. A `DisplayProxy` wrapper provides a unified API so all existing rendering code works unchanged.
+- **Sensors**: BMI270 6-axis IMU, dual MEMS microphone (ES7210), proximity/ambient light (LTR-553)
+- **Audio**: AW88298 1W I2S speaker (fallback), SAM2695 MIDI Synthesizer Unit via Grove Port C (optional)
+- **Notes**: LCD reset/backlight via AW9523 I2C expander, all managed by M5Unified library. A `DisplayProxy` wrapper provides a unified API so all existing rendering code works unchanged. MIDI synth uses Serial2 UART at 31250 baud (TX=GPIO17, RX=GPIO18).
 
 ### ESP8266 (NodeMCU/Wemos D1 Mini)
 
@@ -327,6 +329,7 @@ All versions pinned in `platformio.ini` — no manual installation needed.
 | SensorLib | 0.4.0 | vizbot, vizpow |
 | LovyanGFX | 1.2.19 | vizbot (LCD targets) |
 | M5Unified | 0.2.13 | vizbot (CoreS3 only) |
+| M5-SAM2695 | latest | vizbot (CoreS3 MIDI synth) |
 | ArduinoJson | 7.4.3 | vizbot |
 | GFX Library for Arduino | 1.6.5 | vizpow (LCD target) |
 

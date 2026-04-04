@@ -53,6 +53,7 @@ extern void cmdSetBgStyle(uint8_t val);
 extern void cmdSetPersonality(uint8_t val);
 extern void cmdSetAmbientEffect(uint8_t val);
 extern void cmdPlaySound(uint16_t freq, uint16_t duration);
+extern void cmdPlaySequence(uint8_t seqId);
 extern void cmdSetVolume(uint8_t vol);
 
 // Forward declarations from bot_mode.h
@@ -391,9 +392,10 @@ static int cloudPost(const char* url, const String& body, String& response) {
 // ============================================================================
 
 static void processContent(JsonObject& content) {
-  // Serialize sayings and personalities separately for cache
+  // Serialize content types separately for cache
   String sayingsStr;
   String personalitiesStr;
+  String sequencesStr;
 
   if (content["sayings"].is<JsonArray>()) {
     serializeJson(content["sayings"], sayingsStr);
@@ -401,18 +403,29 @@ static void processContent(JsonObject& content) {
   if (content["personalities"].is<JsonArray>()) {
     serializeJson(content["personalities"], personalitiesStr);
   }
+  if (content["sequences"].is<JsonArray>()) {
+    serializeJson(content["sequences"], sequencesStr);
+  }
 
   if (sysStatus.littlefsReady) {
     writeCloudContent(sayingsStr, personalitiesStr);
+    if (sequencesStr.length() > 0) {
+      writeCloudSequences(sequencesStr);
+    }
     saveCloudMeta(cloudMeta);
-    applyCloudPersonalities();  // Load cloud personalities into runtime array
+    applyCloudPersonalities();
+#ifdef MIDI_SYNTH_ENABLED
+    applyCloudSequences();
+#endif
   }
 
   DBG("Cloud: cached ");
   DBG(sayingsStr.length());
   DBG("B sayings, ");
   DBG(personalitiesStr.length());
-  DBGLN("B personalities");
+  DBG("B personalities, ");
+  DBG(sequencesStr.length());
+  DBGLN("B sequences");
 }
 
 // ============================================================================
@@ -471,6 +484,12 @@ static void dispatchCloudCommand(const char* type, JsonObject& payload) {
     DBG(freq);
     DBG(" dur=");
     DBGLN(dur);
+
+  } else if (strcmp(type, "play_sequence") == 0) {
+    uint8_t seqId = payload["sequenceId"] | 0;
+    cmdPlaySequence(seqId);
+    DBG("Cloud cmd: play_sequence=");
+    DBGLN(seqId);
 
   } else if (strcmp(type, "set_volume") == 0) {
     uint8_t vol = payload["value"] | 200;

@@ -12,13 +12,14 @@
 // ============================================================================
 // Content Cache — LittleFS-based cloud content storage
 // ============================================================================
-// Manages cached sayings and personalities from vizCloud.
+// Manages cached sayings, personalities, and sequences from vizCloud.
 // Files are stored under /cloud/ on LittleFS.
 //
 // Layout:
 //   /cloud/meta.json          — botId, contentVersion, pollInterval
 //   /cloud/sayings.json       — full sayings array from server
 //   /cloud/personalities.json — full personalities array from server
+//   /cloud/sequences.json     — MIDI sequences array from server
 // ============================================================================
 
 // Thread safety: set true while cloud task writes, checked by getCloudSaying()
@@ -115,6 +116,99 @@ bool saveCloudMeta(const CloudMeta& meta) {
 // ============================================================================
 // Content Read/Write
 // ============================================================================
+
+bool writeCloudSequences(const String& sequencesJson) {
+  if (sequencesJson.length() == 0) return true;
+  File f = LittleFS.open("/cloud/sequences.json", "w");
+  if (!f) {
+    DBGLN("Cache: failed to write sequences");
+    return false;
+  }
+  f.print(sequencesJson);
+  f.close();
+  return true;
+}
+
+bool loadCloudSequences(JsonDocument& doc) {
+  File f = LittleFS.open("/cloud/sequences.json", "r");
+  if (!f) return false;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) {
+    DBG("Sequences parse error: ");
+    DBGLN(err.c_str());
+    return false;
+  }
+  return true;
+}
+
+// Parse cloud sequences JSON into runtime MidiSequenceDef/MidiEvent arrays
+// (defined in bot_sounds.h: cloudSeqEvents, cloudSequences, cloudSequenceCount)
+#ifdef MIDI_SYNTH_ENABLED
+extern MidiEvent  cloudSeqEvents[][SEQ_MAX_EVENTS];
+extern MidiSequenceDef cloudSequences[];
+extern uint8_t cloudSequenceCount;
+
+void applyCloudSequences() {
+  JsonDocument doc;
+  if (!loadCloudSequences(doc)) {
+    DBGLN("Cache: no cloud sequences to apply");
+    return;
+  }
+
+  JsonArray arr = doc.as<JsonArray>();
+  if (arr.isNull() || arr.size() == 0) {
+    DBGLN("Cache: cloud sequences array empty");
+    cloudSequenceCount = 0;
+    return;
+  }
+
+  uint8_t count = 0;
+  for (JsonObject seq : arr) {
+    if (count >= MAX_CLOUD_SEQUENCES) break;
+
+    MidiSequenceDef& def = cloudSequences[count];
+    // Store name in a static buffer (names are short, reuse the event's memory footprint)
+    static char cloudSeqNames[MAX_CLOUD_SEQUENCES][32];
+    const char* name = seq["name"] | "Cloud";
+    strncpy(cloudSeqNames[count], name, sizeof(cloudSeqNames[count]) - 1);
+    cloudSeqNames[count][31] = '\0';
+    def.name = cloudSeqNames[count];
+
+    def.defaultProgram = seq["defaultProgram"] | 0;
+    def.flags = 0;
+
+    JsonArray events = seq["events"];
+    uint8_t evCount = 0;
+    if (events) {
+      for (JsonObject ev : events) {
+        if (evCount >= SEQ_MAX_EVENTS) break;
+        MidiEvent& me = cloudSeqEvents[count][evCount];
+        me.note       = ev["note"] | 0;
+        me.velocity   = ev["velocity"] | 100;
+        me.channel    = ev["channel"] | 0;
+        me.program    = ev["program"] | 255;
+        me.durationMs = ev["duration"] | 100;
+        me.offsetMs   = ev["offset"] | 0;
+        evCount++;
+      }
+    }
+    def.eventCount = evCount;
+    def.events = cloudSeqEvents[count];
+
+    DBG("Cache: loaded cloud sequence [");
+    DBG(count);
+    DBG("] ");
+    DBGLN(def.name);
+
+    count++;
+  }
+
+  cloudSequenceCount = count;
+  DBG("Cache: total cloud sequences: ");
+  DBGLN(cloudSequenceCount);
+}
+#endif // MIDI_SYNTH_ENABLED
 
 bool writeCloudContent(const String& sayingsJson, const String& personalitiesJson) {
   contentUpdateInProgress = true;
@@ -274,6 +368,7 @@ void clearContentCache() {
   LittleFS.remove("/cloud/meta.json");
   LittleFS.remove("/cloud/sayings.json");
   LittleFS.remove("/cloud/personalities.json");
+  LittleFS.remove("/cloud/sequences.json");
   DBGLN("Cache: cleared");
 }
 
