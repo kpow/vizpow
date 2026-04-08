@@ -55,6 +55,23 @@ enum MidiSequenceId : uint8_t {
   SEQ_RAIN_DROP,        // 23 - Single raindrop
   SEQ_COUNTDOWN_TICK,   // 24 - Metronome tick
 
+  // Additional SFX (interaction + character emotion)
+  SEQ_SWIPE,            // 25 - Swipe gesture
+  SEQ_TOGGLE_ON,        // 26 - Toggle on
+  SEQ_TOGGLE_OFF,       // 27 - Toggle off
+  SEQ_DISMISS,          // 28 - Dismiss / cancel
+  SEQ_CONFIRM,          // 29 - Confirm action
+  SEQ_HAPPY_HUM,        // 30 - Cheerful hum
+  SEQ_SAD_SIGH,         // 31 - Sad sigh
+  SEQ_CURIOUS_BEEP,     // 32 - Curious question
+  SEQ_LAUGH,            // 33 - Bouncy laugh
+  SEQ_YAWN,             // 34 - Sleepy yawn
+
+  // Full songs
+  SEQ_SONG_FUNKY_BOT,   // 35 - Upbeat funky tune
+  SEQ_SONG_CHILL_WAVE,  // 36 - Ambient chill
+  SEQ_SONG_RETRO_QUEST, // 37 - Retro game theme
+
   SEQ_BUILTIN_COUNT,    // Sentinel
 
   // Cloud-delivered sequences start here
@@ -261,6 +278,386 @@ static const MidiEvent PROGMEM _evTick[] = {
   {PERC_WOODBLOCK, 90, 9, 255, 20, 0},
 };
 
+// --- Swipe: Celesta quick ascending glissando ---
+static const MidiEvent PROGMEM _evSwipe[] = {
+  {72, 60, 0, GM_CELESTA, 30, 0},     // C5
+  {76, 70, 0, 255,        30, 30},    // E5
+  {79, 80, 0, 255,        30, 60},    // G5
+  {84, 90, 0, 255,        50, 90},    // C6
+};
+
+// --- Toggle On: Music box bright two-note up ---
+static const MidiEvent PROGMEM _evToggleOn[] = {
+  {67, 90, 0, GM_MUSIC_BOX, 60, 0},    // G4
+  {79, 100, 0, 255,         80, 70},   // G5
+};
+
+// --- Toggle Off: Music box two-note down ---
+static const MidiEvent PROGMEM _evToggleOff[] = {
+  {79, 90, 0, GM_MUSIC_BOX, 60, 0},    // G5
+  {67, 80, 0, 255,          80, 70},   // G4
+};
+
+// --- Dismiss: Marimba quick descending fade ---
+static const MidiEvent PROGMEM _evDismiss[] = {
+  {76, 80, 0, GM_MARIMBA, 40, 0},     // E5
+  {72, 70, 0, 255,        40, 40},    // C5
+  {67, 55, 0, 255,        50, 80},    // G4
+};
+
+// --- Confirm: Glockenspiel bright double ding ---
+static const MidiEvent PROGMEM _evConfirm[] = {
+  {79, 100, 0, GM_GLOCKENSPIEL, 80, 0},    // G5
+  {84, 110, 0, 255,             120, 100},  // C6
+};
+
+// --- Happy Hum: Vibraphone cheerful ascending phrase ---
+static const MidiEvent PROGMEM _evHappyHum[] = {
+  {67, 80, 0, GM_VIBRAPHONE, 100, 0},    // G4
+  {71, 85, 0, 255,           80, 100},   // B4
+  {74, 90, 0, 255,           80, 180},   // D5
+  {79, 95, 0, 255,           120, 260},  // G5
+  {83, 100, 0, 255,          180, 340},  // B5
+};
+
+// --- Sad Sigh: Warm pad slow descending minor ---
+static const MidiEvent PROGMEM _evSadSigh[] = {
+  {72, 70, 0, GM_PAD_WARM, 250, 0},     // C5
+  {68, 65, 0, 255,         250, 300},   // Ab4
+  {65, 55, 0, 255,         300, 600},   // F4
+  {63, 50, 0, 255,         400, 900},   // Eb4
+};
+
+// --- Curious Beep: Celesta question-mark melody ---
+static const MidiEvent PROGMEM _evCurious[] = {
+  {67, 80, 0, GM_CELESTA, 60, 0},      // G4
+  {64, 75, 0, 255,        60, 80},     // E4
+  {71, 90, 0, 255,        120, 160},   // B4 (up = question)
+};
+
+// --- Laugh: Xylophone bouncy descending staccato ---
+static const MidiEvent PROGMEM _evLaugh[] = {
+  {84, 100, 0, GM_XYLOPHONE, 30, 0},    // C6
+  {81, 95, 0, 255,           30, 50},   // A5
+  {79, 90, 0, 255,           30, 100},  // G5
+  {76, 85, 0, 255,           30, 150},  // E5
+  {74, 80, 0, 255,           30, 200},  // D5
+  {72, 75, 0, 255,           40, 250},  // C5
+};
+
+// --- Yawn: Blown bottle slow rise and fall ---
+static const MidiEvent PROGMEM _evYawn[] = {
+  {60, 60, 0, GM_BLOWN_BOTTLE, 200, 0},    // C4
+  {64, 65, 0, 255,             200, 200},  // E4
+  {67, 70, 0, 255,             250, 400},  // G4 peak
+  {64, 60, 0, 255,             200, 650},  // E4 falling
+  {60, 50, 0, 255,             300, 850},  // C4 low
+};
+
+// ============================================================================
+// Full Songs — multi-channel MIDI compositions
+// ============================================================================
+// Channels: 0 = melody, 1 = bass, 9 = percussion
+// Songs stay within 8 simultaneous notes for MAX_ACTIVE_NOTES limit
+
+// --- Funky Bot: Upbeat chiptune-style groove (~18s) ---
+// C major pentatonic melody, walking bass, steady beat
+static const MidiEvent PROGMEM _evFunkyBot[] = {
+  // -- Bar 1 (0ms): Intro groove --
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 0},
+  {48, 90, 1, GM_ELECTRIC_PIANO, 200, 0},     // C3 bass
+  {72, 100, 0, GM_BRIGHT_PIANO,  150, 0},     // C5 melody
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 250},
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 250},
+  {76, 100, 0, 255,             150, 250},    // E5
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 500},
+  {PERC_SNARE, 90, 9, 255,      20, 500},
+  {50, 85, 1, 255,              200, 500},    // D3 bass
+  {79, 105, 0, 255,             150, 500},    // G5
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 750},
+  {76, 95, 0, 255,              100, 750},    // E5
+
+  // -- Bar 2 (1000ms): Melodic phrase --
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 1000},
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 1000},
+  {52, 90, 1, 255,              200, 1000},   // E3 bass
+  {84, 110, 0, 255,             200, 1000},   // C6 melody
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 1250},
+  {81, 100, 0, 255,             150, 1250},   // A5
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 1500},
+  {PERC_SNARE, 90, 9, 255,      20, 1500},
+  {55, 85, 1, 255,              200, 1500},   // G3 bass
+  {79, 105, 0, 255,             200, 1500},   // G5
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 1750},
+  {76, 95, 0, 255,              100, 1750},   // E5
+
+  // -- Bar 3 (2000ms): Funky riff --
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 2000},
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 2000},
+  {48, 90, 1, 255,              200, 2000},   // C3 bass
+  {72, 95, 0, 255,              80, 2000},    // C5 staccato
+  {74, 100, 0, 255,             80, 2100},    // D5
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 2250},
+  {76, 105, 0, 255,             150, 2200},   // E5
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 2500},
+  {PERC_SNARE, 90, 9, 255,      20, 2500},
+  {50, 85, 1, 255,              200, 2500},   // D3 bass
+  {79, 110, 0, 255,             200, 2500},   // G5
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 2750},
+  {81, 100, 0, 255,             100, 2750},   // A5
+
+  // -- Bar 4 (3000ms): Climax phrase --
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 3000},
+  {PERC_OPEN_HH, 85, 9, 255,    30, 3000},
+  {55, 90, 1, 255,              200, 3000},   // G3 bass
+  {84, 110, 0, 255,             200, 3000},   // C6 melody high
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 3250},
+  {81, 105, 0, 255,             150, 3250},   // A5
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 3500},
+  {PERC_SNARE, 95, 9, 255,      20, 3500},
+  {52, 85, 1, 255,              200, 3500},   // E3 bass
+  {79, 100, 0, 255,             200, 3500},   // G5
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 3750},
+  {76, 90, 0, 255,              100, 3750},   // E5
+
+  // -- Bar 5 (4000ms): Repeat groove variation --
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 4000},
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 4000},
+  {48, 90, 1, 255,              200, 4000},   // C3
+  {74, 100, 0, 255,             150, 4000},   // D5
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 4250},
+  {76, 105, 0, 255,             100, 4250},   // E5
+  {79, 110, 0, 255,             150, 4350},   // G5
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 4500},
+  {PERC_SNARE, 90, 9, 255,      20, 4500},
+  {50, 85, 1, 255,              200, 4500},   // D3
+  {81, 100, 0, 255,             200, 4500},   // A5
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 4750},
+  {84, 110, 0, 255,             100, 4750},   // C6
+
+  // -- Bar 6 (5000ms): Bridge --
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 5000},
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 5000},
+  {53, 90, 1, 255,              200, 5000},   // F3
+  {77, 100, 0, 255,             200, 5000},   // F5 (new note!)
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 5250},
+  {79, 100, 0, 255,             150, 5250},   // G5
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 5500},
+  {PERC_SNARE, 90, 9, 255,      20, 5500},
+  {55, 85, 1, 255,              200, 5500},   // G3
+  {81, 105, 0, 255,             200, 5500},   // A5
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 5750},
+  {79, 95, 0, 255,              100, 5750},   // G5
+
+  // -- Bar 7 (6000ms): Return to hook --
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 6000},
+  {PERC_OPEN_HH, 85, 9, 255,    30, 6000},
+  {48, 90, 1, 255,              200, 6000},   // C3
+  {84, 115, 0, 255,             200, 6000},   // C6
+  {PERC_CLOSED_HH, 70, 9, 255,  20, 6250},
+  {81, 105, 0, 255,             150, 6250},   // A5
+  {PERC_CLOSED_HH, 80, 9, 255,  20, 6500},
+  {PERC_SNARE, 95, 9, 255,      20, 6500},
+  {52, 85, 1, 255,              200, 6500},   // E3
+  {79, 100, 0, 255,             150, 6500},   // G5
+  {76, 95, 0, 255,              150, 6750},   // E5
+
+  // -- Bar 8 (7000ms): Ending --
+  {PERC_BASS_DRUM, 110, 9, 255, 20, 7000},
+  {PERC_SNARE, 100, 9, 255,     20, 7000},
+  {48, 95, 1, 255,              300, 7000},   // C3 bass hold
+  {72, 110, 0, 255,             100, 7000},   // C5
+  {76, 110, 0, 255,             100, 7100},   // E5
+  {79, 115, 0, 255,             100, 7200},   // G5
+  {84, 120, 0, 255,             400, 7300},   // C6 final hold
+  {PERC_HAND_CLAP, 100, 9, 255, 20, 7300},
+};
+
+// --- Chill Wave: Ambient vibraphone + pad (~20s) ---
+// Cmaj7/Am7 progression, soft percussion, dreamy feel
+static const MidiEvent PROGMEM _evChillWave[] = {
+  // -- Section 1 (0ms): Cmaj7 pad entry --
+  {48, 50, 1, GM_PAD_WARM, 2000, 0},          // C3 pad
+  {67, 70, 0, GM_VIBRAPHONE, 400, 200},        // G4
+  {PERC_TRIANGLE, 40, 9, 255,   30, 200},
+  {72, 65, 0, 255,              500, 800},     // C5
+  {71, 60, 0, 255,              400, 1400},    // B4
+  {PERC_TRIANGLE, 35, 9, 255,   30, 1600},
+
+  // -- Section 2 (2000ms): Am7 shift --
+  {45, 50, 1, 255,             2000, 2000},    // A2 pad
+  {69, 70, 0, 255,              400, 2200},    // A4
+  {PERC_TRIANGLE, 40, 9, 255,   30, 2400},
+  {76, 65, 0, 255,              500, 2800},    // E5
+  {74, 60, 0, 255,              400, 3400},    // D5
+  {PERC_CLOSED_HH, 30, 9, 255,  20, 3500},
+
+  // -- Section 3 (4000ms): Fmaj7 --
+  {41, 50, 1, 255,             2000, 4000},    // F2 pad
+  {72, 70, 0, 255,              400, 4200},    // C5
+  {PERC_TRIANGLE, 40, 9, 255,   30, 4200},
+  {77, 65, 0, 255,              500, 4800},    // F5
+  {76, 60, 0, 255,              400, 5400},    // E5
+  {PERC_TRIANGLE, 35, 9, 255,   30, 5600},
+
+  // -- Section 4 (6000ms): G7 resolve --
+  {43, 50, 1, 255,             2000, 6000},    // G2 pad
+  {74, 70, 0, 255,              400, 6200},    // D5
+  {PERC_TRIANGLE, 40, 9, 255,   30, 6200},
+  {79, 65, 0, 255,              500, 6800},    // G5
+  {77, 60, 0, 255,              400, 7400},    // F5
+  {PERC_CLOSED_HH, 30, 9, 255,  20, 7600},
+
+  // -- Section 5 (8000ms): Repeat Cmaj7, higher register --
+  {48, 50, 1, 255,             2000, 8000},    // C3 pad
+  {79, 70, 0, 255,              400, 8200},    // G5
+  {PERC_TRIANGLE, 40, 9, 255,   30, 8400},
+  {84, 60, 0, 255,              500, 8800},    // C6
+  {83, 55, 0, 255,              400, 9400},    // B5
+  {PERC_TRIANGLE, 35, 9, 255,   30, 9400},
+
+  // -- Section 6 (10000ms): Am7 --
+  {45, 50, 1, 255,             2000, 10000},   // A2 pad
+  {81, 65, 0, 255,              400, 10200},   // A5
+  {PERC_TRIANGLE, 40, 9, 255,   30, 10400},
+  {84, 60, 0, 255,              500, 10800},   // C6
+  {79, 55, 0, 255,              500, 11400},   // G5
+
+  // -- Section 7 (12000ms): Fmaj7 variation --
+  {41, 50, 1, 255,             2000, 12000},   // F2 pad
+  {77, 65, 0, 255,              500, 12200},   // F5
+  {PERC_TRIANGLE, 40, 9, 255,   30, 12200},
+  {76, 60, 0, 255,              400, 12800},   // E5
+  {72, 55, 0, 255,              500, 13400},   // C5
+  {PERC_TRIANGLE, 35, 9, 255,   30, 13600},
+
+  // -- Section 8 (14000ms): G7 → resolve --
+  {43, 50, 1, 255,             2000, 14000},   // G2 pad
+  {79, 65, 0, 255,              400, 14200},   // G5
+  {PERC_TRIANGLE, 40, 9, 255,   30, 14200},
+  {74, 60, 0, 255,              500, 14800},   // D5
+  {71, 55, 0, 255,              500, 15400},   // B4
+
+  // -- Section 9 (16000ms): Final Cmaj7 fade --
+  {48, 45, 1, 255,             3000, 16000},   // C3 pad long
+  {72, 55, 0, 255,              600, 16200},   // C5
+  {PERC_TRIANGLE, 35, 9, 255,   30, 16400},
+  {76, 50, 0, 255,              600, 17000},   // E5
+  {79, 45, 0, 255,              800, 17800},   // G5 fade
+  {84, 40, 0, 255,              1000, 18600},  // C6 final ring
+};
+
+// --- Retro Quest: Game adventure theme (~16s) ---
+// Em/G/C/D progression, music box melody, 8-bit feel
+static const MidiEvent PROGMEM _evRetroQuest[] = {
+  // -- Bar 1 (0ms): Em - Hero theme intro --
+  {PERC_BASS_DRUM, 90, 9, 255,  20, 0},
+  {40, 80, 1, GM_ELECTRIC_PIANO, 400, 0},      // E2 bass
+  {76, 100, 0, GM_MUSIC_BOX,    150, 0},       // E5 melody
+  {79, 95, 0, 255,              150, 200},     // G5
+  {PERC_CLOSED_HH, 60, 9, 255,  20, 250},
+  {83, 105, 0, 255,             200, 400},     // B5
+  {PERC_SNARE, 80, 9, 255,      20, 500},
+  {79, 90, 0, 255,              150, 600},     // G5
+
+  // -- Bar 2 (800ms): G - Rising action --
+  {PERC_BASS_DRUM, 90, 9, 255,  20, 800},
+  {43, 80, 1, 255,              400, 800},     // G2 bass
+  {79, 100, 0, 255,             150, 800},     // G5
+  {83, 95, 0, 255,              150, 1000},    // B5
+  {PERC_CLOSED_HH, 60, 9, 255,  20, 1050},
+  {84, 105, 0, 255,             200, 1200},    // C6
+  {PERC_SNARE, 80, 9, 255,      20, 1300},
+  {86, 100, 0, 255,             200, 1400},    // D6
+
+  // -- Bar 3 (1600ms): C - Triumphant --
+  {PERC_BASS_DRUM, 90, 9, 255,  20, 1600},
+  {36, 80, 1, 255,              400, 1600},    // C2 bass
+  {88, 110, 0, 255,             200, 1600},    // E6 high!
+  {PERC_CLOSED_HH, 60, 9, 255,  20, 1850},
+  {86, 100, 0, 255,             150, 1800},    // D6
+  {84, 95, 0, 255,              150, 2000},    // C6
+  {PERC_SNARE, 80, 9, 255,      20, 2100},
+  {83, 90, 0, 255,              200, 2200},    // B5
+
+  // -- Bar 4 (2400ms): D - Resolution --
+  {PERC_BASS_DRUM, 90, 9, 255,  20, 2400},
+  {38, 80, 1, 255,              400, 2400},    // D2 bass
+  {86, 105, 0, 255,             200, 2400},    // D6
+  {PERC_CLOSED_HH, 60, 9, 255,  20, 2650},
+  {84, 100, 0, 255,             200, 2600},    // C6
+  {83, 95, 0, 255,              200, 2800},    // B5
+  {PERC_SNARE, 80, 9, 255,      20, 2900},
+  {79, 90, 0, 255,              300, 3000},    // G5 hold
+
+  // -- Bar 5 (3200ms): Em - Second verse lower --
+  {PERC_BASS_DRUM, 90, 9, 255,  20, 3200},
+  {PERC_COWBELL, 60, 9, 255,    20, 3200},
+  {40, 80, 1, 255,              400, 3200},    // E2
+  {64, 95, 0, 255,              150, 3200},    // E4
+  {67, 90, 0, 255,              150, 3400},    // G4
+  {PERC_CLOSED_HH, 60, 9, 255,  20, 3450},
+  {71, 100, 0, 255,             200, 3600},    // B4
+  {PERC_SNARE, 80, 9, 255,      20, 3700},
+  {74, 95, 0, 255,              150, 3800},    // D5
+
+  // -- Bar 6 (4000ms): G - Build up --
+  {PERC_BASS_DRUM, 90, 9, 255,  20, 4000},
+  {43, 80, 1, 255,              400, 4000},    // G2
+  {76, 100, 0, 255,             150, 4000},    // E5
+  {79, 100, 0, 255,             150, 4200},    // G5
+  {PERC_CLOSED_HH, 60, 9, 255,  20, 4250},
+  {83, 105, 0, 255,             200, 4400},    // B5
+  {PERC_SNARE, 80, 9, 255,      20, 4500},
+  {84, 110, 0, 255,             200, 4600},    // C6
+
+  // -- Bar 7 (4800ms): Am - Dramatic turn --
+  {PERC_BASS_DRUM, 95, 9, 255,  20, 4800},
+  {33, 80, 1, 255,              400, 4800},    // A1 bass
+  {84, 105, 0, 255,             200, 4800},    // C6
+  {81, 100, 0, 255,             150, 5000},    // A5
+  {PERC_CLOSED_HH, 60, 9, 255,  20, 5050},
+  {76, 95, 0, 255,              200, 5200},    // E5
+  {PERC_SNARE, 85, 9, 255,      20, 5300},
+  {81, 100, 0, 255,             200, 5400},    // A5
+
+  // -- Bar 8 (5600ms): B7 - Tension --
+  {PERC_BASS_DRUM, 95, 9, 255,  20, 5600},
+  {35, 80, 1, 255,              400, 5600},    // B1 bass
+  {83, 110, 0, 255,             100, 5600},    // B5 quick
+  {80, 105, 0, 255,             100, 5700},    // Ab5
+  {83, 110, 0, 255,             100, 5800},    // B5
+  {PERC_SNARE, 85, 9, 255,      20, 5900},
+  {86, 115, 0, 255,             300, 5900},    // D6 dramatic
+
+  // -- Bar 9 (6400ms): Em - Final chorus --
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 6400},
+  {PERC_OPEN_HH, 75, 9, 255,   30, 6400},
+  {40, 85, 1, 255,              400, 6400},    // E2
+  {88, 115, 0, 255,             200, 6400},    // E6 high
+  {PERC_CLOSED_HH, 60, 9, 255,  20, 6650},
+  {86, 110, 0, 255,             150, 6600},    // D6
+  {84, 105, 0, 255,             200, 6800},    // C6
+  {PERC_SNARE, 90, 9, 255,      20, 6900},
+  {83, 100, 0, 255,             200, 7000},    // B5
+
+  // -- Bar 10 (7200ms): G → ending --
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 7200},
+  {43, 85, 1, 255,              400, 7200},    // G2
+  {79, 100, 0, 255,             150, 7200},    // G5
+  {83, 105, 0, 255,             200, 7400},    // B5
+  {PERC_SNARE, 90, 9, 255,      20, 7500},
+  {86, 110, 0, 255,             300, 7600},    // D6
+
+  // -- Ending (7800ms): Final Em chord --
+  {PERC_BASS_DRUM, 110, 9, 255, 20, 7800},
+  {PERC_HAND_CLAP, 90, 9, 255,  20, 7800},
+  {40, 90, 1, 255,              500, 7800},    // E2 bass hold
+  {76, 110, 0, 255,             500, 7800},    // E5 chord
+  {79, 110, 0, 255,             500, 7800},    // G5 chord
+  {83, 115, 0, 255,             600, 7800},    // B5 chord ring
+};
+
 // --- Sequence Lookup Table ---
 
 static const MidiSequenceDef builtinSequences[] = {
@@ -292,6 +689,21 @@ static const MidiSequenceDef builtinSequences[] = {
   { "Typing",         1, GM_WOODBLOCK,    0, _evTyping },
   { "Rain Drop",      1, GM_GLOCKENSPIEL, 0, _evRain },
   { "Countdown",      1, 0,               SEQ_FLAG_PERCUSSION, _evTick },
+  // Additional SFX (25-34)
+  { "Swipe",          4, GM_CELESTA,      0, _evSwipe },
+  { "Toggle On",      2, GM_MUSIC_BOX,    0, _evToggleOn },
+  { "Toggle Off",     2, GM_MUSIC_BOX,    0, _evToggleOff },
+  { "Dismiss",        3, GM_MARIMBA,      0, _evDismiss },
+  { "Confirm",        2, GM_GLOCKENSPIEL, 0, _evConfirm },
+  { "Happy Hum",      5, GM_VIBRAPHONE,   0, _evHappyHum },
+  { "Sad Sigh",       4, GM_PAD_WARM,     0, _evSadSigh },
+  { "Curious Beep",   3, GM_CELESTA,      0, _evCurious },
+  { "Laugh",          6, GM_XYLOPHONE,    0, _evLaugh },
+  { "Yawn",           5, GM_BLOWN_BOTTLE, 0, _evYawn },
+  // Full songs (35-37)
+  { "Funky Bot",      sizeof(_evFunkyBot)/sizeof(MidiEvent),   GM_BRIGHT_PIANO, SEQ_FLAG_PERCUSSION, _evFunkyBot },
+  { "Chill Wave",     sizeof(_evChillWave)/sizeof(MidiEvent),  GM_VIBRAPHONE,   SEQ_FLAG_PERCUSSION, _evChillWave },
+  { "Retro Quest",    sizeof(_evRetroQuest)/sizeof(MidiEvent), GM_MUSIC_BOX,    SEQ_FLAG_PERCUSSION, _evRetroQuest },
 };
 
 #define BUILTIN_SEQ_COUNT (sizeof(builtinSequences) / sizeof(builtinSequences[0]))
