@@ -91,7 +91,7 @@ struct MidiEvent {
 
 // --- Sequence Definition ---
 
-#define SEQ_MAX_EVENTS 32
+#define SEQ_MAX_EVENTS 128  // cloud-sequence event cap (matches vizCloud MAX_CLOUD_EVENTS)
 #define SEQ_FLAG_LOOP       0x01
 #define SEQ_FLAG_PERCUSSION 0x02
 
