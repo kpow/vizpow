@@ -28,6 +28,18 @@ struct SystemStatus {
   bool proxLightReady;   // Core S3 proximity/light sensor initialized
   bool psramAvailable;   // PSRAM detected at boot
   bool ntpSynced;            // NTP time obtained
+  // StackChan base subsystems (only meaningful when BOARD_HAS_STACKCHAN_BASE)
+#ifdef BOARD_HAS_STACKCHAN_BASE
+  bool scIoExpanderReady;    // PY32L020 IO expander (I2C 0x6F)
+  bool scVmEnReady;          // VM_EN servo power rail enabled
+  bool scServoXReady;        // SCS0009 yaw servo
+  bool scServoYReady;        // SCS0009 pitch servo
+  bool scBaseLedsReady;      // WS2812C 12-LED ring
+  bool scHeadTouchReady;     // Si12T capacitive touch (I2C 0x68)
+  bool scBatteryMonReady;    // INA226 battery monitor (I2C 0x41)
+  bool scCameraReady;        // GC0308 camera
+  bool scPhotoFsReady;       // LittleFS photo storage partition
+#endif
   unsigned long ntpSyncedAt; // millis() when NTP first synced
   uint32_t psramSizeKB;  // Total PSRAM in KB (0 if not available)
   IPAddress apIP;
