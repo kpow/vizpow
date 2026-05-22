@@ -1334,6 +1334,32 @@ void handleSchedule() {
   server.send(200, "application/json", json);
 }
 
+// ============================================================================
+// StackChan Stub Endpoints (Phase 1 — return 501 Not Implemented)
+// ============================================================================
+// URL shapes are final (MCP-wrappable per Q8). Behavior is stubbed until
+// the corresponding subsystem driver lands in Phase 2+.
+#ifdef BOARD_HAS_STACKCHAN_BASE
+
+void scSendDeferred(uint8_t phase) {
+  String json = "{\"status\":\"deferred\",\"phase\":";
+  json += phase;
+  json += "}";
+  server.send(501, "application/json", json);
+}
+
+void handleScHeadSetAngles()  { scSendDeferred(2); }
+void handleScHeadPreset()     { scSendDeferred(2); }
+void handleScHeadRecenter()   { scSendDeferred(2); }
+void handleScBaseLeds()       { scSendDeferred(2); }
+void handleScPhotoCapture()   { scSendDeferred(4); }
+void handleScPhotoList()      { scSendDeferred(4); }
+void handleScPhotoGet()       { scSendDeferred(4); }
+void handleScPhotoDelete()    { scSendDeferred(4); }
+void handleScBatteryStatus()  { scSendDeferred(2); }
+
+#endif // BOARD_HAS_STACKCHAN_BASE
+
 void handleCaptiveRedirect() {
   // In STA-only mode, no captive portal — just serve root
   String ip = sysStatus.staConnected ? sysStatus.staIP.toString() : WiFi.softAPIP().toString();
@@ -1392,6 +1418,19 @@ void setupWebServer() {
   #ifdef CLOUD_ENABLED
   server.on("/cloud/status", handleCloudStatus);
   server.on("/cloud/sync", handleCloudSync);
+  #endif
+
+  // StackChan stub endpoints (501 until driver bring-up)
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  server.on("/bot/head/set_angles", handleScHeadSetAngles);
+  server.on("/bot/head/preset", handleScHeadPreset);
+  server.on("/bot/head/recenter", handleScHeadRecenter);
+  server.on("/bot/base_leds/set", handleScBaseLeds);
+  server.on("/bot/photo/capture", handleScPhotoCapture);
+  server.on("/bot/photos", handleScPhotoList);
+  server.on("/bot/photo/get", handleScPhotoGet);
+  server.on("/bot/photo/delete", handleScPhotoDelete);
+  server.on("/bot/battery/status", handleScBatteryStatus);
   #endif
 
   // Schedule endpoints

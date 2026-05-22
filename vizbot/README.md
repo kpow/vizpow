@@ -39,17 +39,49 @@ A board is selected by a `BOARD_*` build flag set per PlatformIO env (see [Build
 | `BOARD_ESP32S3_LCD_169` | `lcd-169` | `TARGET_LCD` | 240x280 ST7789V2 | CST816T | Primary dev board |
 | `BOARD_ESP32S3_LCD_13` | `lcd-13` | `TARGET_LCD` | 240x240 ST7789VW | none | Battery powered, no touch |
 | `BOARD_M5CORES3` | `m5cores3` | `TARGET_CORES3` | 320x240 ILI9342C | FT6336 | Audio, proximity, MIDI synth |
+| `BOARD_M5CORES3` + `BOARD_HAS_STACKCHAN_BASE` | `stackchan` | `TARGET_CORES3` | 320x240 ILI9342C | FT6336 | StackChan K151-R flagship (3.0) |
 | `BOARD_ESP32S3_MATRIX` | `matrix` | `TARGET_LED` | 8x8 WS2812B only | none | LED-only, 4MB flash |
 
 All LCD targets use `DisplayProxy`, which wraps LovyanGFX (or M5Unified's internal LovyanGFX)
 behind a unified `beginCanvas()`/`flushCanvas()` double-buffered API.
 
-> **vizBot 3.0 / StackChan (in progress).** A new flagship target, the M5Stack StackChan
-> (K151-R), is being added as an *extension* of `BOARD_M5CORES3` via a `BOARD_HAS_STACKCHAN_BASE`
-> build flag (PlatformIO env `stackchan`) — not a separate board. It adds servo head motion,
-> a base LED ring, head-touch, battery monitor, and camera. StackChan-specific code is gated by
-> the extension flag so bare Core S3 builds remain unchanged and license-clean. See
-> [Licenses](#licenses) for the GPL-3.0 obligation that applies to the StackChan binary.
+### StackChan Target (vizBot 3.0, in progress)
+
+The M5Stack StackChan (K151-R) is the new flagship target, added as an *extension* of
+`BOARD_M5CORES3` via `BOARD_HAS_STACKCHAN_BASE` (PlatformIO env `stackchan`). All
+StackChan-specific code is gated by the extension flag — bare Core S3 builds remain unchanged
+and license-clean. See [Licenses](#licenses) for the GPL-3.0 obligation.
+
+**Current status (alpha.1):** The StackChan build boots vizBot on the StackChan hardware with
+all existing features working (face, personalities, WLED, captive portal, mesh). New
+StackChan-specific subsystems are **stubbed** — present in the boot diagnostics as DEFER, with
+driver bring-up planned for Phase 2+.
+
+| Subsystem | Boot stage | Status | Driver phase |
+|---|---|---|---|
+| PY32L020 IO expander (0x6F) | IO Exp | DEFER | Phase 2 |
+| VM_EN servo power rail | VM_EN | DEFER | Phase 2 |
+| SCS0009 yaw servo | Servo X | DEFER | Phase 2 |
+| SCS0009 pitch servo | Servo Y | DEFER | Phase 2 |
+| WS2812C 12-LED base ring | Base LED | DEFER | Phase 2 |
+| Si12T head touch (0x68) | Touch SC | DEFER | Phase 2 |
+| INA226 battery monitor (0x41) | Battery | DEFER | Phase 2 |
+| GC0308 camera | Camera | DEFER | Phase 4 |
+| LittleFS photo storage | Photo FS | DEFER | Phase 4 |
+
+**Stub HTTP endpoints** (return 501 with `{"status":"deferred","phase":N}`):
+
+| Endpoint | Phase |
+|---|---|
+| `/bot/head/set_angles` | 2 |
+| `/bot/head/preset` | 2 |
+| `/bot/head/recenter` | 2 |
+| `/bot/base_leds/set` | 2 |
+| `/bot/battery/status` | 2 |
+| `/bot/photo/capture` | 4 |
+| `/bot/photos` | 4 |
+| `/bot/photo/get` | 4 |
+| `/bot/photo/delete` | 4 |
 
 ## Architecture
 
