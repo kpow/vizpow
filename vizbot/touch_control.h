@@ -94,9 +94,9 @@ extern void toggleWifiAP();
 
 // Ambient effect names (for background overlay control)
 const char* ambientEffectNames[] = {
-  "Plasma", "Rainbow", "Fire", "Ocean", "Sparkle",
-  "Matrix", "Lava", "Aurora", "Confetti", "Comet",
-  "Galaxy", "Heart", "Donut"
+  "Plasma", "Galaxy", "Ripple", "Chevrons", "Stripes",
+  "Checker", "Scanline", "Perlin", "Distorsion", "ZVortex",
+  "Snakes", "Sinusoid", "Puzzle", "Bumpmap", "Xorcery", "Hiphotic"
 };
 
 // Palette names (must match order in palettes.h)
