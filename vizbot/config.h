@@ -161,7 +161,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.0.0-dev"
+#define FIRMWARE_VERSION "3.0.0"
 
 #if defined(BOARD_ESP32S3_MATRIX)
   #define BOARD_TYPE "esp32s3-matrix"
@@ -218,7 +218,7 @@
 #define MODE_BOT 0
 
 // Ambient effect count (used for bot background overlay)
-#define NUM_AMBIENT_EFFECTS 11
+#define NUM_AMBIENT_EFFECTS 16
 #define NUM_PALETTES 15
 #define MAX_SAY_LEN 96  // Max characters for speech text (LCD + WLED)
 
