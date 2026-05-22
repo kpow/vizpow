@@ -26,6 +26,7 @@ extern CRGBPalette16 currentPalette;
 #ifdef BOARD_HAS_STACKCHAN_BASE
 #include "stackchan_base.h"
 #include "stackchan_leds.h"
+#include "stackchan_touch.h"
 #endif
 
 // Web interface HTML
@@ -244,6 +245,43 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             <button onclick="setWledIP()">Set</button>
           </div>
           <button onclick="testWled()" class="btn-full" style="margin-top:8px">Test Connection</button>
+        </div>
+      </div>
+
+      <div class="card" id="scCard" style="display:none">
+        <h2 class="shdr" onclick="tgl('secSC')">StackChan <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secSC">
+          <span class="lbl">Head Control</span>
+          <div class="grid3" style="margin-top:6px">
+            <button onclick="scPreset('left')">&#8592; Left</button>
+            <button onclick="scPreset('nod')">Nod</button>
+            <button onclick="scPreset('right')">Right &#8594;</button>
+            <button onclick="scPreset('lookup')">&#8593; Up</button>
+            <button onclick="api('/bot/head/recenter')">Center</button>
+            <button onclick="scPreset('lookdown')">&#8595; Down</button>
+          </div>
+          <div class="row" style="margin-top:6px">
+            <button onclick="scPreset('shake')" class="flex1">Shake</button>
+          </div>
+          <div class="srow" style="margin-top:12px"><span>Yaw</span><span id="scYawVal">0&deg;</span></div>
+          <input type="range" id="scYaw" min="-900" max="900" value="0">
+          <div class="srow"><span>Pitch</span><span id="scPitchVal">50&deg;</span></div>
+          <input type="range" id="scPitch" min="250" max="850" value="500">
+          <div style="border-top:1px solid #eee;margin-top:8px;padding-top:10px">
+            <span class="lbl">Base LEDs</span>
+            <select id="scLedMode" onchange="scSetLedMode(this.value)" class="sel" style="margin-top:6px"></select>
+            <div class="srow" style="margin-top:8px"><span>Brightness</span><span id="scLedBrVal">80</span></div>
+            <input type="range" id="scLedBr" min="10" max="255" value="80">
+            <div class="srow"><span>Speed</span><span id="scLedSpVal">128</span></div>
+            <input type="range" id="scLedSp" min="10" max="255" value="128">
+          </div>
+          <div style="border-top:1px solid #eee;margin-top:8px;padding-top:10px">
+            <div class="trow"><span>Chill Mode (10 min)</span><div class="tog" id="scChillToggle" onclick="scToggleChill()"></div></div>
+            <div class="hint">Hold head 2s or tap here. Stops movement.</div>
+          </div>
+          <div id="scBattery" style="border-top:1px solid #eee;margin-top:8px;padding-top:10px;display:none">
+            <div class="srow"><span>Battery</span><span id="scBatVal">--</span></div>
+          </div>
         </div>
       </div>
 
@@ -473,6 +511,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           renderEmojiGrid();
           renderEmojiQueue();
         }
+        if (state.stackchan) scUpdateFromState(state);
         render();
       } catch(e) {}
     }
@@ -695,6 +734,94 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       } catch(e) {}
     }
 
+    // ---- StackChan controls ----
+    const scLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood'];
+    let scLedMode = 2;
+
+    function scPreset(name) { api('/bot/head/preset?name=' + name); }
+
+    function scInitSliders() {
+      const yaw = document.getElementById('scYaw');
+      const pitch = document.getElementById('scPitch');
+      yaw.oninput = function() {
+        document.getElementById('scYawVal').textContent = (this.value / 10) + '°';
+      };
+      yaw.onchange = function() {
+        api('/bot/head/set_angles?yaw=' + this.value + '&time=400');
+      };
+      pitch.oninput = function() {
+        document.getElementById('scPitchVal').textContent = (this.value / 10) + '°';
+      };
+      pitch.onchange = function() {
+        api('/bot/head/set_angles?pitch=' + this.value + '&time=400');
+      };
+      const ledBr = document.getElementById('scLedBr');
+      ledBr.oninput = function() {
+        document.getElementById('scLedBrVal').textContent = this.value;
+      };
+      ledBr.onchange = function() {
+        api('/bot/base_leds/mode?brightness=' + this.value);
+      };
+      const ledSp = document.getElementById('scLedSp');
+      ledSp.oninput = function() {
+        document.getElementById('scLedSpVal').textContent = this.value;
+      };
+      ledSp.onchange = function() {
+        api('/bot/base_leds/mode?speed=' + this.value);
+      };
+    }
+
+    function scSetLedMode(v) {
+      scLedMode = parseInt(v);
+      api('/bot/base_leds/mode?mode=' + v);
+    }
+
+    function scRenderLedModes() {
+      const sel = document.getElementById('scLedMode');
+      sel.innerHTML = scLedModes.map((name, i) =>
+        `<option value="${i}" ${i===scLedMode?'selected':''}>${name.charAt(0).toUpperCase()+name.slice(1)}</option>`
+      ).join('');
+    }
+
+    let scChillOn = false;
+    async function scToggleChill() {
+      const r = await fetch('/bot/chill');
+      if (r) {
+        const d = await r.json();
+        scChillOn = d.chill;
+        document.getElementById('scChillToggle').className = 'tog ' + (scChillOn ? 'on' : '');
+      }
+    }
+
+    function scUpdateFromState(s) {
+      if (!s.stackchan) return;
+      document.getElementById('scCard').style.display = '';
+      const sc = s.stackchan;
+      if (sc.chill !== undefined) {
+        scChillOn = sc.chill;
+        document.getElementById('scChillToggle').className = 'tog ' + (scChillOn ? 'on' : '');
+      }
+      if (sc.ledMode !== undefined) {
+        scLedMode = sc.ledMode;
+        document.getElementById('scLedMode').value = sc.ledMode;
+      }
+      if (sc.ledBrightness !== undefined) {
+        document.getElementById('scLedBr').value = sc.ledBrightness;
+        document.getElementById('scLedBrVal').textContent = sc.ledBrightness;
+      }
+      if (sc.ledSpeed !== undefined) {
+        document.getElementById('scLedSp').value = sc.ledSpeed;
+        document.getElementById('scLedSpVal').textContent = sc.ledSpeed;
+      }
+      if (sc.voltage !== undefined) {
+        document.getElementById('scBattery').style.display = '';
+        document.getElementById('scBatVal').textContent = sc.voltage + 'V / ' + (sc.current * 1000).toFixed(0) + 'mA';
+      }
+    }
+
+    scRenderLedModes();
+    scInitSliders();
+
     getState();
     render();
     wifiInitCheck();
@@ -801,6 +928,7 @@ void handleState() {
                   (sysStatus.scServoYReady ? ",\"servoYPos\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
                   (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
                                                   ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
+                  ",\"chill\":" + (scTouch_state.chillMode ? "true" : "false") +
                   (sysStatus.scBaseLedsReady ? ",\"ledMode\":" + String(scLeds.mode) +
                                                 ",\"ledModeName\":\"" + String(SC_LED_MODE_NAMES[scLeds.mode]) + "\"" +
                                                 ",\"ledBrightness\":" + String(scLeds.brightness) +
@@ -1544,6 +1672,13 @@ void handleScBaseLedMode() {
   server.send(200, "application/json", json);
 }
 
+// POST /bot/chill — toggle chill mode
+void handleScChillToggle() {
+  scFireChillMode();
+  server.send(200, "application/json",
+    scTouch_state.chillMode ? "{\"chill\":true}" : "{\"chill\":false}");
+}
+
 // Camera endpoints remain stubs (Phase 4)
 void handleScPhotoCapture()   { scSendDeferred(4); }
 void handleScPhotoList()      { scSendDeferred(4); }
@@ -1619,6 +1754,7 @@ void setupWebServer() {
   server.on("/bot/head/recenter", handleScHeadRecenter);
   server.on("/bot/base_leds/set", handleScBaseLeds);
   server.on("/bot/base_leds/mode", handleScBaseLedMode);
+  server.on("/bot/chill", handleScChillToggle);
   server.on("/bot/photo/capture", handleScPhotoCapture);
   server.on("/bot/photos", handleScPhotoList);
   server.on("/bot/photo/get", handleScPhotoGet);
