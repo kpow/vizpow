@@ -17,6 +17,7 @@ extern uint8_t paletteIndex;
 extern uint8_t brightness;
 extern uint8_t speed;
 extern bool autoCycle;
+extern unsigned long lastChange;
 extern void resetEffectShuffle();
 extern uint8_t currentMode;
 extern CRGBPalette16 currentPalette;
@@ -143,7 +144,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           <span class="lbl" style="display:block;margin-top:12px">Background</span>
           <div class="row" id="botBgStyles" style="margin-top:6px;gap:6px"></div>
           <div id="ambientSection" style="display:none;margin-top:12px">
-            <span class="lbl">Ambient Effect</span>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span class="lbl">Ambient Effect</span>
+              <button id="autoCycleBtn" onclick="toggleAutoCycle()" style="font-size:11px;padding:3px 10px"></button>
+            </div>
             <div class="grid3" id="ambientEffects" style="margin-top:6px"></div>
           </div>
         </div>
@@ -282,6 +286,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           <div id="scBattery" style="border-top:1px solid #eee;margin-top:8px;padding-top:10px;display:none">
             <div class="srow"><span>Battery</span><span id="scBatVal">--</span></div>
           </div>
+          <div style="border-top:1px solid #eee;margin-top:8px;padding-top:10px">
+            <button onclick="scPowerOff()" style="width:100%;padding:10px;background:#c0392b;color:#fff;border:3px solid #000;box-shadow:3px 3px 0 0 #000;font-weight:800;font-size:13px;text-transform:uppercase;cursor:pointer">&#9211; Power Off</button>
+          </div>
         </div>
       </div>
 
@@ -313,11 +320,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     const botExprNames = ["Neutral","Happy","Sad","Surprised","Chill","Angry","Love","Dizzy","Thinking","Excited","Mischief","Skeptical","Worried","Confused","Proud","Shy","Annoyed","Focused","Winking","Devious","Shocked","Kissing","Nervous","Glitching","Sassy"];
     const botColorNames = ["White","Cyan","Green","Pink","Yellow"];
     const botBgStyles = [{n:"Black",v:0},{n:"Ambient",v:4}];
-    const ambientNames = ["Plasma","Rainbow","Fire","Ocean","Matrix","Lava","Aurora","Confetti","Galaxy","Heart","Donut"];
+    const ambientNames = ["Plasma","Galaxy","Ripple","Chevrons","Stripes","Checker","Scanline","Perlin","Distorsion","ZVortex","Snakes","Sinusoid","Puzzle","Bumpmap","Xorcery","Hiphotic"];
     let curBgStyle = 4;
     let curAmbient = 0;
     let curExpr = 0;
     let curColor = 0;
+    let autoCycleOn = true;
     let wifiSelectedSSID = '';
     let wifiPollTimer = null;
 
@@ -336,6 +344,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       document.getElementById('ambientEffects').innerHTML = ambientNames.map((name, i) =>
         `<button class="${curAmbient===i?'active':''}" onclick="setAmbient(${i})">${name}</button>`
       ).join('');
+      const acBtn = document.getElementById('autoCycleBtn');
+      if (acBtn) acBtn.textContent = autoCycleOn ? '⏸ Stop Auto' : '▶ Auto';
     }
 
     async function api(endpoint) {
@@ -439,7 +449,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     }
     function setBotColor(i) { curColor=i; render(); api('/bot/background?v=' + i); }
     function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
-    function setAmbient(i) { curAmbient = i; render(); api('/bot/ambient?v=' + i); }
+    function setAmbient(i) { curAmbient = i; autoCycleOn = false; render(); api('/bot/ambient?v=' + i + '&lock=1'); }
+    function toggleAutoCycle() { autoCycleOn = !autoCycleOn; render(); api('/bot/autocycle?v=' + (autoCycleOn ? '1' : '0')); }
 
     document.getElementById('brightness').oninput = function() {
       document.getElementById('brightnessVal').textContent = this.value;
@@ -479,6 +490,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         }
         if (state.ambientEffect !== undefined) {
           curAmbient = state.ambientEffect;
+        }
+        if (state.autoCycle !== undefined) {
+          autoCycleOn = state.autoCycle;
         }
         if (state.infoActive !== undefined) {
           infoOn = state.infoActive;
@@ -793,6 +807,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       }
     }
 
+    function scPowerOff() {
+      if (confirm('Power off vizBot? You will need to press the reset button to turn it back on.')) {
+        api('/bot/poweroff');
+        document.getElementById('statusBar').textContent = 'Powering off...';
+        document.getElementById('statusBar').style.background = '#c0392b';
+        document.getElementById('statusBar').style.color = '#fff';
+      }
+    }
+
     function scUpdateFromState(s) {
       if (!s.stackchan) return;
       document.getElementById('scCard').style.display = '';
@@ -1032,6 +1055,20 @@ void handleBotAmbient() {
   if (server.hasArg("v")) {
     uint8_t val = constrain(server.arg("v").toInt(), 0, NUM_AMBIENT_EFFECTS - 1);
     cmdSetAmbientEffect(val);
+    // lock=1 stops autoCycle so the selected effect stays
+    if (server.hasArg("lock") && server.arg("lock") == "1") {
+      autoCycle = false;
+    }
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleAutoCycle() {
+  if (server.hasArg("v")) {
+    autoCycle = (server.arg("v") == "1");
+    if (autoCycle) {
+      lastChange = millis();  // reset timer so it doesn't immediately cycle
+    }
   }
   server.send(200, "text/plain", "OK");
 }
@@ -1679,6 +1716,29 @@ void handleScChillToggle() {
     scTouch_state.chillMode ? "{\"chill\":true}" : "{\"chill\":false}");
 }
 
+// POST /bot/poweroff — graceful shutdown
+void handleScPowerOff() {
+  server.send(200, "application/json", "{\"ok\":true,\"message\":\"Powering off...\"}");
+  delay(200);  // Let response reach client
+
+  DBGLN("Power off requested — shutting down");
+
+  // Graceful shutdown: servos off, LEDs off, display off
+  scSetServoPower(false);
+  scSetAllBaseLeds(0, 0, 0);
+  scRefreshBaseLeds();
+
+  // Clear display
+  if (gfx) {
+    gfx->beginCanvas();
+    gfx->flushCanvas();
+    M5.Display.setBrightness(0);
+  }
+
+  delay(300);
+  M5.Power.powerOff();
+}
+
 // Camera endpoints remain stubs (Phase 4)
 void handleScPhotoCapture()   { scSendDeferred(4); }
 void handleScPhotoList()      { scSendDeferred(4); }
@@ -1706,6 +1766,7 @@ void setupWebServer() {
   server.on("/bot/hires", handleBotHiRes);
   server.on("/bot/background", handleBotBackground);
   server.on("/bot/ambient", handleBotAmbient);
+  server.on("/bot/autocycle", handleAutoCycle);
   server.on("/bot/personality", handleBotPersonality);
   server.on("/bot/personality/rotation", handleBotPersonalityRotation);
 
@@ -1760,6 +1821,7 @@ void setupWebServer() {
   server.on("/bot/photo/get", handleScPhotoGet);
   server.on("/bot/photo/delete", handleScPhotoDelete);
   server.on("/bot/battery/status", handleScBatteryStatus);
+  server.on("/bot/poweroff", handleScPowerOff);
   #endif
 
   // Schedule endpoints

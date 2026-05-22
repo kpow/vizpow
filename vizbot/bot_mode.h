@@ -610,29 +610,22 @@ extern const AmbientFunc ambientHiResFuncs[];
 extern const AmbientFunc ambientLedFuncs[];
 
 // Render ambient effect as bot background (respects hiResMode)
+extern void runPixelEffect(uint8_t index);
+
 void renderBotAmbientBackground() {
   uint8_t idx = effectIndex % NUM_AMBIENT_EFFECTS;
 
   #if defined(HIRES_ENABLED)
   if (hiResMode) {
-    // Hi-res: render effect directly to LCD canvas
+    // Hi-res: render effect directly to LCD canvas at full resolution
     ambientHiResFuncs[idx]();
   } else {
-  #endif
-    // Pixel mode: run LED effect, then render leds[] as blocky background
-    ambientLedFuncs[idx]();
-    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
-      for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
-        uint16_t ledIndex = XY(x, y);
-        CRGB color = leds[ledIndex];
-        uint16_t c565 = crgbToRgb565(color);
-        int16_t screenX = GRID_OFFSET_X + x * (PIXEL_SIZE + PIXEL_GAP);
-        int16_t screenY = GRID_OFFSET_Y + y * (PIXEL_SIZE + PIXEL_GAP);
-        gfx->fillRect(screenX, screenY, PIXEL_SIZE, PIXEL_SIZE, c565);
-      }
-    }
-  #if defined(HIRES_ENABLED)
+    // Pixel mode: render at expanded resolution (fills LCD screen)
+    runPixelEffect(idx);
   }
+  #else
+    // LED-only target: render directly to leds[]
+    ambientLedFuncs[idx]();
   #endif
 }
 
