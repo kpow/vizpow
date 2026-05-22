@@ -16,8 +16,10 @@
 #include "cloud_client.h"
 #endif
 
-// Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, 0, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
+// Global instance — defined here, extern'd via system_status.h.
+// Zero-initialized: all bool fields false, numerics 0, IPAddress 0.0.0.0.
+// Use {} (not a positional list) so adding SystemStatus fields stays safe.
+SystemStatus sysStatus = {};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
