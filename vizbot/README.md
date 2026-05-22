@@ -1,44 +1,139 @@
-# vizBot — Animated Bot Companion Firmware
+# vizBot — Firmware Technical Reference
 
-vizBot is the primary ESP32-S3 firmware target in the vizPow platform. It renders an animated desktop companion character on LCD displays with procedurally drawn faces, smooth tween-based animations, speech bubbles, weather overlays, and WLED integration — all driven by a dual-core FreeRTOS architecture.
+vizBot is the primary ESP32-S3 firmware target in the vizPow platform: an animated
+desktop-companion character rendered on LCD displays, with procedural faces, tween-based
+animation, speech bubbles, weather overlays, WLED integration, ESP-NOW mesh, and a
+captive-portal web UI, on a dual-core FreeRTOS architecture.
+
+This document is a technical reference for development and feature planning, not a user guide.
+
+## Contents
+
+- [Hardware Targets](#hardware-targets)
+- [Architecture](#architecture)
+- [Modes & Overlays](#modes--overlays)
+- [File Guide](#file-guide)
+- [Peripheral Inventory](#peripheral-inventory)
+- [Expressions (25)](#expressions-25)
+- [Personality System](#personality-system)
+- [Tween Animation Engine](#tween-animation-engine)
+- [Web Control Panel](#web-control-panel)
+- [HTTP API Surface](#http-api-surface)
+- [Configuration & Persistence](#configuration--persistence)
+- [WLED Integration](#wled-integration)
+- [vizCloud Integration](#vizcloud-integration)
+- [ESP-NOW Mesh](#esp-now-mesh)
+- [Graphics Stack](#graphics-stack)
+- [Core S3 Extras](#core-s3-extras)
+- [Building](#building)
+- [Version History](#version-history)
+- [Licenses](#licenses)
 
 ## Hardware Targets
 
-vizBot runs on four boards, selected in `config.h`:
+A board is selected by a `BOARD_*` build flag set per PlatformIO env (see [Building](#building)).
+`config.h` derives a `TARGET_*` from each board flag.
 
-| Board Define | Target | Display | Touch | Notes |
-|---|---|---|---|---|
-| `BOARD_ESP32S3_LCD_169` | TARGET_LCD | 240x280 ST7789V2 | CST816S | Primary dev board |
-| `BOARD_ESP32S3_LCD_13` | TARGET_LCD | 240x240 ST7789VW | None | Battery powered, no touch |
-| `BOARD_M5CORES3` | TARGET_CORES3 | 320x240 ILI9342C | FT6336 | Audio, proximity, camera |
-| `BOARD_ESP32S3_MATRIX` | TARGET_LED | 8x8 WS2812B only | None | LED-only mode |
+| Board flag | PlatformIO env | Target | Display | Touch | Notes |
+|---|---|---|---|---|---|
+| `BOARD_ESP32S3_LCD_169` | `lcd-169` | `TARGET_LCD` | 240x280 ST7789V2 | CST816T | Primary dev board |
+| `BOARD_ESP32S3_LCD_13` | `lcd-13` | `TARGET_LCD` | 240x240 ST7789VW | none | Battery powered, no touch |
+| `BOARD_M5CORES3` | `m5cores3` | `TARGET_CORES3` | 320x240 ILI9342C | FT6336 | Audio, proximity, MIDI synth |
+| `BOARD_M5CORES3` + `BOARD_HAS_STACKCHAN_BASE` | `stackchan` | `TARGET_CORES3` | 320x240 ILI9342C | FT6336 | StackChan K151-R flagship (3.0) |
+| `BOARD_ESP32S3_MATRIX` | `matrix` | `TARGET_LED` | 8x8 WS2812B only | none | LED-only, 4MB flash |
 
-All LCD targets use `DisplayProxy` wrapping LovyanGFX (or M5Unified's internal LovyanGFX) for a unified `beginCanvas()`/`flushCanvas()` double-buffered rendering API.
+All LCD targets use `DisplayProxy`, which wraps LovyanGFX (or M5Unified's internal LovyanGFX)
+behind a unified `beginCanvas()`/`flushCanvas()` double-buffered API.
+
+### StackChan Target (vizBot 3.0, in progress)
+
+The M5Stack StackChan (K151-R) is the new flagship target, added as an *extension* of
+`BOARD_M5CORES3` via `BOARD_HAS_STACKCHAN_BASE` (PlatformIO env `stackchan`). All
+StackChan-specific code is gated by the extension flag — bare Core S3 builds remain unchanged
+and license-clean. See [Licenses](#licenses) for the GPL-3.0 obligation.
+
+**Current status (alpha.1):** The StackChan build boots vizBot on the StackChan hardware with
+all existing features working (face, personalities, WLED, captive portal, mesh). New
+StackChan-specific subsystems are **stubbed** — present in the boot diagnostics as DEFER, with
+driver bring-up planned for Phase 2+.
+
+| Subsystem | Boot stage | Status | Driver phase |
+|---|---|---|---|
+| PY32L020 IO expander (0x6F) | IO Exp | DEFER | Phase 2 |
+| VM_EN servo power rail | VM_EN | DEFER | Phase 2 |
+| SCS0009 yaw servo | Servo X | DEFER | Phase 2 |
+| SCS0009 pitch servo | Servo Y | DEFER | Phase 2 |
+| WS2812C 12-LED base ring | Base LED | DEFER | Phase 2 |
+| Si12T head touch (0x68) | Touch SC | DEFER | Phase 2 |
+| INA226 battery monitor (0x41) | Battery | DEFER | Phase 2 |
+| GC0308 camera | Camera | DEFER | Phase 4 |
+| LittleFS photo storage | Photo FS | DEFER | Phase 4 |
+
+**Stub HTTP endpoints** (return 501 with `{"status":"deferred","phase":N}`):
+
+| Endpoint | Phase |
+|---|---|
+| `/bot/head/set_angles` | 2 |
+| `/bot/head/preset` | 2 |
+| `/bot/head/recenter` | 2 |
+| `/bot/base_leds/set` | 2 |
+| `/bot/battery/status` | 2 |
+| `/bot/photo/capture` | 4 |
+| `/bot/photos` | 4 |
+| `/bot/photo/get` | 4 |
+| `/bot/photo/delete` | 4 |
 
 ## Architecture
 
 ```
 Core 0 (Protocol CPU)                Core 1 (Application CPU)
 ─────────────────────────            ─────────────────────────
-wifiServerTask (8KB static BSS)      Arduino loop()
-├── server.handleClient()            ├── readIMU()
-├── dnsServer.processNextRequest()   ├── handleTouch()
-├── pollWifiConnectTask()            ├── drainCommandQueue()  ←── FreeRTOS Queue
-├── pollWledDisplay()                ├── updateBotMode()
-├── pollWeatherFetch()               ├── renderBotMode()
-├── pollCloudSync()         (TLS)    ├── FastLED.show()
-├── pollScheduledCommands()          └── tween updates
-├── pollScheduledContent()
+wifiServerTask (8KB static BSS)      Arduino loop()  (~30 FPS, BOT_FRAME_DELAY_MS)
+├── pollWifiConnectTask()            ├── readIMU()
+├── pollWledDisplay()                ├── handleTouch()
+├── pollWeatherFetch()               ├── tweenManager.update()
+├── pollCloudSync()         (TLS)    ├── drainCommandQueue()  ←── FreeRTOS Queue (depth 8)
+├── pollScheduledCommands()          ├── runInfoMode() OR runBotMode()
+├── pollScheduledContent()           └── showDisplay()  (FastLED.show / renderToLCD)
 ├── pollMeshBroadcast()    (ESP-NOW)
+├── dnsServer.processNextRequest()
+├── server.handleClient()    (HTTP)
 └── vTaskDelay(2ms)
 ```
 
-**Why dual-core?** FastLED disables interrupts during `show()` (2-5ms), which conflicts with WiFi radio timing. Running WiFi on Core 0 and rendering on Core 1 eliminates dropped connections and frame stutters.
+**Why dual-core?** FastLED disables interrupts during `show()` (2-5ms), which conflicts with
+WiFi radio timing. WiFi/network on Core 0 and rendering on Core 1 eliminates dropped connections
+and frame stutters.
+
+**Boot.** `setup()` runs `runBootSequence()` (`boot_sequence.h`), which initializes each
+subsystem as its own diagnostic stage drawn to the LCD with a pass/fail indicator (9 stages on
+LCD/Matrix boards, more on Core S3). Results populate the global `SystemStatus sysStatus`, which
+the rest of the firmware checks before touching hardware so dead/absent peripherals are skipped
+rather than crashing.
 
 **Cross-core communication:**
-- **Command Queue** (FreeRTOS, depth 8) — Web/cloud handlers push `Command` structs; render loop drains them atomically between frames
-- **I2C Mutex** (FreeRTOS semaphore) — IMU and touch share the I2C bus
+- **Command Queue** (FreeRTOS, depth 8) — web/cloud/touch handlers push `Command` structs;
+  the render loop drains them atomically between frames (`drainCommandQueue()`). Handlers never
+  mutate render state or touch I2C directly.
+- **I2C Mutex** (FreeRTOS semaphore) — IMU and touch share the I2C bus (`i2cAcquire()`/`i2cRelease()`).
 - **Volatile flags** — `wledData.sendState`, `meshScanRequested`, etc.
+
+## Modes & Overlays
+
+There is no general mode enum. The render loop dispatches exactly two top-level states:
+
+| State | Entry | What it draws |
+|---|---|---|
+| **Bot** (default) | `runBotMode()` when `!infoMode.active` | The procedural face. Sub-state machine `BotState` = `BOT_ACTIVE` / `BOT_IDLE` / `BOT_SLEEPING`. |
+| **Info** | `runInfoMode()` when `infoMode.active` | Weather dashboard (mini eyes, 3-day forecast). Toggled by sustained shake or `/info/toggle`. |
+
+Two features layer *on top of* bot mode and are sometimes referred to loosely as "modes":
+
+- **Ambient background ("viz")** — one of 11 ambient effects renders behind the face, auto-cycled.
+- **Time overlay ("clock")** — a clock drawn over the face, toggled via `/bot/time`.
+
+> Note for planning: adding a genuinely new mode (e.g. a future camera mode) requires building a
+> dispatch layer; today the loop is a two-way branch, not a registry.
 
 ## File Guide
 
@@ -46,12 +141,12 @@ wifiServerTask (8KB static BSS)      Arduino loop()
 
 | File | Purpose |
 |------|---------|
-| `vizbot.ino` | Entry point — `setup()`, `loop()`, mode dispatch, command drain |
-| `config.h` | Board selection, pin definitions, target-level config, WiFi/cloud constants |
+| `vizbot.ino` | Entry point — `setup()`, `loop()`, state dispatch, command drain, shake detection |
+| `config.h` | Board selection, pin definitions, target-level config, firmware identity, WiFi/cloud constants |
 | `settings.h` | NVS persistence layer with debounced writes (2s after last change) |
 | `device_id.h` | Per-device unique SSID/mDNS from eFuse MAC or user-set custom name |
 | `system_status.h` | `SystemStatus` struct — tracks subsystem health (IMU, touch, WiFi, etc.) |
-| `boot_sequence.h` | Visual LCD boot diagnostics (9 stages with pass/fail indicators) |
+| `boot_sequence.h` | Visual LCD boot diagnostics (per-subsystem stages with pass/fail) + defines `sysStatus` |
 | `task_manager.h` | FreeRTOS tasks, I2C mutex, command queue, `drainCommandQueue()` |
 | `partitions.csv` | Custom partition table (+2MB app space on 4MB flash boards) |
 
@@ -63,26 +158,27 @@ wifiServerTask (8KB static BSS)      Arduino loop()
 | `bot_eyes.h` | Eye/pupil/brow/mouth rendering, look-around, blink system, face color |
 | `bot_overlays.h` | Speech bubbles, time overlay, weather overlay, notification banners |
 | `layout.h` | Resolution-independent UI positions (derived from `LCD_WIDTH`/`LCD_HEIGHT`) |
-| `display_lcd.h` | LovyanGFX initialization, `DisplayProxy` struct, `beginCanvas()`/`flushCanvas()` |
+| `display_lcd.h` | LovyanGFX init, `DisplayProxy` struct, `beginCanvas()`/`flushCanvas()` |
 | `tween.h` | `TweenManager` — 16-slot animation engine with 8 easing functions |
 
 ### Bot Behavior
 
 | File | Purpose |
 |------|---------|
-| `bot_mode.h` | Bot state machine (Active/Idle), personality system, update/render pipeline |
-| `bot_sayings.h` | 14 saying categories, 80+ phrases (greetings, idle, reactions, time-of-day) |
-| `bot_sounds.h` | Sound effect system for Core S3 (boot chime, tap boop, shake rattle, etc.) |
+| `bot_mode.h` | Bot state machine (Active/Idle/Sleeping), personality system, update/render pipeline |
+| `bot_sayings.h` | Saying categories + phrases (greetings, idle, reactions, time-of-day) |
+| `bot_sounds.h` | Sound effect + MIDI sequence system for Core S3 (boot chime, tap boop, etc.) |
 
 ### Web & Network
 
 | File | Purpose |
 |------|---------|
-| `web_server.h` | Neo-brutalist web UI (PROGMEM HTML/CSS/JS) + all API endpoint handlers |
+| `web_server.h` | Neo-brutalist web UI (PROGMEM HTML/CSS/JS) + all HTTP endpoint handlers |
 | `wifi_provisioning.h` | AP+STA dual mode, captive portal, credential NVS storage, scan/connect |
+| `ota_update.h` | OTA firmware upload + GitHub release check, boot-valid marking (rollback guard) |
 | `cloud_client.h` | vizCloud HTTPS client — registration, sync, command dispatch, TLS pinning |
 | `content_cache.h` | LittleFS caching for cloud content (sayings, personalities, metadata) |
-| `esp_now_mesh.h` | ESP-NOW peer-to-peer mesh — state broadcast, coordinated WLED, peer tracking |
+| `esp_now_mesh.h` | ESP-NOW mesh — state broadcast, coordinated WLED, peer tracking |
 
 ### WLED Integration
 
@@ -91,170 +187,249 @@ wifiServerTask (8KB static BSS)      Arduino loop()
 | `wled_display.h` | DDP pixel control (32x8), state capture/restore, cross-core queue, hologram mode |
 | `wled_emoji.h` | Emoji sprite slideshow on WLED matrix with fade transitions |
 | `wled_font.h` | 3x5 pixel font for rendering text into the 32x8 pixel buffer |
-| `wled_weather_view.h` | Weather card cycling on WLED (current conditions, forecast, fade transitions) |
-| `wled_scheduled_content.h` | Periodic weather/emoji content cycling on WLED display |
+| `wled_weather_view.h` | Weather card cycling on WLED |
+| `wled_scheduled_content.h` | Periodic weather/emoji content cycling on WLED |
 | `emoji_sprites.h` | Pixel art sprite data (palette-indexed compression) |
 
-### Effects & Palettes
+### Effects, Sensors, Data
 
 | File | Purpose |
 |------|---------|
 | `effects_ambient.h` | 11 ambient effects with hi-res LCD variants (plasma, fire, ocean, aurora, etc.) |
-| `palettes.h` | 15 color palette definitions (custom gradients for small LED displays) |
-
-### Sensors & Input
-
-| File | Purpose |
-|------|---------|
+| `palettes.h` | 15 color palette definitions |
 | `touch_control.h` | Touch menu gestures and UI (long-press, swipe, shared I2C mutex) |
-| `audio_analysis.h` | Microphone audio analysis — spike/speech/silence detection (Core S3 only) |
-| `proximity_light.h` | Proximity/ambient light sensor — peek-a-boo, cover, hand wave (Core S3 only) |
-
-### Data & Info
-
-| File | Purpose |
-|------|---------|
+| `audio_analysis.h` | Mic audio analysis — spike/speech/silence detection (Core S3 only) |
+| `proximity_light.h` | Proximity/ambient light sensor reactions (Core S3 only) |
+| `midi_synth.h` | SAM2695 MIDI synth driver (Core S3 Grove Port C) |
 | `info_mode.h` | Weather dashboard with mini eyes, 3-day forecast bar graph, page dots |
 | `weather_data.h` | Open-Meteo API client, geocoding, forecast parsing, NTP time sync |
 | `weather_icons.h` | Weather condition icons (44px sprites for info mode) |
 
+## Peripheral Inventory
+
+I2C runs at the pins below per board; the IMU and touch controller share the bus (guarded by the
+I2C mutex). On Core S3, M5Unified owns and drives the internal bus.
+
+| Board | I2C SDA / SCL | IMU | Touch | LED data | Display bus |
+|---|---|---|---|---|---|
+| LCD 1.69 | 11 / 10 | QMI8658 @ 0x6B | CST816T @ 0x15 | GPIO14 (ext) | SPI: SCK6 MOSI7 CS5 DC4 RST8 BL15 |
+| LCD 1.3 | 47 / 48 | QMI8658 @ 0x6B | none | GPIO14 (ext) | SPI: SCK40 MOSI41 CS39 DC38 RST42 BL20 |
+| Core S3 | 12 / 11 | BMI270 (M5Unified) | FT6336 @ 0x38 | GPIO38 (onboard RGB) | ILI9342C (M5Unified) |
+| Matrix | 11 / 12 | — | none | GPIO14 (8x8 WS2812B) | none |
+
+**Core S3 additional:** SAM2695 MIDI synth on Grove Port C (TX 17 / RX 18 @ 31250 baud);
+mic, speaker, proximity/light, and AXP2101 PMU managed by M5Unified.
+
+**Common:** `NUM_LEDS` 64, matrix 8x8. WiFi AP SSID base `vizBot` (+ 4-hex MAC suffix),
+password `12345678`, mDNS base `vizbot` → `vizbot-xxxx.local`.
+
 ## Expressions (25)
 
-| Index | Name | Description |
-|-------|------|-------------|
-| 0 | Neutral | Default resting face |
-| 1 | Happy | Upturned mouth, raised brows |
-| 2 | Sad | Downturned mouth, lowered brows |
-| 3 | Surprised | Wide eyes, open mouth |
-| 4 | Chill | Relaxed half-closed eyes |
-| 5 | Angry | Furrowed brows, tight mouth |
-| 6 | Love | Heart-shaped eyes |
-| 7 | Dizzy | Spiral eyes |
-| 8 | Thinking | Raised brow, side-looking |
-| 9 | Excited | Star-shaped eyes |
-| 10 | Mischievous | Asymmetric grin |
-| 11 | Skeptical | One raised brow |
-| 12 | Worried | Curved brows, small mouth |
-| 13 | Confused | Tilted expression |
-| 14 | Proud | Puffed up, wide smile |
-| 15 | Shy | Looking away, small eyes |
-| 16 | Annoyed | Half-lidded, frowning |
-| 17 | Focused | Concentrated look |
-| 18 | Winking | One eye closed |
-| 19 | Devious | Narrowed scheming eyes |
-| 20 | Shocked | Extra-wide eyes and mouth |
-| 21 | Kissing | Puckered lips |
-| 22 | Nervous | Darting eyes, wobbly mouth |
-| 23 | Glitching | Distorted/corrupted face |
-| 24 | Sassy | Head-tilt attitude |
+| Idx | Name | Idx | Name | Idx | Name |
+|--|--|--|--|--|--|
+| 0 | Neutral | 9 | Excited | 18 | Winking |
+| 1 | Happy | 10 | Mischievous | 19 | Devious |
+| 2 | Sad | 11 | Skeptical | 20 | Shocked |
+| 3 | Surprised | 12 | Worried | 21 | Kissing |
+| 4 | Chill | 13 | Confused | 22 | Nervous |
+| 5 | Angry | 14 | Proud | 23 | Glitching |
+| 6 | Love | 15 | Shy | 24 | Sassy |
+| 7 | Dizzy | 16 | Annoyed | | |
+| 8 | Thinking | 17 | Focused | | |
 
-Expressions are defined as `BotExpression` structs in `bot_faces.h` with parameters for eye mode, pupil size, brow angle, mouth shape, and more. Transitions between expressions use LERP interpolation over configurable durations.
+Expressions are `BotExpression` structs in `bot_faces.h` (eye mode, pupil size, brow angle, mouth
+shape, etc.). Transitions LERP over configurable durations.
 
 ## Personality System
 
-Three built-in personalities with distinct behavior profiles:
-
-| Personality | Idle Timeout | Expression Rate | Say Rate | Say Chance | Favorites |
-|-------------|-------------|----------------|----------|------------|-----------|
+| Personality | Idle timeout | Expression rate | Say rate | Say chance | Favorites |
+|---|---|---|---|---|---|
 | **Chill** (default) | 90s | 4-10s | 16-40s | 30% | Neutral, Happy, Thinking, Mischief, Winking, Shy, Proud, Sassy |
 | **Hyper** | 180s | 2-6s | 8-24s | 45% | Happy, Excited, Surprised, Love, Proud, Winking, Kissing, Sassy |
 | **Grumpy** | 45s | 6-18s | 20-55s | 30% | Angry, Annoyed, Mischief, Skeptical, Devious, Nervous, Glitching, Focused |
 
 Each personality also has favorite palettes and ambient effects for background cycling.
-
-**Cloud personalities** (slots 3-11) are synced from vizCloud, cached in LittleFS, and loaded into the `runtimePersonalities[]` array at runtime. Up to 12 total personalities can be active.
-
-**Personality rotation** cycles through a configurable list at a set interval (default 5 minutes). Setting a single personality via web UI or cloud command stops rotation.
+**Cloud personalities** (slots 3-11) sync from vizCloud, cache to LittleFS, and load into
+`runtimePersonalities[]` (12 total max). **Rotation** cycles a configurable list at an interval
+(default 5 min); setting a single personality stops rotation.
 
 ## Tween Animation Engine
 
-`tween.h` provides a lightweight animation system:
-
-- **16 concurrent tween slots** — drives float values from start to end over a duration
+`tween.h`:
+- **16 concurrent slots** driving a float from start to end over a duration
 - **8 easing functions**: Linear, InQuad, OutQuad, InOutQuad, OutCubic, OutBounce, OutElastic, OutBack
-- **Auto-eviction**: When all slots are full, the oldest tween is snapped to its end value and replaced
-- **Deduplication**: Starting a tween on an already-tweening target reuses the existing slot
+- **Auto-eviction**: when full, the oldest tween snaps to its end value and is replaced
+- **Deduplication**: re-tweening an active target reuses its slot
 
-Used for expression transitions, info mode enter/exit, overlay fade-in/out, and eye look-around.
+Drives expression transitions, info-mode enter/exit, overlay fades, and eye look-around.
 
 ## Web Control Panel
 
-The web UI is embedded as a PROGMEM string in `web_server.h` (~10KB). It uses a **neo-brutalist** design: thick black borders (3px), hard offset shadows (zero blur), square corners, saturated accent colors, off-white card surfaces on warm cream background.
+Embedded as a PROGMEM string in `web_server.h`. **Neo-brutalist** design: 3px black borders, hard
+zero-blur offset shadows, square corners, saturated accents on a warm cream background. Two-column
+dashboard (60/40 desktop, single-column mobile) with collapsible sections persisted to localStorage.
 
-**Layout:** Two-column dashboard (60/40 desktop, 50/50 tablet, single-column mobile). All sections visible with collapsible headers. Collapse state persisted to localStorage.
+- **Left:** Expressions (25-button grid), Say Something, Personality (+ rotation), Appearance
+  (face color, background style, ambient effects), WLED Sprites.
+- **Right:** Device (brightness, volume, time overlay, hi-res toggle), Weather & Info, WiFi
+  provisioning, WLED Display config.
 
-**Left column:** Expressions (25 buttons, 5-column grid), Say Something (text input), Personality (dropdown + rotation), Appearance (face color, background style, ambient effects), WLED Sprites.
+## HTTP API Surface
 
-**Right column:** Device (brightness, volume, time overlay, hi-res toggle), Weather & Info, WiFi provisioning, WLED Display config.
+All endpoints served on port 80 via the captive-portal AP (`vizBot-XXXX` / `12345678`) and over STA.
+Most write endpoints take query args and return `text/plain` `"OK"`; read endpoints return JSON.
+
+| Endpoint | Method | Params | Returns |
+|---|---|---|---|
+| `/` | GET | — | HTML web UI |
+| `/state` | GET | — | JSON full device state |
+| `/brightness` | GET | `v` 1-255 | OK |
+| `/bot/expression` | GET | `v` 0-24 | OK |
+| `/bot/say` | GET | `text`, `dur` 1000-10000 | OK |
+| `/bot/time` | GET | `v` 0/1/2 (2=toggle) | OK |
+| `/bot/hires` | GET | `v` 0/1 | OK |
+| `/bot/background` | GET | `v` or `style` 0-4 | OK |
+| `/bot/ambient` | GET | `v` 0..N-1 | OK |
+| `/bot/personality` | GET/POST | GET: list JSON; set: `v` index | OK / JSON |
+| `/bot/personality/rotation` | POST | JSON body (list + interval) | OK |
+| `/bot/sound` | GET | `seq` id, or `freq`+`dur` | OK |
+| `/bot/volume` | GET | `v` 0-255 | OK |
+| `/bot/sequences` | GET | — | JSON MIDI sequence list |
+| `/bot/mic` | GET | — | JSON mic analysis |
+| `/info/toggle` | GET | — | OK |
+| `/info/location` | GET | `lat`, `lon` | OK |
+| `/info/zip` | GET | `zip` | JSON geocode result |
+| `/wifi/scan` | GET | — | OK (results polled via `/wifi/status`) |
+| `/wifi/connect` | GET | `ssid`, `pass` | OK |
+| `/wifi/status` | GET | — | JSON WiFi/provisioning state |
+| `/wifi/reset` | GET | — | OK |
+| `/device/name` | GET | `name` (empty clears) | text status |
+| `/wled/status` | GET | — | JSON WLED state |
+| `/wled/config` | GET | `ip`,`on`,`speed`,`ix`,`hologram`,`r`,`g`,`b` | OK |
+| `/wled/test` | GET | — | OK |
+| `/wled/emoji/add`,`/remove`,`/clear`,`/toggle`,`/settings` | GET | varies (`v`,`cycle`,`fade`) | OK |
+| `/cloud/status` | GET | — | JSON cloud registration/sync |
+| `/cloud/sync` | GET | — | text status |
+| `/schedule` | GET | `enabled`, `intervalMin` 1-120 | JSON schedule state |
+| `/update` | GET/POST | OTA upload form / firmware POST | HTML / result |
+| captive-portal probes | GET | `/generate_204`, `/hotspot-detect.html`, etc. | 302 redirect |
+
+> New endpoints added in 3.0 are single-purpose, JSON-in/JSON-out, and tool-named
+> (e.g. `/bot/head/set_angles`) so they can be wrapped by a future MCP server without an API rewrite.
+
+## Configuration & Persistence
+
+Settings persist to NVS (`Preferences`, namespace `vizbot`) with debounced writes — dirty state is
+flushed 2s after the last change via `flushSettingsIfDirty()`.
+
+| NVS key | Field | Notes |
+|---|---|---|
+| `bright` | `brightness` | LED brightness 1-255 |
+| `lcdBr` | `lcdBrightness` | LCD backlight |
+| `effect` | `effectIndex` | Ambient effect |
+| `palette` | `paletteIndex` | Palette |
+| `autoCyc` | `autoCycle` | Auto-cycle effects/palettes |
+| `bgStyle` | `botBackgroundStyle` | Bot background style 0-4 |
+| `hiRes` | `hiResMode` | Hi-res ambient |
+| `wLat` / `wLon` | `weatherLat` / `weatherLon` | Weather location |
+| `sndOn` / `sndVol` | sound enabled / volume | Core S3 |
+
+Other namespaces: `vizwifi` (WiFi credentials), `vizcloud` (cloud meta). WLED + schedule settings
+have their own load/save paths (`loadWledSettings()`, `loadScheduleSettings()`).
 
 ## WLED Integration
 
-vizBot controls a WLED-connected 32x8 LED matrix via **DDP (Distributed Display Protocol)**:
+vizBot drives a WLED 32x8 matrix via **DDP**:
+1. Speech text rendered to a 32x8 buffer with a 3x5 font.
+2. Multi-word phrases split and sequenced one word at a time.
+3. Pixels sent as one UDP packet (10-byte DDP header + 768 bytes RGB).
+4. WLED enters realtime mode; vizBot restores the previous effect over HTTP afterward.
 
-1. Bot speech text is rendered to a 32x8 pixel buffer using a 3x5 font
-2. Multi-word phrases are split and sequenced one word at a time
-3. Pixel data sent as a single UDP packet (10-byte DDP header + 768 bytes RGB = 778 bytes)
-4. WLED auto-enters realtime mode; vizBot restores the previous effect via HTTP after display
-
-**Palette sync:** vizBot polls WLED's current palette via HTTP and maps it to a local palette index, keeping the LCD background visually consistent with the LED matrix.
-
-**Hologram mode:** Horizontal mirror for Pepper's ghost prism displays — mirrors both LCD face and WLED pixel buffer.
-
-**Mesh coordination:** When multiple vizBots share a WLED target, ESP-NOW mesh prevents DDP collisions by deferring sends until the active peer finishes.
+**Palette sync** maps WLED's current palette to a local index. **Hologram mode** horizontally
+mirrors LCD + WLED buffer for Pepper's-ghost prisms. **Mesh coordination** defers DDP sends when a
+mesh peer is using the same WLED target.
 
 ## vizCloud Integration
 
-Cloud connectivity via HTTPS to a DigitalOcean App Platform server:
+HTTPS to a DigitalOcean App Platform server:
+- **TLS pinning**: GTS Root R4 (Google Trust Services), *not* `esp_crt_bundle` (crashes generic ESP32-S3).
+- **Registration**: POST `/api/bots/register` (MAC, hardware type, firmware version, capabilities).
+- **Sync polling**: POST `/api/bots/{id}/sync` (default 60s).
+- **Commands**: expression, say, personality, brightness, background, ambient_effect, sound, volume, sleep, reboot, mesh_scan.
+- **Scheduled commands**: ISO-8601 `execute_at`, 8 slots.
+- **Content sync**: sayings + personalities cached to LittleFS.
+- **Telemetry**: expression, personality, RSSI, heap, uptime, NTP, IMU, lux, mesh peers.
 
-- **TLS pinning**: GTS Root R4 certificate (Google Trust Services), NOT `esp_crt_bundle` (crashes generic ESP32-S3)
-- **Registration**: POST `/api/bots/register` with MAC, hardware type, firmware version, capabilities
-- **Sync polling**: POST `/api/bots/{id}/sync` at configurable interval (default 60s)
-- **Command dispatch**: Supports expression, say, personality, brightness, background, ambient_effect, sound, volume, sleep, reboot, mesh_scan
-- **Scheduled commands**: ISO-8601 `execute_at` timestamps, buffered in 8 slots
-- **Content sync**: Cloud-managed sayings and personalities cached to LittleFS
-- **Group management**: Multi-bot groups with sync modes, shared WLED ownership
-- **Fleet telemetry**: Reports expression, personality, RSSI, heap, uptime, NTP time, IMU, lux, mesh peers
-
-Runs cooperatively inside `wifiServerTask` on Core 0 — TLS naturally serialized with WLED HTTP to prevent heap fragmentation.
-
-See `FIRMWARE-INTEGRATION.md` for the full integration spec.
+Runs cooperatively inside `wifiServerTask` on Core 0 — TLS serialized with WLED HTTP to limit heap
+fragmentation. See `FIRMWARE-INTEGRATION.md` for the full spec.
 
 ## ESP-NOW Mesh
 
-Peer-to-peer mesh networking between vizBot devices (`esp_now_mesh.h`):
-
-- Periodic broadcast of device state (expression, personality, WLED activity)
-- Automatic peer discovery and stale peer eviction
-- Coordinated WLED display — prevents DDP collisions when multiple bots share a WLED target
-- Deferred speech: LCD bubble delayed if a mesh peer is currently using the same WLED
+Peer-to-peer mesh between vizBots (`esp_now_mesh.h`): periodic state broadcast, peer discovery +
+stale eviction, coordinated WLED to prevent DDP collisions, and deferred speech (LCD bubble delayed
+while a peer uses the shared WLED).
 
 ## Graphics Stack
 
-- **LovyanGFX** for TARGET_LCD (custom LGFX class, DMA SPI at 40MHz, ST7789V2/ST7789VW)
-- **M5Unified** for TARGET_CORES3 (wraps LovyanGFX internally)
-- **DisplayProxy** struct provides unified API: `beginCanvas()`, `flushCanvas()`, `fillRect()`, `drawLine()`, etc.
-- **Double-buffering**: All rendering goes to an offscreen LGFX_Sprite, then flushed to the display in one atomic SPI transfer — zero flicker
-- **Resolution-independent layout**: `layout.h` derives all UI positions from `LCD_WIDTH` and `LCD_HEIGHT` at compile time
+- **LovyanGFX** for `TARGET_LCD` (custom LGFX, DMA SPI @ 40MHz, ST7789V2/VW).
+- **M5Unified** for `TARGET_CORES3` (wraps LovyanGFX).
+- **DisplayProxy** unifies the API: `beginCanvas()`, `flushCanvas()`, `fillRect()`, `drawLine()`, etc.
+- **Double-buffering**: all rendering goes to an offscreen `LGFX_Sprite`, flushed in one atomic SPI transfer.
+- **Resolution-independent layout** (`layout.h`) from `LCD_WIDTH`/`LCD_HEIGHT` at compile time.
 
 ## Core S3 Extras
 
-The M5Stack Core S3 target enables additional sensor-reactive behaviors:
-
-- **Audio analysis** (`audio_analysis.h`): Built-in mic detects spikes (clap → Surprised), speech (→ Focused), and extended silence (→ Chill)
-- **Proximity/light** (`proximity_light.h`): Detects hand approaching (→ Surprised/Shy), peek-a-boo (3+ cover/uncover cycles → "Peekaboo!"), sustained cover (→ Worried + "Dark")
-- **Sound effects** (`bot_sounds.h`): Boot chime, tap boop, shake rattle, clap react, wake chime
-- **Auto-brightness**: Ambient light sensor adjusts LCD backlight
+- **Audio analysis** (`audio_analysis.h`): mic detects spikes (clap → Surprised), speech (→ Focused), silence (→ Chill).
+- **Proximity/light** (`proximity_light.h`): hand-approach (→ Surprised/Shy), peek-a-boo, sustained cover (→ Worried).
+- **Sound + MIDI** (`bot_sounds.h`, `midi_synth.h`): boot chime, reactions, and SAM2695 MIDI sequences.
+- **Auto-brightness**: ambient light sensor adjusts the LCD backlight.
 
 ## Building
 
-1. Set board target in `config.h` (uncomment one `BOARD_*` define)
-2. Arduino IDE: Board = `ESP32S3 Dev Module`, USB CDC On Boot = Enabled
-3. For 4MB flash boards: Partition Scheme = Custom, select `partitions.csv`
-4. Required libraries: FastLED, SensorLib, LovyanGFX (TARGET_LCD), M5Unified (TARGET_CORES3), ArduinoJson
-5. Upload `vizbot.ino`
+Builds use **PlatformIO** (`platformio.ini` in this folder). One env per board:
 
-## API Endpoints
+```bash
+pio run -e lcd-169       # build
+pio run -e m5cores3 -t upload    # build + flash
+pio run -e lcd-13 -t upload -t monitor
+```
 
-All endpoints served on port 80 via the captive portal AP (default `vizBot-XXXX` / `12345678`).
+A post-build script (`name_firmware.py`) publishes `vizbot-<env>-v<FIRMWARE_VERSION>.bin` (and a
+merged `-factory.bin`) into `../builds/`. The version comes from `FIRMWARE_VERSION` in `config.h`;
+the board portion of the name comes from the env name.
 
-See the root [README.md](../README.md) for the complete API endpoint reference.
+**Per-board gotchas:**
+- **Core S3 PSRAM is QSPI, not OPI.** The `m5cores3` env intentionally omits
+  `board_build.arduino.memory_type` and uses the board default; do **not** add `qio_opi` or set OPI
+  (gives `octal_psram: PSRAM ID read error` and 0KB PSRAM).
+- **Matrix board: do not call `setCpuFrequencyMhz()`** — 80MHz and 160MHz both break USB CDC serial.
+- **`-factory.bin` flash size must match the hardware** (16MB Core S3 / LCD, 4MB Matrix); a mismatch
+  in the bootloader header bricks the device into a fast boot loop. `name_firmware.py` derives this
+  from the env's board config.
+- `StackType_t` is `uint8_t` on ESP-IDF — a static task stack array's size is bytes, not words.
+
+## Version History
+
+| Version | Boards | Notes |
+|---|---|---|
+| `3.0.0-dev` | all | vizBot 3.0 line in progress — adds StackChan flagship (`stackchan` env). |
+| `2.2.1` | m5cores3 | Correct `flash_size` in merged `-factory.bin`. |
+| `2.2.0` | m5cores3 | SAM2695 MIDI synth, 37 built-in sequences. |
+
+## Licenses
+
+vizBot firmware is **MIT** licensed (see [`LICENSE`](../LICENSE) at the repo root).
+
+**StackChan build target (`stackchan` env) — GPL-3.0.** The vizBot 3.0 StackChan target vendors
+driver code (SCS0009 servo, GC0308 camera, head-angle control) lifted from M5Stack's StackChan
+factory firmware (<https://github.com/m5stack/StackChan>), which is GPL-3.0. Consequently the
+**StackChan binary as a whole is distributed under GPL-3.0**, and its corresponding source is
+available in this public repository. Original copyright headers are preserved in the vendored files,
+crediting both mongonta0716 (original author) and M5Stack (port).
+
+This GPL obligation applies **only** to the StackChan binary. All other board targets
+(`lcd-169`, `lcd-13`, `m5cores3` bare, `matrix`) contain no GPL code — StackChan sources are gated
+behind `BOARD_HAS_STACKCHAN_BASE` — and remain MIT.
+
+Third-party libraries: FastLED (MIT), LovyanGFX (FreeBSD), M5Unified (MIT), ArduinoJson (MIT),
+SensorLib (MIT), M5-SAM2695 (MIT).

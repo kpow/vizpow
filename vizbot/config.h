@@ -161,7 +161,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "2.2.1"
+#define FIRMWARE_VERSION "3.0.0-dev"
 
 #if defined(BOARD_ESP32S3_MATRIX)
   #define BOARD_TYPE "esp32s3-matrix"
@@ -171,6 +171,28 @@
   #define BOARD_TYPE "esp32s3-lcd13"
 #elif defined(BOARD_M5CORES3)
   #define BOARD_TYPE "m5cores3"
+#endif
+
+// StackChan extension: override BOARD_TYPE for distinct cloud/state identity
+#ifdef BOARD_HAS_STACKCHAN_BASE
+  #undef BOARD_TYPE
+  #define BOARD_TYPE "stackchan"
+#endif
+
+// ============================================================================
+// StackChan Base Peripherals (K151-R)
+// ============================================================================
+// Constants for the StackChan robot base. All hardware access is gated behind
+// BOARD_HAS_STACKCHAN_BASE and stubbed until Phase 2 driver bring-up.
+#ifdef BOARD_HAS_STACKCHAN_BASE
+  #define SC_IOEXP_I2C_ADDR     0x6F  // PY32L020 IO expander
+  #define SC_HEADTOUCH_I2C_ADDR 0x68  // Si12T capacitive touch panel
+  #define SC_BATTMON_I2C_ADDR   0x41  // INA226 battery/current monitor
+  #define SC_BASE_LED_COUNT     12    // WS2812C ring (driven via IO expander IO14)
+  #define SC_SERVO_X_ID         1     // SCS0009 yaw servo
+  #define SC_SERVO_Y_ID         2     // SCS0009 pitch servo
+  #define SC_SERVO_Y_MIN_DEG    5     // Pitch safety clamp (hardware limit)
+  #define SC_SERVO_Y_MAX_DEG    85    // Pitch safety clamp (hardware limit)
 #endif
 
 // GitHub repo for OTA update checks

@@ -15,9 +15,14 @@
 #include "content_cache.h"
 #include "cloud_client.h"
 #endif
+#ifdef BOARD_HAS_STACKCHAN_BASE
+#include "stackchan_base.h"
+#endif
 
-// Global instance — defined here, extern'd via system_status.h
-SystemStatus sysStatus = {false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, 0, 0, IPAddress(0,0,0,0), IPAddress(0,0,0,0), 0, 0};
+// Global instance — defined here, extern'd via system_status.h.
+// Zero-initialized: all bool fields false, numerics 0, IPAddress 0.0.0.0.
+// Use {} (not a positional list) so adding SystemStatus fields stays safe.
+SystemStatus sysStatus = {};
 
 // Only compile boot sequence for LCD targets
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
@@ -45,6 +50,7 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 #define BOOT_COLOR_FAIL    0xF800  // Red
 #define BOOT_COLOR_WARN    0xFFE0  // Yellow
 #define BOOT_COLOR_READY   0x07FF  // Cyan
+#define BOOT_COLOR_DEFER   0x7BEF  // Mid gray — neutral, not alarming
 
 // ============================================================================
 // Boot Display Helpers
@@ -53,8 +59,13 @@ SystemStatus sysStatus = {false, false, false, false, false, false, false, false
 // External GFX pointer (initialized in display_lcd.h before boot runs)
 extern GfxDevice *gfx;
 
+// Global stage counter (for [n/total] labels across all columns)
 static uint8_t bootStageIndex = 0;
-#if defined(TARGET_CORES3) && defined(CLOUD_ENABLED)
+
+// Total stage count (compile-time, includes StackChan stages when applicable)
+#if defined(BOARD_HAS_STACKCHAN_BASE)
+static const uint8_t BOOT_TOTAL_STAGES = 21;  // 12 core + 9 StackChan
+#elif defined(TARGET_CORES3) && defined(CLOUD_ENABLED)
 static const uint8_t BOOT_TOTAL_STAGES = 12;
 #elif defined(TARGET_CORES3)
 static const uint8_t BOOT_TOTAL_STAGES = 10;
@@ -64,6 +75,17 @@ static const uint8_t BOOT_TOTAL_STAGES = 11;
 static const uint8_t BOOT_TOTAL_STAGES = 9;
 #endif
 
+// Column-aware drawing state. On non-StackChan builds these equal the old
+// constants and produce pixel-identical output. StackChan builds override
+// them at the top of runBootSequence() for a compact two-column layout.
+static int16_t bootLabelX     = BOOT_LEFT_MARGIN;
+static int16_t bootStatusX    = BOOT_STATUS_X;
+static uint8_t bootTextSz     = BOOT_TEXT_SIZE;
+static uint8_t bootLineH      = BOOT_LINE_HEIGHT;
+static bool    bootShowDetail  = true;
+static uint8_t bootRowInCol    = 0;   // row within current column
+static uint8_t bootMaxRow      = 0;   // max rows seen in any column
+
 // Draw the boot header
 void bootDrawHeader() {
   gfx->setTextSize(BOOT_TEXT_SIZE);
@@ -71,22 +93,32 @@ void bootDrawHeader() {
   gfx->setTextColor(BOOT_COLOR_TITLE);
   gfx->print("vizBot");
 
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  gfx->setTextSize(1);
+  gfx->setCursor(LCD_WIDTH - 56, 2);
+  gfx->setTextColor(BOOT_COLOR_TITLE);
+  gfx->print("StackChan");
+  gfx->setCursor(LCD_WIDTH - 26, 12);
+  gfx->setTextColor(BOOT_COLOR_DETAIL);
+  gfx->print("boot");
+  #else
   gfx->setTextSize(1);
   gfx->setCursor(LCD_WIDTH - 42, 10);
   gfx->setTextColor(BOOT_COLOR_DETAIL);
   gfx->print("boot");
+  #endif
 }
 
-// Draw a stage label: "[1/7] LCD"
+// Draw a stage label: "[1/21] LCD"
 void bootDrawStage(const char* label) {
   bootStageIndex++;
-  int16_t y = BOOT_TOP_MARGIN + (bootStageIndex - 1) * BOOT_LINE_HEIGHT;
+  bootRowInCol++;
+  int16_t y = BOOT_TOP_MARGIN + (bootRowInCol - 1) * bootLineH;
 
-  gfx->setTextSize(BOOT_TEXT_SIZE);
-  gfx->setCursor(BOOT_LEFT_MARGIN, y);
+  gfx->setTextSize(bootTextSz);
+  gfx->setCursor(bootLabelX, y);
   gfx->setTextColor(BOOT_COLOR_LABEL);
 
-  // Stage number
   gfx->print("[");
   gfx->print(bootStageIndex);
   gfx->print("/");
@@ -97,27 +129,47 @@ void bootDrawStage(const char* label) {
 
 // Draw result for the current stage
 void bootDrawResult(bool success, const char* detail = nullptr) {
-  int16_t y = BOOT_TOP_MARGIN + (bootStageIndex - 1) * BOOT_LINE_HEIGHT;
+  int16_t y = BOOT_TOP_MARGIN + (bootRowInCol - 1) * bootLineH;
 
-  gfx->setTextSize(BOOT_TEXT_SIZE);
-  gfx->setCursor(BOOT_STATUS_X, y);
+  gfx->setTextSize(bootTextSz);
+  gfx->setCursor(bootStatusX, y);
   gfx->setTextColor(success ? BOOT_COLOR_OK : BOOT_COLOR_FAIL);
   gfx->print(success ? "OK" : "FAIL");
 
   if (!success) sysStatus.failCount++;
 
-  // Optional detail line below in smaller text
-  if (detail != nullptr) {
+  if (bootShowDetail && detail != nullptr) {
     gfx->setTextSize(1);
-    gfx->setCursor(BOOT_LEFT_MARGIN + 20, y + 14);
+    gfx->setCursor(bootLabelX + 20, y + 14);
     gfx->setTextColor(BOOT_COLOR_DETAIL);
     gfx->print(detail);
   }
 }
 
+// Draw deferred/stub status — neutral color, does NOT increment failCount
+void bootDrawDeferred() {
+  int16_t y = BOOT_TOP_MARGIN + (bootRowInCol - 1) * bootLineH;
+
+  gfx->setTextSize(bootTextSz);
+  gfx->setCursor(bootStatusX, y);
+  gfx->setTextColor(BOOT_COLOR_DEFER);
+  gfx->print("DEFER");
+}
+
+// Switch to the right column (StackChan stages)
+#ifdef BOARD_HAS_STACKCHAN_BASE
+void bootBeginRightColumn() {
+  if (bootRowInCol > bootMaxRow) bootMaxRow = bootRowInCol;
+  bootLabelX  = 164;
+  bootStatusX = 286;
+  bootRowInCol = 0;
+}
+#endif
+
 // Draw final boot summary at bottom of screen
 void bootDrawSummary() {
-  int16_t y = BOOT_TOP_MARGIN + BOOT_TOTAL_STAGES * BOOT_LINE_HEIGHT + 10;
+  if (bootRowInCol > bootMaxRow) bootMaxRow = bootRowInCol;
+  int16_t y = BOOT_TOP_MARGIN + bootMaxRow * bootLineH + 10;
 
   gfx->setTextSize(BOOT_TEXT_SIZE);
   gfx->setCursor(BOOT_LEFT_MARGIN, y);
@@ -178,9 +230,7 @@ extern bool bootAttemptSTA();
 
 // Stage 1: LCD — already initialized before boot screen starts
 bool bootStageLCD() {
-  // LCD was already initialized to show this boot screen.
   #ifdef TARGET_CORES3
-  // DisplayProxy* is always valid (points to static instance)
   bool ok = true;
   #else
   bool ok = (gfx != nullptr);
@@ -196,8 +246,6 @@ bool bootStageLEDs() {
   FastLED.clear();
   FastLED.show();
 
-  // Quick sanity: if addLeds didn't crash, we're good.
-  // Flash a brief white pixel to confirm data line works.
   leds[0] = CRGB::White;
   FastLED.show();
   delay(50);
@@ -211,18 +259,12 @@ bool bootStageLEDs() {
 // Stage 3: I2C Bus
 bool bootStageI2C() {
   #ifdef TARGET_CORES3
-  // M5Unified initialized I2C during M5.begin() in setup() and manages the bus
-  // internally via its own low-level driver — Arduino Wire is never started here.
-  // A Wire bus scan would find nothing and incorrectly report failure.
-  // M5.begin() completing (we are past setup()) is sufficient proof I2C is up.
   sysStatus.i2cReady = true;
   return true;
-
   #else
   Wire.begin(I2C_SDA, I2C_SCL);
   delay(50);
 
-  // Scan for any device on the bus to verify it's alive
   bool found = false;
   for (uint8_t addr = 0x08; addr < 0x78; addr++) {
     Wire.beginTransmission(addr);
@@ -245,8 +287,6 @@ bool bootStageIMU() {
   }
 
   #ifdef TARGET_CORES3
-  // BMI270 via M5Unified — already initialized by M5.begin().
-  // Do a test read; az should be ~1.0 when resting flat.
   float ax = 0, ay = 0, az = 0;
   M5.Imu.getAccel(&ax, &ay, &az);
   bool ok = (ax != 0.0f || ay != 0.0f || az != 0.0f);
@@ -292,7 +332,6 @@ bool bootStageTouch() {
 // Stage 6: WiFi AP (preserves STA if already connected)
 bool bootStageWiFi() {
   if (sysStatus.staConnected) {
-    // STA already connected from bootAttemptSTA — use AP+STA so we don't kill it
     WiFi.mode(WIFI_AP_STA);
   } else {
     WiFi.mode(WIFI_AP);
@@ -301,13 +340,9 @@ bool bootStageWiFi() {
 
   bool ok = WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   if (ok) {
-    // Must be called AFTER softAP — disables radio power saving so beacons keep going
     WiFi.setSleep(false);
-
-    // Set TX power from config — full power for USB boards, reduced for battery LED
     WiFi.setTxPower(WIFI_TX_POWER);
 
-    // Wait for AP to actually start beaconing (IP becomes valid)
     uint8_t retries = 0;
     while (WiFi.softAPIP() == IPAddress(0, 0, 0, 0) && retries < 20) {
       delay(100);
@@ -315,7 +350,6 @@ bool bootStageWiFi() {
     }
     sysStatus.apIP = WiFi.softAPIP();
 
-    // If IP is still 0.0.0.0 after 2 seconds, AP didn't really start
     if (sysStatus.apIP == IPAddress(0, 0, 0, 0)) {
       ok = false;
     }
@@ -354,13 +388,9 @@ bool bootStageDNS() {
     return false;
   }
 
-  // Wildcard DNS — all domains resolve to our AP IP
   startDNS();
   sysStatus.dnsReady = true;
-
-  // mDNS — vizbot.local
   sysStatus.mdnsReady = startMDNS();
-
   return true;
 }
 
@@ -373,7 +403,19 @@ bool bootStageDNS() {
 void runBootSequence() {
   uint32_t bootStart = millis();
   bootStageIndex = 0;
+  bootRowInCol = 0;
+  bootMaxRow = 0;
   sysStatus.failCount = 0;
+
+  // StackChan builds: compact two-column layout (text size 1, no detail sub-lines).
+  // Left column = core stages, right column = StackChan stages.
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  bootTextSz     = 1;
+  bootLineH      = 13;
+  bootShowDetail = false;
+  bootLabelX     = 2;
+  bootStatusX    = 120;
+  #endif
 
   // Clear screen and draw header
   gfx->fillScreen(BOOT_COLOR_BG);
@@ -433,18 +475,14 @@ void runBootSequence() {
   #ifdef TARGET_CORES3
   {
     bootDrawStage("Sensors");
-    // MIDI synth init (SAM2695 via Grove Port C)
     #ifdef MIDI_SYNTH_ENABLED
     midiSynth.init();
     sysStatus.midiReady = midiSynth.ready;
     #endif
-    // Speaker/sound init (uses MIDI if available, else M5.Speaker fallback)
     botSounds.init();
     sysStatus.speakerReady = true;
-    // Mic init
     audioAnalysis.init();
     sysStatus.micReady = true;
-    // Proximity/light init
     proxLight.init();
     sysStatus.proxLightReady = proxLight.initialized;
     char detail[48];
@@ -456,7 +494,7 @@ void runBootSequence() {
   }
   #endif
 
-  // --- WiFi STA (hardcoded — runs FIRST, STA-only like POC) ---
+  // --- WiFi STA ---
   bootDrawStage("WiFi STA");
   ok = bootAttemptSTA();
   if (ok) {
@@ -468,7 +506,7 @@ void runBootSequence() {
   }
   delay(80);
 
-  // --- Stage 7: WiFi AP (starts after STA attempt, regardless of result) ---
+  // --- WiFi AP ---
   bootDrawStage("WiFi AP");
   ok = bootStageWiFi();
   if (ok) {
@@ -480,13 +518,13 @@ void runBootSequence() {
   }
   delay(80);
 
-  // --- Stage 8: Web Server ---
+  // --- Web Server ---
   bootDrawStage("Web Srv");
   ok = bootStageWebServer();
   bootDrawResult(ok, ok ? "Port 80" : "No WiFi");
   delay(80);
 
-  // --- Stage 9: DNS + mDNS (Captive Portal) ---
+  // --- DNS + mDNS (Captive Portal) ---
   bootDrawStage("Portal");
   ok = bootStageDNS();
   if (ok) {
@@ -503,20 +541,17 @@ void runBootSequence() {
   delay(80);
 
 #ifdef CLOUD_ENABLED
-  // --- Stage 10: LittleFS ---
+  // --- LittleFS ---
   bootDrawStage("Storage");
   ok = initContentCache();
   sysStatus.littlefsReady = ok;
   bootDrawResult(ok, ok ? "LittleFS 128K" : "Format failed");
   delay(80);
 
-  // --- Stage 11: Cloud ---
-  // Only load cached metadata here. Actual TLS connections happen in the cloud
-  // task on Core 0 (16KB stack). Core 1's setup stack (8KB) is too small for
-  // the mbedtls handshake and causes StoreProhibited crashes on non-PSRAM boards.
+  // --- Cloud ---
   bootDrawStage("Cloud");
   if (sysStatus.littlefsReady) {
-    initCloudClient();  // loads cached meta from NVS + LittleFS
+    initCloudClient();
     sysStatus.cloudRegistered = cloudMeta.registered;
     if (cloudMeta.registered) {
       bootDrawResult(true, "Cached ID");
@@ -529,6 +564,73 @@ void runBootSequence() {
     bootDrawResult(false, "No storage");
   }
   delay(80);
+#endif
+
+  // ========================================================================
+  // StackChan stages — right column, all stubs reporting DEFER
+  // ========================================================================
+#ifdef BOARD_HAS_STACKCHAN_BASE
+  bootBeginRightColumn();
+
+  // Right-column header
+  gfx->setTextSize(1);
+  gfx->setCursor(bootLabelX, BOOT_TOP_MARGIN - 10);
+  gfx->setTextColor(BOOT_COLOR_TITLE);
+  gfx->print("StackChan");
+
+  // --- IO Expander (PY32L020) ---
+  bootDrawStage("IO Exp");
+  scInitIoExpander();
+  bootDrawDeferred();
+  delay(40);
+
+  // --- VM_EN servo power rail ---
+  bootDrawStage("VM_EN");
+  scInitVmEn();
+  bootDrawDeferred();
+  delay(40);
+
+  // --- SCS0009 Servo X (yaw) ---
+  bootDrawStage("Servo X");
+  scInitServoX();
+  bootDrawDeferred();
+  delay(40);
+
+  // --- SCS0009 Servo Y (pitch) ---
+  bootDrawStage("Servo Y");
+  scInitServoY();
+  bootDrawDeferred();
+  delay(40);
+
+  // --- WS2812C base LED ring ---
+  bootDrawStage("Base LED");
+  scInitBaseLeds();
+  bootDrawDeferred();
+  delay(40);
+
+  // --- Si12T head touch ---
+  bootDrawStage("Touch SC");
+  scInitHeadTouch();
+  bootDrawDeferred();
+  delay(40);
+
+  // --- INA226 battery monitor ---
+  bootDrawStage("Battery");
+  scInitBatteryMon();
+  bootDrawDeferred();
+  delay(40);
+
+  // --- GC0308 camera ---
+  bootDrawStage("Camera");
+  scInitCamera();
+  bootDrawDeferred();
+  delay(40);
+
+  // --- LittleFS photo storage ---
+  bootDrawStage("Photo FS");
+  scInitPhotoFs();
+  bootDrawDeferred();
+  delay(40);
 #endif
 
   // --- Summary ---
