@@ -580,53 +580,53 @@ void runBootSequence() {
 
   // --- IO Expander (PY32L020) ---
   bootDrawStage("IO Exp");
-  scInitIoExpander();
-  bootDrawDeferred();
+  ok = scInitIoExpander();
+  bootDrawResult(ok);
   delay(40);
 
   // --- VM_EN servo power rail ---
   bootDrawStage("VM_EN");
-  scInitVmEn();
-  bootDrawDeferred();
+  ok = scInitVmEn();
+  bootDrawResult(ok);
   delay(40);
 
   // --- SCS0009 Servo X (yaw) ---
   bootDrawStage("Servo X");
-  scInitServoX();
-  bootDrawDeferred();
+  ok = scInitServoX();
+  bootDrawResult(ok);
   delay(40);
 
   // --- SCS0009 Servo Y (pitch) ---
   bootDrawStage("Servo Y");
-  scInitServoY();
-  bootDrawDeferred();
+  ok = scInitServoY();
+  bootDrawResult(ok);
   delay(40);
 
   // --- WS2812C base LED ring ---
   bootDrawStage("Base LED");
-  scInitBaseLeds();
-  bootDrawDeferred();
+  ok = scInitBaseLeds();
+  bootDrawResult(ok);
   delay(40);
 
   // --- Si12T head touch ---
   bootDrawStage("Touch SC");
-  scInitHeadTouch();
-  bootDrawDeferred();
+  ok = scInitHeadTouch();
+  bootDrawResult(ok);
   delay(40);
 
   // --- INA226 battery monitor ---
   bootDrawStage("Battery");
-  scInitBatteryMon();
-  bootDrawDeferred();
+  ok = scInitBatteryMon();
+  bootDrawResult(ok);
   delay(40);
 
-  // --- GC0308 camera ---
+  // --- GC0308 camera (Phase 4 stub) ---
   bootDrawStage("Camera");
   scInitCamera();
   bootDrawDeferred();
   delay(40);
 
-  // --- LittleFS photo storage ---
+  // --- LittleFS photo storage (Phase 4 stub) ---
   bootDrawStage("Photo FS");
   scInitPhotoFs();
   bootDrawDeferred();
