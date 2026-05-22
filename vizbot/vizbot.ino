@@ -472,10 +472,14 @@ void loop() {
       scFirePetReaction(scTouch_state.pendingTapZone, botMode.personalityIndex);
     } else if (touchResult == 2) {
       scFireRecenter(botMode.personalityIndex);
+    } else if (touchResult == 3) {
+      scFireChillMode();
     }
   }
-  // Idle head drift (personality-driven random movement)
-  scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);
+  // Idle head drift — suppressed during chill mode
+  if (!scTouch_state.chillMode) {
+    scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);
+  }
   #endif
 
   // Auto-cycle ambient effects and palettes (skip while in info mode)

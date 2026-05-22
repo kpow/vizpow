@@ -14,11 +14,11 @@
 // Polls Si12T each frame. Detects:
 //   - Single tap: any zone press→release triggers pet reaction
 //   - Double-tap center: two center taps within 400ms → recenter head
+//   - Long press: hold any zone 2+ seconds → chill mode (10 min)
 //
 // Touch zones: 0=left, 1=center, 2=right
-// Pressure levels: OUTPUT_NONE=0, OUTPUT_LOW=1, OUTPUT_MID=2, OUTPUT_HIGH=3
 
-// Forward declarations — implemented in bot_mode.h
+// Forward declarations
 struct BotModeState;
 extern BotModeState botMode;
 
@@ -30,11 +30,9 @@ struct ScTouchState {
   unsigned long lastCenterTapMs = 0;
   bool waitingForDoubleTap = false;
 
-  // Debounce: ignore rapid re-triggers
+  // Debounce
   unsigned long lastReactionMs = 0;
   static constexpr uint16_t DEBOUNCE_MS = 300;
-
-  // Double-tap window
   static constexpr uint16_t DOUBLE_TAP_WINDOW_MS = 400;
 
   // Single tap held in suspense during double-tap window
@@ -42,31 +40,76 @@ struct ScTouchState {
   uint8_t pendingTapZone = 0;
   unsigned long pendingTapAt = 0;
 
+  // Long press tracking
+  bool anyPressed = false;
+  unsigned long pressStartMs = 0;
+  bool longPressFired = false;
+  static constexpr uint16_t SC_LONG_PRESS_MS = 2000;
+
+  // Chill mode
+  bool chillMode = false;
+  unsigned long chillEndMs = 0;
+  static constexpr uint32_t CHILL_DURATION_MS = 600000;  // 10 minutes
+
   void init() {
     memset(prevZone, OUTPUT_NONE, sizeof(prevZone));
     lastCenterTapMs = 0;
     waitingForDoubleTap = false;
     lastReactionMs = 0;
     pendingSingleTap = false;
+    anyPressed = false;
+    longPressFired = false;
+    chillMode = false;
+    chillEndMs = 0;
   }
 
-  // Call once per frame from main loop
-  // Returns: 0=nothing, 1=single tap fired, 2=double-tap recenter fired
+  // Returns: 0=nothing, 1=single tap, 2=double-tap recenter, 3=long-press chill
   uint8_t update() {
     if (!sysStatus.scHeadTouchReady) return 0;
 
     unsigned long now = millis();
 
+    // Check chill mode expiry
+    if (chillMode && now >= chillEndMs) {
+      chillMode = false;
+    }
+
     // Read fresh touch data
     scReadTouch();
 
-    // Get current zone states
     uint8_t curZone[3];
     for (int i = 0; i < 3; i++) {
       curZone[i] = scGetTouchZone(i);
     }
 
+    // Check if anything is currently pressed
+    bool nowPressed = (curZone[0] != OUTPUT_NONE ||
+                       curZone[1] != OUTPUT_NONE ||
+                       curZone[2] != OUTPUT_NONE);
+
     uint8_t result = 0;
+
+    // Long press detection: any zone held for 2+ seconds
+    if (nowPressed && !anyPressed) {
+      // Just started pressing
+      pressStartMs = now;
+      longPressFired = false;
+    }
+    if (nowPressed && !longPressFired && (now - pressStartMs >= SC_LONG_PRESS_MS)) {
+      // Long press triggered!
+      longPressFired = true;
+      pendingSingleTap = false;
+      waitingForDoubleTap = false;
+      lastReactionMs = now;
+      result = 3;
+    }
+    anyPressed = nowPressed;
+
+    // Skip tap detection if long press just fired
+    if (longPressFired) {
+      memcpy(prevZone, curZone, sizeof(prevZone));
+      return result;
+    }
 
     // Detect release events (was pressed, now not)
     for (int z = 0; z < 3; z++) {
@@ -74,17 +117,14 @@ struct ScTouchState {
       bool isPressed  = (curZone[z] != OUTPUT_NONE);
 
       if (wasPressed && !isPressed && (now - lastReactionMs > DEBOUNCE_MS)) {
-        // Release detected on zone z
         if (z == 1) {
           // Center zone — check for double-tap
           if (waitingForDoubleTap && (now - lastCenterTapMs < DOUBLE_TAP_WINDOW_MS)) {
-            // Double-tap! Cancel pending single tap and recenter
             pendingSingleTap = false;
             waitingForDoubleTap = false;
             lastReactionMs = now;
-            result = 2;  // recenter
+            result = 2;
           } else {
-            // First center tap — hold in suspense
             lastCenterTapMs = now;
             waitingForDoubleTap = true;
             pendingSingleTap = true;
@@ -92,12 +132,12 @@ struct ScTouchState {
             pendingTapAt = now;
           }
         } else {
-          // Left or right zone — immediate single tap (no double-tap check)
+          // Left or right — immediate single tap
           lastReactionMs = now;
           pendingSingleTap = false;
           waitingForDoubleTap = false;
-          result = 1;  // single tap
-          pendingTapZone = z;  // store which zone for reaction
+          result = 1;
+          pendingTapZone = z;
         }
       }
     }
@@ -107,10 +147,10 @@ struct ScTouchState {
       pendingSingleTap = false;
       waitingForDoubleTap = false;
       lastReactionMs = now;
-      result = 1;  // single tap (delayed center)
+      result = 1;
+      pendingTapZone = 1;
     }
 
-    // Save state for next frame
     memcpy(prevZone, curZone, sizeof(prevZone));
     return result;
   }
@@ -121,28 +161,20 @@ static ScTouchState scTouch_state;
 // ============================================================================
 // Pet Reaction — personality-specific response to head touch
 // ============================================================================
-// Different reactions per personality × zone:
-//   Chill: gentle, happy reactions
-//   Hyper: excited, over-the-top reactions
-//   Grumpy: annoyed, reluctant reactions
 
-// Personality-specific expression pools for touch reactions
 static const uint8_t SC_TOUCH_EXPR_CHILL[]  = { EXPR_HAPPY, EXPR_SHY, EXPR_LOVE, EXPR_CHILL, EXPR_WINKING };
 static const uint8_t SC_TOUCH_EXPR_HYPER[]  = { EXPR_EXCITED, EXPR_LOVE, EXPR_SURPRISED, EXPR_KISSING, EXPR_SASSY };
 static const uint8_t SC_TOUCH_EXPR_GRUMPY[] = { EXPR_ANNOYED, EXPR_SKEPTICAL, EXPR_ANGRY, EXPR_MISCHIEF, EXPR_DEVIOUS };
 
-// Flash colors per personality
-static const uint8_t SC_TOUCH_FLASH_CHILL[]  = { 100, 200, 255 };  // soft blue
-static const uint8_t SC_TOUCH_FLASH_HYPER[]  = { 255, 100, 200 };  // hot pink
-static const uint8_t SC_TOUCH_FLASH_GRUMPY[] = { 255,  60,  20 };  // angry orange
+static const uint8_t SC_TOUCH_FLASH_CHILL[]  = { 100, 200, 255 };
+static const uint8_t SC_TOUCH_FLASH_HYPER[]  = { 255, 100, 200 };
+static const uint8_t SC_TOUCH_FLASH_GRUMPY[] = { 255,  60,  20 };
 
-// Head wiggle per personality (yaw swing in tenths of degrees)
-static const int SC_TOUCH_WIGGLE_CHILL  =  80;   // gentle tilt
-static const int SC_TOUCH_WIGGLE_HYPER  = 200;   // big swing
-static const int SC_TOUCH_WIGGLE_GRUMPY =  40;   // minimal grudging shift
+static const int SC_TOUCH_WIGGLE_CHILL  =  80;
+static const int SC_TOUCH_WIGGLE_HYPER  = 200;
+static const int SC_TOUCH_WIGGLE_GRUMPY =  40;
 
 inline void scFirePetReaction(uint8_t zone, uint8_t personalityIndex) {
-  // Pick expression based on personality
   const uint8_t* pool;
   uint8_t poolSize = 5;
   const uint8_t* flashColor;
@@ -159,44 +191,38 @@ inline void scFirePetReaction(uint8_t zone, uint8_t personalityIndex) {
       flashColor = SC_TOUCH_FLASH_GRUMPY;
       wiggle = SC_TOUCH_WIGGLE_GRUMPY;
       break;
-    default:  // CHILL and any custom
+    default:
       pool = SC_TOUCH_EXPR_CHILL;
       flashColor = SC_TOUCH_FLASH_CHILL;
       wiggle = SC_TOUCH_WIGGLE_CHILL;
       break;
   }
 
-  // Expression
   uint8_t expr = pool[random(0, poolSize)];
   botMode.face.transitionTo(expr, 150);
 
-  // Saying (reuse existing SAY_REACT_TAP pool)
   if (random(100) < 60) {
     char buf[MAX_SAY_LEN];
     getRandomSayingText(SAY_REACT_TAP, buf, sizeof(buf));
     botMode.speechBubble.show(buf, 2500);
   }
 
-  // LED flash
   scLeds.flash(flashColor[0], flashColor[1], flashColor[2], 300);
 
-  // Head wiggle — direction based on zone
   int yawDir = 0;
-  if (zone == 0) yawDir = wiggle;       // left zone → wiggle left
-  else if (zone == 2) yawDir = -wiggle; // right zone → wiggle right
-  else yawDir = (random(2) ? wiggle : -wiggle);  // center → random direction
+  if (zone == 0) yawDir = wiggle;
+  else if (zone == 2) yawDir = -wiggle;
+  else yawDir = (random(2) ? wiggle : -wiggle);
 
   scMoveYaw(yawDir, 200);
-  // Schedule return to center (handled by shakeReactEnd in bot_mode)
 
-  // Mark as reacting
   botMode.registerInteraction();
   botMode.shakeReacting = true;
   botMode.shakeReactEnd = millis() + 1500;
 }
 
 // ============================================================================
-// Double-Tap Recenter — personality-flavored return to home
+// Double-Tap Recenter
 // ============================================================================
 
 inline void scFireRecenter(uint8_t personalityIndex) {
@@ -204,41 +230,68 @@ inline void scFireRecenter(uint8_t personalityIndex) {
 
   switch (personalityIndex) {
     case PERSONALITY_HYPER:
-      // Snap to center fast, then overshoot and settle
       scMoveYaw(0, 150);
       scMovePitch(SC_SERVO_Y_HOME_DEG * 10, 150);
-      // Quick overshoot wiggle
       delay(150);
       scMoveYaw(60, 100);
       delay(100);
       scMoveYaw(-40, 100);
       delay(100);
       scMoveYaw(0, 100);
-      scLeds.flash(255, 255, 0, 200);  // yellow flash
+      scLeds.flash(255, 255, 0, 200);
       botMode.face.transitionTo(EXPR_EXCITED, 150);
       break;
 
     case PERSONALITY_GRUMPY:
-      // Reluctant pause, then slow grudging move
       botMode.face.transitionTo(EXPR_ANNOYED, 200);
-      delay(400);  // dramatic pause
-      scMoveYaw(0, 800);   // slow
+      delay(400);
+      scMoveYaw(0, 800);
       scMovePitch(SC_SERVO_Y_HOME_DEG * 10, 800);
-      scLeds.flash(255, 80, 20, 150);  // orange flash
+      scLeds.flash(255, 80, 20, 150);
       break;
 
-    default:  // CHILL
-      // Smooth, gentle return
+    default:
       scMoveYaw(0, 500);
       scMovePitch(SC_SERVO_Y_HOME_DEG * 10, 500);
-      scLeds.flash(100, 200, 255, 250);  // soft blue
+      scLeds.flash(100, 200, 255, 250);
       botMode.face.transitionTo(EXPR_HAPPY, 300);
       break;
   }
 
-  // Brief reaction state so bot doesn't immediately change expression
   botMode.shakeReacting = true;
   botMode.shakeReactEnd = millis() + 2000;
+}
+
+// ============================================================================
+// Long-Press Chill — hold head 2s → 10 min quiet mode
+// ============================================================================
+
+inline void scFireChillMode() {
+  // Toggle: if already chilling, wake up
+  if (scTouch_state.chillMode) {
+    scTouch_state.chillMode = false;
+    botMode.face.transitionTo(EXPR_HAPPY, 300);
+    botMode.speechBubble.show("I'm up!", 2000);
+    scLeds.flash(255, 220, 50, 300);
+    // Restore default LED mode
+    scLeds.mode = SC_LED_MODE_RAINBOW;
+    scLeds.speed = 128;
+  } else {
+    scTouch_state.chillMode = true;
+    scTouch_state.chillEndMs = millis() + ScTouchState::CHILL_DURATION_MS;
+
+    scGoHome(800);
+    botMode.face.transitionTo(EXPR_CHILL, 500);
+    botMode.speechBubble.show("Zzz...", 3000);
+
+    scLeds.mode = SC_LED_MODE_BREATHING;
+    scLeds.speed = 40;
+    scLeds.flash(80, 120, 255, 500);
+  }
+
+  botMode.registerInteraction();
+  botMode.shakeReacting = true;
+  botMode.shakeReactEnd = millis() + 3000;
 }
 
 #endif // BOARD_HAS_STACKCHAN_BASE
