@@ -286,6 +286,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           <div id="scBattery" style="border-top:1px solid #eee;margin-top:8px;padding-top:10px;display:none">
             <div class="srow"><span>Battery</span><span id="scBatVal">--</span></div>
           </div>
+          <div style="border-top:1px solid #eee;margin-top:8px;padding-top:10px">
+            <button onclick="scPowerOff()" style="width:100%;padding:10px;background:#c0392b;color:#fff;border:3px solid #000;box-shadow:3px 3px 0 0 #000;font-weight:800;font-size:13px;text-transform:uppercase;cursor:pointer">&#9211; Power Off</button>
+          </div>
         </div>
       </div>
 
@@ -801,6 +804,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         const d = await r.json();
         scChillOn = d.chill;
         document.getElementById('scChillToggle').className = 'tog ' + (scChillOn ? 'on' : '');
+      }
+    }
+
+    function scPowerOff() {
+      if (confirm('Power off vizBot? You will need to press the reset button to turn it back on.')) {
+        api('/bot/poweroff');
+        document.getElementById('statusBar').textContent = 'Powering off...';
+        document.getElementById('statusBar').style.background = '#c0392b';
+        document.getElementById('statusBar').style.color = '#fff';
       }
     }
 
@@ -1704,6 +1716,29 @@ void handleScChillToggle() {
     scTouch_state.chillMode ? "{\"chill\":true}" : "{\"chill\":false}");
 }
 
+// POST /bot/poweroff — graceful shutdown
+void handleScPowerOff() {
+  server.send(200, "application/json", "{\"ok\":true,\"message\":\"Powering off...\"}");
+  delay(200);  // Let response reach client
+
+  DBGLN("Power off requested — shutting down");
+
+  // Graceful shutdown: servos off, LEDs off, display off
+  scSetServoPower(false);
+  scSetAllBaseLeds(0, 0, 0);
+  scRefreshBaseLeds();
+
+  // Clear display
+  if (gfx) {
+    gfx->beginCanvas();
+    gfx->flushCanvas();
+    M5.Display.setBrightness(0);
+  }
+
+  delay(300);
+  M5.Power.powerOff();
+}
+
 // Camera endpoints remain stubs (Phase 4)
 void handleScPhotoCapture()   { scSendDeferred(4); }
 void handleScPhotoList()      { scSendDeferred(4); }
@@ -1786,6 +1821,7 @@ void setupWebServer() {
   server.on("/bot/photo/get", handleScPhotoGet);
   server.on("/bot/photo/delete", handleScPhotoDelete);
   server.on("/bot/battery/status", handleScBatteryStatus);
+  server.on("/bot/poweroff", handleScPowerOff);
   #endif
 
   // Schedule endpoints
