@@ -25,6 +25,7 @@ extern CRGBPalette16 currentPalette;
 #include "system_status.h"
 #ifdef BOARD_HAS_STACKCHAN_BASE
 #include "stackchan_base.h"
+#include "stackchan_leds.h"
 #endif
 
 // Web interface HTML
@@ -800,6 +801,10 @@ void handleState() {
                   (sysStatus.scServoYReady ? ",\"servoYPos\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
                   (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
                                                   ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
+                  (sysStatus.scBaseLedsReady ? ",\"ledMode\":" + String(scLeds.mode) +
+                                                ",\"ledModeName\":\"" + String(SC_LED_MODE_NAMES[scLeds.mode]) + "\"" +
+                                                ",\"ledBrightness\":" + String(scLeds.brightness) +
+                                                ",\"ledSpeed\":" + String(scLeds.speed) : "") +
                 "}" +
 #endif
 #ifdef CLOUD_ENABLED
@@ -1493,6 +1498,52 @@ void handleScBatteryStatus() {
   server.send(200, "application/json", json);
 }
 
+// POST /bot/base_leds/mode?mode=N (0-8) or ?name=rainbow etc.
+// Optional: ?brightness=N (0-255), ?speed=N (0-255)
+void handleScBaseLedMode() {
+  if (!sysStatus.scBaseLedsReady) {
+    server.send(503, "application/json", "{\"error\":\"base LEDs not ready\"}");
+    return;
+  }
+
+  if (server.hasArg("mode")) {
+    int m = server.arg("mode").toInt();
+    if (m >= 0 && m < SC_LED_MODE_COUNT) scLeds.mode = m;
+  } else if (server.hasArg("name")) {
+    String name = server.arg("name");
+    for (int i = 0; i < SC_LED_MODE_COUNT; i++) {
+      if (name.equalsIgnoreCase(SC_LED_MODE_NAMES[i])) {
+        scLeds.mode = i;
+        break;
+      }
+    }
+  }
+  if (server.hasArg("brightness")) {
+    scLeds.brightness = constrain(server.arg("brightness").toInt(), 0, 255);
+  }
+  if (server.hasArg("speed")) {
+    scLeds.speed = constrain(server.arg("speed").toInt(), 0, 255);
+  }
+
+  String json = "{\"ok\":true,\"mode\":";
+  json += scLeds.mode;
+  json += ",\"name\":\"";
+  json += SC_LED_MODE_NAMES[scLeds.mode];
+  json += "\",\"brightness\":";
+  json += scLeds.brightness;
+  json += ",\"speed\":";
+  json += scLeds.speed;
+  json += ",\"modes\":[";
+  for (int i = 0; i < SC_LED_MODE_COUNT; i++) {
+    if (i > 0) json += ",";
+    json += "\"";
+    json += SC_LED_MODE_NAMES[i];
+    json += "\"";
+  }
+  json += "]}";
+  server.send(200, "application/json", json);
+}
+
 // Camera endpoints remain stubs (Phase 4)
 void handleScPhotoCapture()   { scSendDeferred(4); }
 void handleScPhotoList()      { scSendDeferred(4); }
@@ -1567,6 +1618,7 @@ void setupWebServer() {
   server.on("/bot/head/preset", handleScHeadPreset);
   server.on("/bot/head/recenter", handleScHeadRecenter);
   server.on("/bot/base_leds/set", handleScBaseLeds);
+  server.on("/bot/base_leds/mode", handleScBaseLedMode);
   server.on("/bot/photo/capture", handleScPhotoCapture);
   server.on("/bot/photos", handleScPhotoList);
   server.on("/bot/photo/get", handleScPhotoGet);

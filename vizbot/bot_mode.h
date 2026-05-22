@@ -8,6 +8,9 @@
 #include "bot_eyes.h"
 #include "bot_sayings.h"
 #include "bot_overlays.h"
+#ifdef BOARD_HAS_STACKCHAN_BASE
+#include "stackchan_leds.h"
+#endif
 
 // ============================================================================
 // Bot Mode — Main State Machine & Render Pipeline
@@ -579,6 +582,11 @@ void updateBotMode() {
   // Update overlays
   botMode.speechBubble.update();
   botMode.notification.update();
+
+  // StackChan: sync mood ring LEDs to current expression
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  scUpdateMoodFromExpression(botMode.face.targetExpr);
+  #endif
 }
 
 // ============================================================================
