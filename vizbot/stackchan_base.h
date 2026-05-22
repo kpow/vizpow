@@ -280,6 +280,10 @@ inline void scMoveYaw(int angleTenths, uint16_t timeMs = 500) {
 
 inline void scMovePitch(int angleTenths, uint16_t timeMs = 500) {
   if (!sysStatus.scServoYReady) return;
+  constexpr int minTenths = SC_SERVO_Y_MIN_DEG * 10;
+  constexpr int maxTenths = SC_SERVO_Y_MAX_DEG * 10;
+  if (angleTenths < minTenths) angleTenths = minTenths;
+  if (angleTenths > maxTenths) angleTenths = maxTenths;
   int mapped = scServoYZeroPos + angleTenths * 16 / 50;
   if (mapped < 0) mapped = 0;
   if (mapped > 1000) mapped = 1000;
@@ -288,7 +292,7 @@ inline void scMovePitch(int angleTenths, uint16_t timeMs = 500) {
 
 inline void scGoHome(uint16_t timeMs = 500) {
   scMoveYaw(0, timeMs);
-  scMovePitch(0, timeMs);
+  scMovePitch(SC_SERVO_Y_HOME_DEG * 10, timeMs);
 }
 
 inline int scReadServoPos(uint8_t id) {
