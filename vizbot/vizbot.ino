@@ -57,6 +57,11 @@
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
+#ifdef BOARD_HAS_STACKCHAN_BASE
+#include "stackchan_leds.h"
+#include "stackchan_touch.h"
+#include "stackchan_idle.h"
+#endif
 #endif
 #include "task_manager.h"
 #include "esp_now_mesh.h"
@@ -377,6 +382,13 @@ void setup() {
   // No boot-time TLS — avoids blocking setup() for 10-14s on DNS/connect timeout
   // when WiFi signal is marginal. First sync happens ~2s after WiFi task starts.
 
+  // Initialize StackChan base LED effects + head touch + idle servo
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  scLeds.init();
+  scTouch_state.init();
+  scIdleServo.init();
+  #endif
+
   // Enter bot mode
   enterBotMode();
 
@@ -450,6 +462,20 @@ void loop() {
   if (sysStatus.touchReady) {
     handleTouch();
   }
+  #endif
+
+  // StackChan head touch (Si12T capacitive sensor)
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  {
+    uint8_t touchResult = scTouch_state.update();
+    if (touchResult == 1) {
+      scFirePetReaction(scTouch_state.pendingTapZone, botMode.personalityIndex);
+    } else if (touchResult == 2) {
+      scFireRecenter(botMode.personalityIndex);
+    }
+  }
+  // Idle head drift (personality-driven random movement)
+  scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);
   #endif
 
   // Auto-cycle ambient effects and palettes (skip while in info mode)
@@ -534,6 +560,11 @@ void loop() {
   } else {
     runBotMode();
   }
+
+  // Update StackChan base LED ring effects
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  scLeds.update();
+  #endif
 
   delay(BOT_FRAME_DELAY_MS);
 }
