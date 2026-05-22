@@ -23,6 +23,9 @@ extern CRGBPalette16 currentPalette;
 
 // System status (populated by boot_sequence.h)
 #include "system_status.h"
+#ifdef BOARD_HAS_STACKCHAN_BASE
+#include "stackchan_base.h"
+#endif
 
 // Web interface HTML
 const char webpage[] PROGMEM = R"rawliteral(
@@ -784,6 +787,21 @@ void handleState() {
                   ",\"lux\":" + String(proxLight.ambientLux) +
                 "}" +
 #endif
+#ifdef BOARD_HAS_STACKCHAN_BASE
+                ",\"stackchan\":{" +
+                  "\"ioExpander\":" + (sysStatus.scIoExpanderReady ? "true" : "false") +
+                  ",\"vmEn\":" + (sysStatus.scVmEnReady ? "true" : "false") +
+                  ",\"servoX\":" + (sysStatus.scServoXReady ? "true" : "false") +
+                  ",\"servoY\":" + (sysStatus.scServoYReady ? "true" : "false") +
+                  ",\"baseLeds\":" + (sysStatus.scBaseLedsReady ? "true" : "false") +
+                  ",\"headTouch\":" + (sysStatus.scHeadTouchReady ? "true" : "false") +
+                  ",\"battery\":" + (sysStatus.scBatteryMonReady ? "true" : "false") +
+                  (sysStatus.scServoXReady ? ",\"servoXPos\":" + String(scReadServoPos(SC_SERVO_X_ID)) : "") +
+                  (sysStatus.scServoYReady ? ",\"servoYPos\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
+                  (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
+                                                  ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
+                "}" +
+#endif
 #ifdef CLOUD_ENABLED
                 ",\"cloud\":{" +
                   "\"state\":\"" + String(getCloudStateStr()) + "\"" +
@@ -1335,10 +1353,8 @@ void handleSchedule() {
 }
 
 // ============================================================================
-// StackChan Stub Endpoints (Phase 1 — return 501 Not Implemented)
+// StackChan Endpoints
 // ============================================================================
-// URL shapes are final (MCP-wrappable per Q8). Behavior is stubbed until
-// the corresponding subsystem driver lands in Phase 2+.
 #ifdef BOARD_HAS_STACKCHAN_BASE
 
 void scSendDeferred(uint8_t phase) {
@@ -1348,15 +1364,140 @@ void scSendDeferred(uint8_t phase) {
   server.send(501, "application/json", json);
 }
 
-void handleScHeadSetAngles()  { scSendDeferred(2); }
-void handleScHeadPreset()     { scSendDeferred(2); }
-void handleScHeadRecenter()   { scSendDeferred(2); }
-void handleScBaseLeds()       { scSendDeferred(2); }
+// POST /bot/head/set_angles?yaw=N&pitch=N&time=N
+// yaw: tenths of degrees (-1280 to 1280), pitch: tenths (0 to 900)
+// time: movement duration in ms (default 500)
+void handleScHeadSetAngles() {
+  if (!sysStatus.scServoXReady && !sysStatus.scServoYReady) {
+    server.send(503, "application/json", "{\"error\":\"servos not ready\"}");
+    return;
+  }
+  int yaw   = server.hasArg("yaw")   ? server.arg("yaw").toInt()   : 0;
+  int pitch = server.hasArg("pitch") ? server.arg("pitch").toInt() : 0;
+  int timeMs = server.hasArg("time") ? server.arg("time").toInt()  : 500;
+  if (timeMs < 20) timeMs = 20;
+  if (timeMs > 5000) timeMs = 5000;
+
+  if (server.hasArg("yaw"))   scMoveYaw(yaw, timeMs);
+  if (server.hasArg("pitch")) scMovePitch(pitch, timeMs);
+
+  String json = "{\"ok\":true,\"yaw\":";
+  json += yaw;
+  json += ",\"pitch\":";
+  json += pitch;
+  json += ",\"time\":";
+  json += timeMs;
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// POST /bot/head/preset?name=nod|shake|lookup|lookdown|left|right
+void handleScHeadPreset() {
+  if (!sysStatus.scServoXReady && !sysStatus.scServoYReady) {
+    server.send(503, "application/json", "{\"error\":\"servos not ready\"}");
+    return;
+  }
+  String name = server.hasArg("name") ? server.arg("name") : "nod";
+
+  // Presets use home pitch as anchor, all angles in tenths of degrees
+  constexpr int homePitch = SC_SERVO_Y_HOME_DEG * 10;
+  if (name == "nod") {
+    // Dip down 15° from home, return — 3 cycles
+    for (int i = 0; i < 3; i++) {
+      scMovePitch(homePitch - 150, 250);
+      delay(250);
+      scMovePitch(homePitch, 250);
+      delay(250);
+    }
+  } else if (name == "shake") {
+    // Hold home pitch, swing yaw ±25° — 3 cycles, return center
+    for (int i = 0; i < 3; i++) {
+      scMoveYaw(250, 200);
+      delay(200);
+      scMoveYaw(-250, 200);
+      delay(200);
+    }
+    scMoveYaw(0, 250);
+  } else if (name == "lookup") {
+    scMovePitch(900, 500);   // Full up (90 degrees)
+  } else if (name == "lookdown") {
+    scMovePitch(SC_SERVO_Y_MIN_DEG * 10, 500);
+  } else if (name == "left") {
+    scMoveYaw(1000, 500);    // 100 degrees left (BSP example value)
+  } else if (name == "right") {
+    scMoveYaw(-1000, 500);   // 100 degrees right (BSP example value)
+  } else {
+    server.send(400, "application/json", "{\"error\":\"unknown preset\"}");
+    return;
+  }
+
+  server.send(200, "application/json", "{\"ok\":true,\"preset\":\"" + name + "\"}");
+}
+
+// POST /bot/head/recenter
+void handleScHeadRecenter() {
+  if (!sysStatus.scServoXReady && !sysStatus.scServoYReady) {
+    server.send(503, "application/json", "{\"error\":\"servos not ready\"}");
+    return;
+  }
+  scGoHome(500);
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// POST /bot/base_leds/set?r=N&g=N&b=N  OR  ?index=N&r=N&g=N&b=N
+void handleScBaseLeds() {
+  if (!sysStatus.scBaseLedsReady) {
+    server.send(503, "application/json", "{\"error\":\"base LEDs not ready\"}");
+    return;
+  }
+  uint8_t r = server.hasArg("r") ? server.arg("r").toInt() : 0;
+  uint8_t g = server.hasArg("g") ? server.arg("g").toInt() : 0;
+  uint8_t b = server.hasArg("b") ? server.arg("b").toInt() : 0;
+
+  if (server.hasArg("index")) {
+    int idx = server.arg("index").toInt();
+    if (idx < 0 || idx >= SC_BASE_LED_COUNT) {
+      server.send(400, "application/json", "{\"error\":\"index 0-11\"}");
+      return;
+    }
+    scSetBaseLedColor(idx, r, g, b);
+    scRefreshBaseLeds();
+  } else {
+    scSetAllBaseLeds(r, g, b);
+  }
+
+  String json = "{\"ok\":true,\"r\":";
+  json += r;
+  json += ",\"g\":";
+  json += g;
+  json += ",\"b\":";
+  json += b;
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// GET /bot/battery/status
+void handleScBatteryStatus() {
+  if (!sysStatus.scBatteryMonReady) {
+    server.send(503, "application/json", "{\"error\":\"battery monitor not ready\"}");
+    return;
+  }
+  float volts = scGetBatteryVoltage();
+  float amps  = scGetBatteryCurrent();
+
+  String json = "{\"voltage\":";
+  json += String(volts, 2);
+  json += ",\"current\":";
+  json += String(amps, 3);
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// Camera endpoints remain stubs (Phase 4)
 void handleScPhotoCapture()   { scSendDeferred(4); }
 void handleScPhotoList()      { scSendDeferred(4); }
 void handleScPhotoGet()       { scSendDeferred(4); }
 void handleScPhotoDelete()    { scSendDeferred(4); }
-void handleScBatteryStatus()  { scSendDeferred(2); }
 
 #endif // BOARD_HAS_STACKCHAN_BASE
 
