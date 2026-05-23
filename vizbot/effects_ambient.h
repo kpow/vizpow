@@ -77,6 +77,108 @@ inline void advanceAmbientState() {
   }
 }
 
+// ============================================================================
+// Kaleidoscope post-processing — mirror/symmetry transforms on CRGB buffers
+// ============================================================================
+// 0=off, 1=vertical, 2=horizontal, 3=H+V, 4=6-slice, 5=8-slice
+#define KSCOPE_OFF      0
+#define KSCOPE_VERT     1
+#define KSCOPE_HORIZ    2
+#define KSCOPE_HV       3
+#define KSCOPE_6SLICE   4
+#define KSCOPE_8SLICE   5
+#define KSCOPE_MODE_COUNT 6
+
+static const char* const KSCOPE_NAMES[] = {
+  "Off", "Vertical", "Horizontal", "H+V", "6-Slice", "8-Slice"
+};
+
+uint8_t kaleidoscopeMode = KSCOPE_OFF;
+
+// Apply kaleidoscope symmetry to a CRGB buffer in-place
+inline void applyKaleidoscope(CRGB* buf, uint8_t w, uint8_t h) {
+  if (kaleidoscopeMode == KSCOPE_OFF) return;
+
+  uint8_t cx = w / 2;
+  uint8_t cy = h / 2;
+
+  switch (kaleidoscopeMode) {
+
+    case KSCOPE_VERT:
+      // Mirror left half to right (reflect across vertical center)
+      for (uint8_t y = 0; y < h; y++) {
+        for (uint8_t x = 0; x < cx; x++) {
+          buf[y * w + (w - 1 - x)] = buf[y * w + x];
+        }
+      }
+      break;
+
+    case KSCOPE_HORIZ:
+      // Mirror top half to bottom (reflect across horizontal center)
+      for (uint8_t y = 0; y < cy; y++) {
+        for (uint8_t x = 0; x < w; x++) {
+          buf[(h - 1 - y) * w + x] = buf[y * w + x];
+        }
+      }
+      break;
+
+    case KSCOPE_HV:
+      // Mirror top-left quadrant to all four quadrants
+      for (uint8_t y = 0; y < cy; y++) {
+        for (uint8_t x = 0; x < cx; x++) {
+          CRGB c = buf[y * w + x];
+          buf[y * w + (w - 1 - x)]           = c;  // top-right
+          buf[(h - 1 - y) * w + x]            = c;  // bottom-left
+          buf[(h - 1 - y) * w + (w - 1 - x)]  = c;  // bottom-right
+        }
+      }
+      break;
+
+    case KSCOPE_6SLICE:
+    case KSCOPE_8SLICE: {
+      // Radial kaleidoscope — fold all pixels into one wedge, mirror to fill
+      // Must copy buffer first: in-place read+write corrupts source pixels
+      uint16_t total = (uint16_t)w * h;
+      CRGB* tmp = (CRGB*)malloc(total * sizeof(CRGB));
+      if (!tmp) break;  // OOM — skip gracefully
+      memcpy(tmp, buf, total * sizeof(CRGB));
+
+      float fcx = (float)w * 0.5f;
+      float fcy = (float)h * 0.5f;
+      // 6-slice = π/3 (60°), 8-slice = π/4 (45°)
+      float sector = (kaleidoscopeMode == KSCOPE_6SLICE)
+                        ? 1.0471976f    // π/3
+                        : 0.7853982f;   // π/4
+
+      for (uint8_t y = 0; y < h; y++) {
+        for (uint8_t x = 0; x < w; x++) {
+          float dx = (float)x - fcx;
+          float dy = (float)y - fcy;
+          float angle = atan2f(dy, dx);
+          float radius = sqrtf(dx * dx + dy * dy);
+          // Normalize to [0, 2π)
+          if (angle < 0) angle += 6.2831853f;
+          // Fold into first sector
+          float foldedAngle = fmodf(angle, sector);
+          // Mirror alternate sectors for seamless kaleidoscope joins
+          int sectorIdx = (int)(angle / sector);
+          if (sectorIdx & 1) foldedAngle = sector - foldedAngle;
+          // Map back to source coordinates
+          int sx = (int)(fcx + radius * cosf(foldedAngle) + 0.5f);
+          int sy = (int)(fcy + radius * sinf(foldedAngle) + 0.5f);
+          if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+            buf[y * w + x] = tmp[sy * w + sx];
+          } else {
+            buf[y * w + x] = CRGB::Black;
+          }
+        }
+      }
+      free(tmp);
+      break;
+    }
+  }
+}
+
 // Populate audio fields from AudioSpectrum (when available)
 inline void fillCtxAudio(EffectCtx& ctx) {
   #ifdef TARGET_CORES3
@@ -134,6 +236,7 @@ inline void fillCtxHiRes(EffectCtx& ctx, CRGB* buf, uint8_t sid) {
 
 // Blit CRGB buffer to LCD as 8x8 pixel blocks
 inline void blitHiRes(CRGB* buf) {
+  applyKaleidoscope(buf, HIRES_COLS, HIRES_ROWS);
   for (uint8_t y = 0; y < HIRES_ROWS; y++) {
     for (uint8_t x = 0; x < HIRES_COLS; x++) {
       gfx->fillRect(x * 8, y * 8, 8, 8, toRGB565(buf[y * HIRES_COLS + x]));
@@ -1166,6 +1269,7 @@ void runPixelEffect(uint8_t index) {
   EffectCtx ctx;
   fillCtxPixel(ctx);
   renderFuncs[index](ctx);
+  applyKaleidoscope(pixelModeBuf, PIXEL_MODE_COLS, PIXEL_MODE_ROWS);
   blitPixelMode(pixelModeBuf);
 }
 #endif
@@ -1180,6 +1284,7 @@ void runAmbientEffect(uint8_t index) {
   }
   #endif
   ambientLedFuncs[index]();
+  applyKaleidoscope(leds, MATRIX_WIDTH, MATRIX_HEIGHT);
 }
 
 #endif // EFFECTS_AMBIENT_H
