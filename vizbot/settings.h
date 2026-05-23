@@ -22,6 +22,7 @@ extern bool    autoCycle;
 extern uint8_t botBackgroundStyle;
 extern uint8_t lcdBrightness;
 extern bool    hiResMode;
+extern uint8_t kaleidoscopeMode;
 extern char    weatherLat[12];
 extern char    weatherLon[12];
 #ifdef TARGET_CORES3
@@ -47,6 +48,8 @@ void loadSettings() {
   botBackgroundStyle = prefs.getUChar("bgStyle",  botBackgroundStyle);
   if (botBackgroundStyle > 4) botBackgroundStyle = 0;  // clamp stale NVS values
   hiResMode          = prefs.getBool ("hiRes",    hiResMode);
+  kaleidoscopeMode   = prefs.getUChar("kscope",   0);
+  if (kaleidoscopeMode >= KSCOPE_MODE_COUNT) kaleidoscopeMode = 0;
 
   // Weather location
   String lat = prefs.getString("wLat", weatherLat);
@@ -86,6 +89,7 @@ void saveSettings() {
   prefs.putBool ("autoCyc", autoCycle);
   prefs.putUChar("bgStyle", botBackgroundStyle);
   prefs.putBool ("hiRes",   hiResMode);
+  prefs.putUChar("kscope",  kaleidoscopeMode);
   prefs.putString("wLat",   weatherLat);
   prefs.putString("wLon",   weatherLon);
 
