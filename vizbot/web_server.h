@@ -152,6 +152,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             <div id="audioFxRow" style="display:none;margin-top:10px">
               <div class="trow"><span>Audio FX</span><div class="tog" id="audioFxToggle" onclick="toggleAudioFx()"></div></div>
             </div>
+            <div style="margin-top:10px">
+              <div class="trow"><span>Kaleidoscope</span><select id="kscopeSelect" onchange="setKscope(this.value)" style="font-size:12px;padding:2px 6px"></select></div>
+            </div>
           </div>
         </div>
       </div>
@@ -330,6 +333,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     let curColor = 0;
     let autoCycleOn = true;
     let audioFxOn = false;
+    let kscopeMode = 0;
+    const kscopeNames = ['Off','Vertical','Horizontal','H+V','6-Slice','8-Slice'];
     let wifiSelectedSSID = '';
     let wifiPollTimer = null;
 
@@ -350,6 +355,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       ).join('');
       const acBtn = document.getElementById('autoCycleBtn');
       if (acBtn) acBtn.textContent = autoCycleOn ? '⏸ Stop Auto' : '▶ Auto';
+      const ksel = document.getElementById('kscopeSelect');
+      if (ksel) {
+        ksel.innerHTML = kscopeNames.map((name, i) =>
+          `<option value="${i}" ${kscopeMode===i?'selected':''}>${name}</option>`
+        ).join('');
+      }
     }
 
     async function api(endpoint) {
@@ -456,6 +467,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     function setAmbient(i) { curAmbient = i; autoCycleOn = false; render(); api('/bot/ambient?v=' + i + '&lock=1'); }
     function toggleAutoCycle() { autoCycleOn = !autoCycleOn; render(); api('/bot/autocycle?v=' + (autoCycleOn ? '1' : '0')); }
     function toggleAudioFx() { audioFxOn = !audioFxOn; document.getElementById('audioFxToggle').className = 'tog ' + (audioFxOn ? 'on' : ''); api('/bot/audiofx?v=' + (audioFxOn ? '1' : '0')); }
+    function setKscope(v) { kscopeMode = parseInt(v); api('/bot/kscope?v=' + kscopeMode); }
 
     document.getElementById('brightness').oninput = function() {
       document.getElementById('brightnessVal').textContent = this.value;
@@ -505,6 +517,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         }
         if (state.hasMic) {
           document.getElementById('audioFxRow').style.display = 'block';
+        }
+        if (state.kscope !== undefined) {
+          kscopeMode = state.kscope;
         }
         if (state.infoActive !== undefined) {
           infoOn = state.infoActive;
@@ -908,6 +923,7 @@ void handleState() {
                 ",\"timeOverlay\":" + (isBotTimeOverlayEnabled() ? "true" : "false") +
                 ",\"hiRes\":" + (hiResMode ? "true" : "false") +
                 ",\"ambientEffect\":" + String(effectIndex) +
+                ",\"kscope\":" + String(kaleidoscopeMode) +
                 ",\"sys\":{" +
                   "\"lcd\":" + (sysStatus.lcdReady ? "true" : "false") +
                   ",\"leds\":" + (sysStatus.ledsReady ? "true" : "false") +
@@ -1084,6 +1100,18 @@ void handleAutoCycle() {
     }
   }
   server.send(200, "text/plain", "OK");
+}
+
+void handleKscope() {
+  if (server.hasArg("v")) {
+    uint8_t v = server.arg("v").toInt();
+    if (v < KSCOPE_MODE_COUNT) {
+      kaleidoscopeMode = v;
+      markSettingsDirty();
+    }
+  }
+  server.send(200, "application/json",
+    String("{\"kscope\":") + String(kaleidoscopeMode) + "}");
 }
 
 // ============================================================================
@@ -1778,6 +1806,7 @@ void setupWebServer() {
   server.on("/bot/background", handleBotBackground);
   server.on("/bot/ambient", handleBotAmbient);
   server.on("/bot/autocycle", handleAutoCycle);
+  server.on("/bot/kscope", handleKscope);
   server.on("/bot/personality", handleBotPersonality);
   server.on("/bot/personality/rotation", handleBotPersonalityRotation);
 
