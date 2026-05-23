@@ -77,6 +77,24 @@ inline void advanceAmbientState() {
   }
 }
 
+// Populate audio fields from AudioSpectrum (when available)
+inline void fillCtxAudio(EffectCtx& ctx) {
+  #ifdef TARGET_CORES3
+  extern struct AudioSpectrum audioSpectrum;
+  if (audioSpectrum.alive) {
+    ctx.audioAlive   = true;
+    ctx.audioBass    = audioSpectrum.bass;
+    ctx.audioMid     = audioSpectrum.mid;
+    ctx.audioTreble  = audioSpectrum.treble;
+    ctx.audioRms     = audioSpectrum.rms;
+    ctx.audioBeatEnv = audioSpectrum.beatEnv;
+    return;
+  }
+  #endif
+  ctx.audioAlive = false;
+  ctx.audioBass = ctx.audioMid = ctx.audioTreble = ctx.audioRms = ctx.audioBeatEnv = 0.0f;
+}
+
 // Fill EffectCtx for 8x8 LED rendering
 inline void fillCtxLed(EffectCtx& ctx, uint8_t sid) {
   advanceAmbientState();
@@ -92,12 +110,7 @@ inline void fillCtxLed(EffectCtx& ctx, uint8_t sid) {
   ctx.proximity  = 0.0f;
   ctx.xy         = XY;
   ctx.surfaceId  = sid;
-  ctx.audioAlive   = false;
-  ctx.audioBass    = 0.0f;
-  ctx.audioMid     = 0.0f;
-  ctx.audioTreble  = 0.0f;
-  ctx.audioRms     = 0.0f;
-  ctx.audioBeatEnv = 0.0f;
+  fillCtxAudio(ctx);
 }
 
 #if defined(HIRES_ENABLED)
@@ -116,12 +129,7 @@ inline void fillCtxHiRes(EffectCtx& ctx, CRGB* buf, uint8_t sid) {
   ctx.proximity  = 0.0f;
   ctx.xy         = hiResXY;
   ctx.surfaceId  = sid;
-  ctx.audioAlive   = false;
-  ctx.audioBass    = 0.0f;
-  ctx.audioMid     = 0.0f;
-  ctx.audioTreble  = 0.0f;
-  ctx.audioRms     = 0.0f;
-  ctx.audioBeatEnv = 0.0f;
+  fillCtxAudio(ctx);
 }
 
 // Blit CRGB buffer to LCD as 8x8 pixel blocks
@@ -162,12 +170,7 @@ inline void fillCtxPixel(EffectCtx& ctx) {
   ctx.proximity  = 0.0f;
   ctx.xy         = pixelModeXY;
   ctx.surfaceId  = 2;  // distinct from LED(0) and hi-res(1)
-  ctx.audioAlive   = false;
-  ctx.audioBass    = 0.0f;
-  ctx.audioMid     = 0.0f;
-  ctx.audioTreble  = 0.0f;
-  ctx.audioRms     = 0.0f;
-  ctx.audioBeatEnv = 0.0f;
+  fillCtxAudio(ctx);
 }
 
 inline void blitPixelMode(CRGB* buf) {
