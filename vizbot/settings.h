@@ -27,6 +27,7 @@ extern char    weatherLon[12];
 #ifdef TARGET_CORES3
 extern struct ProxLightState proxLight;
 extern struct BotSounds botSounds;
+extern struct AudioSpectrum audioSpectrum;
 #endif
 
 // ── Load ────────────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ void loadSettings() {
   botSounds.enabled   = prefs.getBool("sndOn", true);
   botSounds.volume    = prefs.getUChar("sndVol", 120);
   if (botSounds.volume > 0) botSounds.setVolume(botSounds.volume);
+  audioSpectrum.setEnabled(prefs.getBool("audioFx", false));
   // Force full brightness — override any stale NVS dim value
   lcdBrightness = 255;
   #endif
@@ -90,6 +92,7 @@ void saveSettings() {
   #ifdef TARGET_CORES3
   prefs.putBool ("sndOn",   botSounds.enabled);
   prefs.putUChar("sndVol",  botSounds.volume);
+  prefs.putBool ("audioFx", audioSpectrum.enabled);
   #endif
 
   prefs.end();

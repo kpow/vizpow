@@ -36,13 +36,13 @@
 #include "palettes.h"
 #include "display_lcd.h"    // Must come before any file that calls gfx->methods() (defines DisplayProxy)
 #include "tween.h"          // Tween animation system (must come before bot_mode.h)
-#include "effects_ambient.h"
 #ifdef TARGET_CORES3
 #include "midi_synth.h"     // SAM2695 MIDI synth driver (must come before bot_sounds.h)
 #include "bot_sounds.h"     // MIDI sequence engine + M5.Speaker fallback (must come before bot_mode.h)
-#include "audio_analysis.h" // Core S3 mic audio analysis
+#include "audio_spectrum.h"  // FFT spectrum analyzer (must come before effects_ambient.h)
 #include "proximity_light.h" // Core S3 proximity & ambient light sensor
 #endif
+#include "effects_ambient.h"
 #include "bot_mode.h"
 #include "info_mode.h"
 #include "wled_display.h"
@@ -500,10 +500,10 @@ void loop() {
   // Advance all active tweens (before rendering so values are current)
   tweenManager.update();
 
-  // Advance sound effect sequencer, mic analysis, and proximity (Core S3 only)
+  // Advance sound effect sequencer, spectrum analyzer, and proximity (Core S3 only)
   #ifdef TARGET_CORES3
   botSounds.update();
-  audioAnalysis.update();
+  audioSpectrum.update();
   proxLight.update();
   #endif
 

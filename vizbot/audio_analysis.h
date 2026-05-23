@@ -92,16 +92,23 @@ struct AudioAnalysis {
     // Mute while speaker is playing to avoid feedback
     if (botSounds.playing) return;
 
-    // Read mic samples
-    if (!M5.Mic.record(sampleBuffer, AUDIO_SAMPLE_COUNT, 16000)) return;
+    // When AudioSpectrum is enabled, it owns the mic — use its RMS instead
+    extern struct AudioSpectrum audioSpectrum;
+    if (audioSpectrum.enabled) {
+      if (!audioSpectrum.alive) return;
+      rmsLevel = audioSpectrum.rawRms;
+    } else {
+      // Normal path: read mic samples ourselves
+      if (!M5.Mic.record(sampleBuffer, AUDIO_SAMPLE_COUNT, 16000)) return;
 
-    // Compute RMS
-    int64_t sum = 0;
-    for (int i = 0; i < AUDIO_SAMPLE_COUNT; i++) {
-      int32_t s = sampleBuffer[i];
-      sum += s * s;
+      // Compute RMS
+      int64_t sum = 0;
+      for (int i = 0; i < AUDIO_SAMPLE_COUNT; i++) {
+        int32_t s = sampleBuffer[i];
+        sum += s * s;
+      }
+      rmsLevel = sqrtf((float)sum / AUDIO_SAMPLE_COUNT);
     }
-    rmsLevel = sqrtf((float)sum / AUDIO_SAMPLE_COUNT);
 
     // Smooth level (for display/animation)
     smoothLevel = smoothLevel * (1.0f - AUDIO_SMOOTH_ALPHA) + rmsLevel * AUDIO_SMOOTH_ALPHA;

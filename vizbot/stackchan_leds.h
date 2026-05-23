@@ -33,11 +33,12 @@
 #define SC_LED_MODE_PULSE      6
 #define SC_LED_MODE_AURORA     7
 #define SC_LED_MODE_MOOD       8
-#define SC_LED_MODE_COUNT      9
+#define SC_LED_MODE_AUDIO      9
+#define SC_LED_MODE_COUNT      10
 
 static const char* const SC_LED_MODE_NAMES[] = {
   "off", "breathing", "rainbow", "chase", "fire",
-  "twinkle", "pulse", "aurora", "mood"
+  "twinkle", "pulse", "aurora", "mood", "audio"
 };
 
 // ============================================================================
@@ -160,6 +161,7 @@ struct ScBaseLeds {
       case SC_LED_MODE_PULSE:     effectPulse(dt, speedFactor); break;
       case SC_LED_MODE_AURORA:    effectAurora(dt, speedFactor); break;
       case SC_LED_MODE_MOOD:      effectMood(dt, speedFactor); break;
+      case SC_LED_MODE_AUDIO:     effectAudio(dt, speedFactor); break;
       default:                    effectOff(); break;
     }
 
@@ -326,6 +328,42 @@ struct ScBaseLeds {
       uint8_t hue = 85 + (uint8_t)(wave1 * 115);
       uint8_t sat = 200 + (uint8_t)(wave2 * 55);
       uint8_t val = 60 + (uint8_t)(wave3 * 195);
+      ScRgb c = scHsvToRgb(hue, sat, val);
+      ledR[i] = c.r; ledG[i] = c.g; ledB[i] = c.b;
+    }
+  }
+
+  // Audio-reactive: bass→brightness, hue rotates with mid, beat flashes
+  void effectAudio(float dt, float spd) {
+    extern struct AudioSpectrum audioSpectrum;
+    if (!audioSpectrum.alive) {
+      // Dim idle glow when audio isn't flowing
+      for (int i = 0; i < SC_BASE_LED_COUNT; i++) {
+        ledR[i] = 10; ledG[i] = 0; ledB[i] = 15;
+      }
+      return;
+    }
+    float b = audioSpectrum.bass;
+    float m = audioSpectrum.mid;
+    float t = audioSpectrum.treble;
+    float r = audioSpectrum.rms;
+    float beat = audioSpectrum.beatEnv;
+
+    // Base hue rotates slowly, mid shifts it faster
+    phase += dt * (0.1f + m * 0.5f) * spd;
+    if (phase > 1.0f) phase -= 1.0f;
+    uint8_t baseHue = (uint8_t)(phase * 255);
+
+    // Overall brightness from RMS + bass boost
+    float vol = constrain(r + b * 0.5f, 0.0f, 1.0f);
+    uint8_t intensity = (uint8_t)(40 + vol * 215);
+
+    for (int i = 0; i < SC_BASE_LED_COUNT; i++) {
+      // Spread hue around ring, treble widens the spread
+      uint8_t hue = baseHue + (uint8_t)(i * (15 + t * 10));
+      // Beat pulse: flash white-hot on beats
+      uint8_t sat = (beat > 0.3f) ? (uint8_t)(240 - beat * 180) : 240;
+      uint8_t val = (beat > 0.3f) ? min(255, (int)(intensity + beat * 100)) : intensity;
       ScRgb c = scHsvToRgb(hue, sat, val);
       ledR[i] = c.r; ledG[i] = c.g; ledB[i] = c.b;
     }

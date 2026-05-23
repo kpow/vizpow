@@ -149,6 +149,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
               <button id="autoCycleBtn" onclick="toggleAutoCycle()" style="font-size:11px;padding:3px 10px"></button>
             </div>
             <div class="grid3" id="ambientEffects" style="margin-top:6px"></div>
+            <div id="audioFxRow" style="display:none;margin-top:10px">
+              <div class="trow"><span>Audio FX</span><div class="tog" id="audioFxToggle" onclick="toggleAudioFx()"></div></div>
+            </div>
           </div>
         </div>
       </div>
@@ -326,6 +329,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     let curExpr = 0;
     let curColor = 0;
     let autoCycleOn = true;
+    let audioFxOn = false;
     let wifiSelectedSSID = '';
     let wifiPollTimer = null;
 
@@ -451,6 +455,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
     function setAmbient(i) { curAmbient = i; autoCycleOn = false; render(); api('/bot/ambient?v=' + i + '&lock=1'); }
     function toggleAutoCycle() { autoCycleOn = !autoCycleOn; render(); api('/bot/autocycle?v=' + (autoCycleOn ? '1' : '0')); }
+    function toggleAudioFx() { audioFxOn = !audioFxOn; document.getElementById('audioFxToggle').className = 'tog ' + (audioFxOn ? 'on' : ''); api('/bot/audiofx?v=' + (audioFxOn ? '1' : '0')); }
 
     document.getElementById('brightness').oninput = function() {
       document.getElementById('brightnessVal').textContent = this.value;
@@ -493,6 +498,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         }
         if (state.autoCycle !== undefined) {
           autoCycleOn = state.autoCycle;
+        }
+        if (state.audioFx !== undefined) {
+          audioFxOn = state.audioFx;
+          document.getElementById('audioFxToggle').className = 'tog ' + (audioFxOn ? 'on' : '');
+        }
+        if (state.hasMic) {
+          document.getElementById('audioFxRow').style.display = 'block';
         }
         if (state.infoActive !== undefined) {
           infoOn = state.infoActive;
@@ -749,7 +761,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     }
 
     // ---- StackChan controls ----
-    const scLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood'];
+    const scLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood','audio'];
     let scLedMode = 2;
 
     function scPreset(name) { api('/bot/head/preset?name=' + name); }
@@ -933,10 +945,11 @@ void handleState() {
                   ",\"proxLight\":" + (sysStatus.proxLightReady ? "true" : "false") +
                   ",\"soundEnabled\":" + (botSounds.enabled ? "true" : "false") +
                   ",\"soundVolume\":" + String(botSounds.volume) +
-                  ",\"micEnabled\":" + (audioAnalysis.enabled ? "true" : "false") +
                   ",\"proximity\":" + String(proxLight.rawProximity) +
                   ",\"lux\":" + String(proxLight.ambientLux) +
                 "}" +
+                ",\"audioFx\":" + (audioSpectrum.enabled ? "true" : "false") +
+                ",\"hasMic\":true" +
 #endif
 #ifdef BOARD_HAS_STACKCHAN_BASE
                 ",\"stackchan\":{" +
@@ -1428,7 +1441,7 @@ void handleCloudSync() {
 // ============================================================================
 #ifdef TARGET_CORES3
 extern struct BotSounds botSounds;
-extern struct AudioAnalysis audioAnalysis;
+extern struct AudioSpectrum audioSpectrum;
 extern struct ProxLightState proxLight;
 
 void handleBotSound() {
@@ -1464,16 +1477,14 @@ void handleBotVolume() {
   server.send(200, "text/plain", "OK");
 }
 
-void handleBotMic() {
-  String json = "{\"rms\":" + String(audioAnalysis.rmsLevel, 1) +
-                ",\"smooth\":" + String(audioAnalysis.smoothLevel, 1) +
-                ",\"peak\":" + String(audioAnalysis.peakLevel, 1) +
-                ",\"normalized\":" + String(audioAnalysis.getNormalizedLevel(), 3) +
-                ",\"spike\":" + (audioAnalysis.spikeDetected ? "true" : "false") +
-                ",\"speech\":" + (audioAnalysis.speechDetected ? "true" : "false") +
-                ",\"enabled\":" + (audioAnalysis.enabled ? "true" : "false") +
-                "}";
-  server.send(200, "application/json", json);
+void handleAudioFx() {
+  if (server.hasArg("v")) {
+    bool on = server.arg("v").toInt() != 0;
+    audioSpectrum.setEnabled(on);
+    markSettingsDirty();
+  }
+  server.send(200, "application/json",
+    String("{\"audioFx\":") + (audioSpectrum.enabled ? "true" : "false") + "}");
 }
 #endif
 
@@ -1799,7 +1810,7 @@ void setupWebServer() {
   server.on("/bot/sound", handleBotSound);
   server.on("/bot/volume", handleBotVolume);
   server.on("/bot/sequences", handleBotSequences);
-  server.on("/bot/mic", handleBotMic);
+  server.on("/bot/audiofx", handleAudioFx);
   #endif
 
   // Cloud endpoints
