@@ -140,8 +140,8 @@ static void meshBuildPacket(MeshStatePacket& pkt) {
     pkt.ambientLux = proxLight.ambientLux;
   }
   if (sysStatus.micReady) {
-    extern struct AudioAnalysis audioAnalysis;
-    pkt.audioLevel = (uint8_t)(constrain(audioAnalysis.smoothLevel * 255.0f, 0.0f, 255.0f));
+    extern struct AudioSpectrum audioSpectrum;
+    pkt.audioLevel = (uint8_t)(constrain(audioSpectrum.rms * 255.0f, 0.0f, 255.0f));
   }
   #endif
 

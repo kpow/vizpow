@@ -354,10 +354,13 @@ void drawMenu() {
     drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, autoCycle ? "AUTO ON" : "AUTO OFF", autoCycle ? 0x0400 : 0x4000);
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 2: Info mode toggle
+    // Row 2: Info mode toggle | Audio FX toggle
     {
       extern struct InfoModeData infoMode;
       drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, infoMode.active ? "INFO ON" : "INFO OFF", infoMode.active ? 0x0400 : 0x4000);
+      #ifdef TARGET_CORES3
+      drawButton(col2X, rowY, BTN_WIDTH, BTN_HEIGHT, audioSpectrum.enabled ? "AUDIO ON" : "AUDIO OFF", audioSpectrum.enabled ? 0x0400 : 0x4000);
+      #endif
     }
     rowY += BTN_HEIGHT + BTN_GAP;
 
@@ -462,7 +465,7 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
         if (col == 0) toggleWifiAP();
         else touchToggleAutoCycle();
         break;
-      case 1:  // Info mode toggle
+      case 1:  // Info mode toggle | Audio FX toggle
         if (col == 0) {
           extern struct InfoModeData infoMode;
           if (infoMode.active) {
@@ -473,6 +476,12 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
           hideMenu();
           return false;
         }
+        #ifdef TARGET_CORES3
+        else {
+          audioSpectrum.setEnabled(!audioSpectrum.enabled);
+          markSettingsDirty();
+        }
+        #endif
         break;
       case 3:  // Back | Close
         if (col == 0) { menuPage = 0; }

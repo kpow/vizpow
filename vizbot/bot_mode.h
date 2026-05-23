@@ -448,36 +448,8 @@ void updateBotMode() {
     botMode.nextIdleSaying = now + random(p->sayMinMs, p->sayMaxMs);
   }
 
-  // ---- Core S3: Audio-reactive expressions ----
-  #ifdef TARGET_CORES3
-  if (sysStatus.micReady && !botMode.shakeReacting &&
-      (now - botMode.lastAudioReactionMs > 3000)) {
-
-    // Spike (clap/bang): SURPRISED + sound + saying
-    if (audioAnalysis.spikeDetected) {
-      botMode.face.transitionTo(EXPR_SURPRISED, 100);
-      botSounds.play(SEQ_CLAP_REACT);
-      char buf[MAX_SAY_LEN];
-      getRandomSayingText(SAY_REACT_SOUND, buf, sizeof(buf));
-      botMode.speechBubble.show(buf, 2000);
-      botMode.shakeReacting = true;
-      botMode.shakeReactEnd = now + 2000;
-      botMode.lastAudioReactionMs = now;
-      botMode.registerInteraction();
-    }
-    // Speech (someone talking): FOCUSED, hold while speech continues
-    else if (audioAnalysis.speechDetected) {
-      botMode.face.transitionTo(EXPR_FOCUSED, 300);
-      botMode.lastAudioReactionMs = now;
-      botMode.registerInteraction();
-    }
-    // Extended silence: chill expression
-    else if (audioAnalysis.silenceExtended && botMode.state == BOT_IDLE) {
-      botMode.face.transitionTo(EXPR_CHILL, 500);
-      botMode.lastAudioReactionMs = now;
-    }
-  }
-  #endif
+  // Audio-reactive expressions removed — replaced by AudioSpectrum-driven
+  // ambient effects (toggled via Audio FX in web UI / touch menu)
 
   // ---- Core S3: Proximity-reactive expressions ----
   #ifdef TARGET_CORES3

@@ -30,7 +30,6 @@ SystemStatus sysStatus = {};
 #ifdef TARGET_CORES3
 #include <M5Unified.h>
 #include "bot_sounds.h"
-#include "audio_analysis.h"
 #include "proximity_light.h"
 #endif
 
@@ -481,7 +480,7 @@ void runBootSequence() {
     #endif
     botSounds.init();
     sysStatus.speakerReady = true;
-    audioAnalysis.init();
+    audioSpectrum.init();
     sysStatus.micReady = true;
     proxLight.init();
     sysStatus.proxLightReady = proxLight.initialized;
