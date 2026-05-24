@@ -268,10 +268,16 @@ inline void scServoWritePos(uint8_t id, uint16_t position, uint16_t timeMs) {
   }
 }
 
+// Speed limiter — enforce a minimum move duration to reduce servo noise.
+// Fast moves (100-250ms) are the loud ones; slow moves (500ms+) are fine.
+// Floor at 300ms caps max speed without slowing already-quiet movements.
+#define SC_SERVO_MIN_MOVE_MS  300
+
 // Move yaw servo by angle (tenths of degrees, relative to zero)
 // Angle mapping: 1 step = 0.3125 deg → mapped = zero + angle * 16 / 50
 inline void scMoveYaw(int angleTenths, uint16_t timeMs = 500) {
   if (!sysStatus.scServoXReady) return;
+  if (timeMs < SC_SERVO_MIN_MOVE_MS) timeMs = SC_SERVO_MIN_MOVE_MS;
   int mapped = scServoXZeroPos + angleTenths * 16 / 50;
   if (mapped < 0) mapped = 0;
   if (mapped > 1000) mapped = 1000;
@@ -280,6 +286,7 @@ inline void scMoveYaw(int angleTenths, uint16_t timeMs = 500) {
 
 inline void scMovePitch(int angleTenths, uint16_t timeMs = 500) {
   if (!sysStatus.scServoYReady) return;
+  if (timeMs < SC_SERVO_MIN_MOVE_MS) timeMs = SC_SERVO_MIN_MOVE_MS;
   constexpr int minTenths = SC_SERVO_Y_MIN_DEG * 10;
   constexpr int maxTenths = SC_SERVO_Y_MAX_DEG * 10;
   if (angleTenths < minTenths) angleTenths = minTenths;
