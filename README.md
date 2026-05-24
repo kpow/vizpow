@@ -2,7 +2,7 @@
 
 A motion-reactive display controller platform for wearable/portable/alternate displays. Supports three firmware targets across multiple hardware boards:
 
-- **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, vizCloud connectivity, ESP-NOW mesh, info mode, 25 facial expressions, audio-reactive effects, kaleidoscope mode, and StackChan robot base support
+- **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, vizCloud connectivity, ESP-NOW mesh, info mode, 25 facial expressions, fully audio-reactive ambient effects (all 16) with adjustable reactivity, kaleidoscope mode, and StackChan robot base support
 - **vizPow** (ESP32-S3) — Full-featured LED controller with IMU, LCD display, touch control, and 4 display modes
 - **vizPow 8266** (ESP8266) — Lightweight WiFi-only port with 2 display modes (ambient + emoji)
 
@@ -140,9 +140,9 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **ESP-NOW Mesh**: Peer-to-peer mesh networking between vizBot devices for coordinated WLED display and state sharing
 - **Multi-Board Support**: Runs on Waveshare ESP32-S3-Touch-LCD-1.69, ESP32-S3-LCD-1.3, ESP32-S3-Matrix, and M5Stack Core S3 — select target via PlatformIO environment
 - **Resolution-Independent Effects**: Hi-res ambient effects adapt to any LCD size (240x280 or 320x240)
-- **Audio-Reactive Effects**: 512-point FFT spectrum analysis drives 4 ambient effects (Plasma, Ripple, ZVortex, Bumpmap) — bass, mid, treble, beat detection via Core S3 dual MEMS mic (toggleable)
+- **Audio-Reactive Effects**: 512-point FFT spectrum analysis (bass/mid/treble/RMS/beat envelope) via Core S3 dual MEMS mic drives **all 16 ambient effects**, each with a distinct audio personality (e.g. Distorsion's RGB channels driven by bass/mid/treble, Galaxy spawns stars on beats, Snakes accelerate with bass, Puzzle palette shifts on beats). Includes a global **Audio Reactivity** slider (0=Off / 100=Tasteful / 200=Dramatic) that uniformly scales the depth across every effect. Persisted in NVS.
 - **Kaleidoscope Mode**: Post-processing symmetry for ambient effects — 5 modes: vertical mirror, horizontal mirror, H+V, 6-slice radial, 8-slice radial (web UI dropdown, NVS persisted)
-- **StackChan Robot Base**: Full K151-R robot base support — dual SCS0009 servos (yaw/pitch), 12x WS2812C LED ring, Si12T capacitive head touch, INA226 battery monitor, PY32 IO expander. Idle behaviors, touch reactions, mood-ring LEDs, audio-reactive base lighting
+- **StackChan Robot Base**: Full K151-R robot base support — dual SCS0009 servos (yaw/pitch), 12x WS2812C LED ring, Si12T capacitive head touch, INA226 battery monitor, PY32 IO expander. Idle behaviors, touch reactions, mood-ring LEDs. **Audio overlay** layers brightness modulation + beat flash onto every base LED mode (breathing/rainbow/chase/fire/twinkle/pulse/aurora/mood) when AudioFX is enabled — honors the same global reactivity slider
 
 ### vizPow (ESP32-S3)
 - **4 Display Modes**: Motion-reactive, ambient, emoji, and bot companion
@@ -434,30 +434,40 @@ vizBot features a **neo-brutalist** web control panel — thick black borders, h
 
 ### Ambient Effects (all platforms)
 
-16 ambient effects, 4 of which are audio-reactive on Core S3 / StackChan:
+16 ambient effects, **all audio-reactive** on Core S3 / StackChan with per-effect audio personalities:
 
-| Effect | Description | Audio-Reactive |
-|--------|-------------|:-:|
-| Plasma | Classic color blend | Bass scales phase velocity |
-| Rainbow | Diagonal rainbow wave | |
-| Fire | Rising flames | |
-| Ocean | Perlin noise water | |
-| Matrix | Falling rain drops | |
-| Lava | Flowing lava lamp | |
-| Aurora | Northern lights | |
-| Confetti | Colorful bursts | |
-| Galaxy | Spinning galaxy | |
-| Heart | Pulsing heart animation | |
-| Donut | Rotating donut shape | |
-| Ripple | Expanding ring pulses | Beat triggers pulses |
-| ZVortex | Spinning vortex | Mid scales spin speed |
-| Bumpmap | Bumpy color terrain | RMS scales brightness |
-| Noise | Perlin noise field | |
-| Starburst | Radiating star lines | |
+| # | Effect | Description | Audio mapping (Core S3 / StackChan) |
+|---|--------|-------------|--------------------------------------|
+| 0 | Plasma | Layered sine-wave color field | Bass scales phase velocity + adds forward push; RMS shifts hue; beat brightens |
+| 1 | Galaxy | Rotating multi-phase spiral + star bursts | Mid scales rotation; beats spawn up to 5 stars; RMS pulses background brightness |
+| 2 | Ripple | Concentric rings from center | Beat onsets reset ring phase (pulses to the beat) |
+| 3 | Chevrons | Vertical chevron patterns with wave modulation | Bass scales scroll speed; RMS boosts wave amplitude |
+| 4 | Stripes | Horizontal striped bands with shimmer | Treble drives shimmer rate; bass widens stripes; beat flashes the frame |
+| 5 | Checker | Animated checkerboard toggle | Beat onset adds shift step (flip on every beat); RMS widens fg/bg contrast |
+| 6 | Scanline | Bouncing scanline with halo trail | Bass scales travel speed; beat brightens trail halo; RMS extends trail length |
+| 7 | Perlin | Pseudo-Perlin noise with multi-sine layering | Bass drives scroll; mid cycles hue; treble adds detail amplitude |
+| 8 | Distorsion | Three-channel distorted color circles | **Bass / mid / treble drive R / G / B channel phases** (natural 3-band fit) |
+| 9 | ZVortex | Concentric ring vortex with polar mapping | Mid scales spin speed |
+| 10 | Snakes | Winding pathfinding snakes with trails | Bass scales snake speed (up to 4×); RMS scales trail brightness |
+| 11 | Sinusoid | Nine parametric sinusoid ray variants | Bass scales emitter size; mid scales phase velocity; treble adds sparkle accents |
+| 12 | Puzzle | Wu-antialiased sliding puzzle solver | RMS scales slide speed (up to 6×); mid shifts palette hue; beat jolts hue |
+| 13 | Bumpmap | Perlin height field with diffuse lighting | RMS scales detail divisor + brightness; beat envelope shifts hue |
+| 14 | Xorcery | XOR-based bitwise spatial pattern | Bass scales pattern size; mid drifts hue; beat offsets XOR z-coord |
+| 15 | Hiphotic | Hipnotic cosine grid | Bass drives grid multiplier (replaces `beatsin8`); mid scales phase rate; beat pulses |
 
 ### Audio-Reactive Mode (Core S3 / StackChan)
 
-When enabled, the ES7210 dual MEMS microphone feeds a 512-point FFT pipeline that produces bass, mid, treble, RMS, and beat envelope values. Four ambient effects respond to these values for music-reactive animation. Toggle via web UI or touch menu; persisted in NVS. Other effects are unaffected (time-based animation continues normally).
+When **AudioFX** is enabled, the ES7210 dual MEMS microphone feeds a 512-point FFT pipeline that produces bass, mid, treble, RMS, and beat-envelope values (~30Hz update rate). Every ambient effect consumes these values according to its mapping above, and the StackChan base LED ring layers a brightness modulation + beat-flash overlay on top of whichever base mode is active.
+
+A single **Audio Reactivity** slider in the web UI (0–200, default 100) uniformly scales the depth across every effect and the base LED overlay:
+
+| Setting | Behavior |
+|---------|----------|
+| **0** (Off) | Effects render as if no audio — bit-identical to AudioFX disabled |
+| **100** (Tasteful) | Audio fields pass through unscaled — natural musical response |
+| **200** (Dramatic) | Audio fields scaled 2× (clamped at 1.5) — overdriven, exaggerated reactions |
+
+Toggle and slider live in the same Appearance card; both persisted in NVS.
 
 ### Kaleidoscope Mode
 
@@ -634,6 +644,7 @@ When running multiple vizbots, each device needs a unique network identity. vizB
 | `/bot/touch` | Read head touch state (JSON) |
 | `/bot/battery` | Read battery voltage and current (JSON) |
 | `/bot/audiofx?v=0\|1` | Toggle audio-reactive effects |
+| `/bot/audiodrama?v=N` | Set audio reactivity depth (0–200; 0=off, 100=tasteful, 200=dramatic) |
 | `/bot/kscope?v=N` | Set kaleidoscope mode (0-5) |
 
 ### Device Identity (vizBot)

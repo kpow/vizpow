@@ -216,5 +216,10 @@ struct AudioSpectrum {
 // Global instance
 AudioSpectrum audioSpectrum;
 
+// Global drama / sensitivity (0..200). Scales audio fields uniformly across
+// every effect in fillCtxAudio(). Default is AUDIO_DRAMA_DEFAULT (100 = pass-
+// through). Persisted in NVS via settings.h.
+uint8_t audioDrama = AUDIO_DRAMA_DEFAULT;
+
 #endif // TARGET_CORES3
 #endif // AUDIO_SPECTRUM_H
