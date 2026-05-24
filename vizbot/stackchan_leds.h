@@ -165,6 +165,34 @@ struct ScBaseLeds {
       default:                    effectOff(); break;
     }
 
+    // Audio overlay — when AudioFX is enabled (and we're not on OFF or the
+    // dedicated AUDIO mode which already does its own thing), modulate the
+    // ring brightness with rms and flash on beats so every base LED pattern
+    // visibly reacts to music. Honors the global audioDrama setting.
+    #ifdef TARGET_CORES3
+    if (mode != SC_LED_MODE_OFF && mode != SC_LED_MODE_AUDIO) {
+      extern struct AudioSpectrum audioSpectrum;
+      extern uint8_t audioDrama;
+      if (audioSpectrum.alive && audioDrama > 0) {
+        const float dramaF = (float)audioDrama / 100.0f;            // 0..2
+        const float rms     = constrain(audioSpectrum.rms     * dramaF, 0.0f, 1.5f);
+        const float beatEnv = constrain(audioSpectrum.beatEnv * dramaF, 0.0f, 1.5f);
+        // Brightness scale: 0.35 + 1.0 * rms → quiet dims to ~35%, loud boosts to ~185%
+        const float brightScale = 0.35f + 1.0f * rms;
+        // Beat flash: additive white-ish punch on each beat (saturating add)
+        const uint8_t beatPunch = (uint8_t)(beatEnv * 90.0f);
+        for (int i = 0; i < SC_BASE_LED_COUNT; i++) {
+          int r = (int)((float)ledR[i] * brightScale) + beatPunch;
+          int g = (int)((float)ledG[i] * brightScale) + beatPunch;
+          int b = (int)((float)ledB[i] * brightScale) + beatPunch;
+          ledR[i] = (uint8_t)(r > 255 ? 255 : (r < 0 ? 0 : r));
+          ledG[i] = (uint8_t)(g > 255 ? 255 : (g < 0 ? 0 : g));
+          ledB[i] = (uint8_t)(b > 255 ? 255 : (b < 0 ? 0 : b));
+        }
+      }
+    }
+    #endif
+
     // Apply brightness and push to hardware
     for (int i = 0; i < SC_BASE_LED_COUNT; i++) {
       uint8_t r = (ledR[i] * brightness) >> 8;
