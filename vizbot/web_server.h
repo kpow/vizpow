@@ -151,6 +151,16 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             <div class="grid3" id="ambientEffects" style="margin-top:6px"></div>
             <div id="audioFxRow" style="display:none;margin-top:10px">
               <div class="trow"><span>Audio FX</span><div class="tog" id="audioFxToggle" onclick="toggleAudioFx()"></div></div>
+              <div style="margin-top:8px">
+                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+                  <span class="lbl">Reactivity</span>
+                  <span id="audioDramaVal" style="font-weight:bold">100</span>
+                </div>
+                <input type="range" id="audioDrama" min="0" max="200" step="10" value="100">
+                <div style="display:flex;justify-content:space-between;font-size:10px;opacity:0.7;margin-top:-8px">
+                  <span>Off</span><span>Tasteful</span><span>Dramatic</span>
+                </div>
+              </div>
             </div>
             <div style="margin-top:10px">
               <div class="trow"><span>Kaleidoscope</span><select id="kscopeSelect" onchange="setKscope(this.value)" style="font-size:12px;padding:2px 6px"></select></div>
@@ -481,6 +491,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       api('/bot/volume?v=' + this.value);
     };
 
+    document.getElementById('audioDrama').oninput = function() {
+      document.getElementById('audioDramaVal').textContent = this.value;
+    };
+    document.getElementById('audioDrama').onchange = function() {
+      api('/bot/audiodrama?v=' + this.value);
+    };
+
     async function getState() {
       try {
         const r = await fetch('/state');
@@ -514,6 +531,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         if (state.audioFx !== undefined) {
           audioFxOn = state.audioFx;
           document.getElementById('audioFxToggle').className = 'tog ' + (audioFxOn ? 'on' : '');
+        }
+        if (state.audioDrama !== undefined) {
+          document.getElementById('audioDrama').value = state.audioDrama;
+          document.getElementById('audioDramaVal').textContent = state.audioDrama;
         }
         if (state.hasMic) {
           document.getElementById('audioFxRow').style.display = 'block';
@@ -965,6 +986,7 @@ void handleState() {
                   ",\"lux\":" + String(proxLight.ambientLux) +
                 "}" +
                 ",\"audioFx\":" + (audioSpectrum.enabled ? "true" : "false") +
+                ",\"audioDrama\":" + String(audioDrama) +
                 ",\"hasMic\":true" +
 #endif
 #ifdef BOARD_HAS_STACKCHAN_BASE
@@ -1470,6 +1492,7 @@ void handleCloudSync() {
 #ifdef TARGET_CORES3
 extern struct BotSounds botSounds;
 extern struct AudioSpectrum audioSpectrum;
+extern uint8_t audioDrama;
 extern struct ProxLightState proxLight;
 
 void handleBotSound() {
@@ -1513,6 +1536,18 @@ void handleAudioFx() {
   }
   server.send(200, "application/json",
     String("{\"audioFx\":") + (audioSpectrum.enabled ? "true" : "false") + "}");
+}
+
+void handleAudioDrama() {
+  if (server.hasArg("v")) {
+    int v = server.arg("v").toInt();
+    if (v < 0) v = 0;
+    if (v > 200) v = 200;
+    audioDrama = (uint8_t)v;
+    markSettingsDirty();
+  }
+  server.send(200, "application/json",
+    String("{\"audioDrama\":") + String(audioDrama) + "}");
 }
 #endif
 
@@ -1840,6 +1875,7 @@ void setupWebServer() {
   server.on("/bot/volume", handleBotVolume);
   server.on("/bot/sequences", handleBotSequences);
   server.on("/bot/audiofx", handleAudioFx);
+  server.on("/bot/audiodrama", handleAudioDrama);
   #endif
 
   // Cloud endpoints

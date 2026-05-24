@@ -179,17 +179,46 @@ inline void applyKaleidoscope(CRGB* buf, uint8_t w, uint8_t h) {
   }
 }
 
+// ============================================================================
+// Audio-reactive mapping (per-effect cheatsheet — keep in sync with effects below)
+// ============================================================================
+// Drama scaling: audioDrama (0..200) multiplies every audio field by drama/100
+// in fillCtxAudio() — one knob, every effect responds.
+//
+//   #  Effect      Audio inputs                  Internal parameter(s)
+//  ─  ─────────── ───────────────────────────── ─────────────────────────────
+//   0 Plasma      bass                          phase velocity
+//   1 Galaxy      mid; beatEnv; rms             rotation; star spawn; star V
+//   2 Ripple      beatEnv                       ring phase reset
+//   3 Chevrons    bass; rms                     scroll speed; wave amplitude
+//   4 Stripes     treble; bass                  shimmer rate; stripe width
+//   5 Checker     beatEnv; rms                  beat shift step; contrast
+//   6 Scanline    bass; beatEnv; rms            travel speed; halo; trail len
+//   7 Perlin      bass; mid; treble             scroll; hue cycle; detail amp
+//   8 Distorsion  bass / mid / treble           R / G / B channel phases
+//   9 ZVortex     mid                           spin speed
+//  10 Snakes      bass; rms                     snake speed; trail brightness
+//  11 Sinusoid    bass; mid; treble             emitter size; phase vel; sparkle
+//  12 Puzzle      rms                           slide speed
+//  13 Bumpmap     rms; beatEnv                  detail divisor; hue shift
+//  14 Xorcery     bass; mid; beatEnv            scale; hue drift; XOR offset
+//  15 Hiphotic    bass; mid; beatEnv            grid mul; phase rate; pulse
+// ============================================================================
+
 // Populate audio fields from AudioSpectrum (when available)
 inline void fillCtxAudio(EffectCtx& ctx) {
   #ifdef TARGET_CORES3
   extern struct AudioSpectrum audioSpectrum;
-  if (audioSpectrum.alive) {
+  extern uint8_t audioDrama;
+  if (audioSpectrum.alive && audioDrama > 0) {
+    const float dramaF = (float)audioDrama / 100.0f;  // 0..2
     ctx.audioAlive   = true;
-    ctx.audioBass    = audioSpectrum.bass;
-    ctx.audioMid     = audioSpectrum.mid;
-    ctx.audioTreble  = audioSpectrum.treble;
-    ctx.audioRms     = audioSpectrum.rms;
-    ctx.audioBeatEnv = audioSpectrum.beatEnv;
+    // Cap at 1.5 so dramatic mode exceeds natural max without going unhinged
+    ctx.audioBass    = constrain(audioSpectrum.bass    * dramaF, 0.0f, 1.5f);
+    ctx.audioMid     = constrain(audioSpectrum.mid     * dramaF, 0.0f, 1.5f);
+    ctx.audioTreble  = constrain(audioSpectrum.treble  * dramaF, 0.0f, 1.5f);
+    ctx.audioRms     = constrain(audioSpectrum.rms     * dramaF, 0.0f, 1.5f);
+    ctx.audioBeatEnv = constrain(audioSpectrum.beatEnv * dramaF, 0.0f, 1.5f);
     return;
   }
   #endif
@@ -488,15 +517,22 @@ inline void puzzleDrawWuCell(EffectCtx& ctx, const CRGBPalette16& pal,
 void renderPlasma(EffectCtx& ctx) {
   static uint16_t plasmaPhase = 0;
   static uint16_t prevFrame   = 0xFFFF;
+  // Audio: bass scales phase velocity AND adds a forward push so plasma keeps
+  // moving with audio even at dirMul=0 inflection points. rms shifts hue and
+  // beat envelope brightens the whole frame.
+  float bass      = ctx.audioAlive ? (1.0f + 4.0f * ctx.audioBass) : 1.0f;
+  float audioPush = ctx.audioAlive ? (ctx.audioBass * 80.0f)       : 0.0f;
   if (ctx.frame != prevFrame) {
     float now    = (float)ctx.millisNow;
     float dirMul = sinf(now / 7000.0f);
-    float bass   = ctx.audioAlive ? (1.0f + 2.5f * ctx.audioBass) : 1.0f;
-    int32_t delta = (int32_t)((float)ctx.speed * dirMul * bass);
+    int32_t delta = (int32_t)((float)ctx.speed * dirMul * bass + audioPush);
     plasmaPhase = (uint16_t)((int32_t)plasmaPhase + delta);
     prevFrame = ctx.frame;
   }
   uint16_t f = plasmaPhase;
+
+  uint8_t audioHueShift   = ctx.audioAlive ? (uint8_t)(ctx.audioRms * 60.0f)     : 0;
+  uint8_t beatBrightBoost = ctx.audioAlive ? (uint8_t)(ctx.audioBeatEnv * 70.0f) : 0;
 
   for (int y = 0; y < ctx.h; y++) {
     for (int x = 0; x < ctx.w; x++) {
@@ -507,8 +543,8 @@ void renderPlasma(EffectCtx& ctx) {
                    + (uint16_t)sin8((sx + sy) / 2 + f / 3);
       uint8_t wave = sum / 3;
       uint8_t arc = 90 + scale8(ctx.param2, 160);
-      uint8_t h = ctx.baseHue + scale8(wave, arc);
-      uint8_t v = 60 + (wave * 3) / 4;
+      uint8_t h = ctx.baseHue + audioHueShift + scale8(wave, arc);
+      uint8_t v = qadd8(60 + (wave * 3) / 4, beatBrightBoost);
       ctx.leds[ctx.xy(x, y)] = CHSV(h, 255, v);
     }
   }
@@ -517,10 +553,12 @@ void renderPlasma(EffectCtx& ctx) {
 void renderGalaxy(EffectCtx& ctx) {
   static int32_t phaseA = 0, phaseB = 0, phaseC = 0;
   static uint16_t prevFrame = 0xFFFF;
+  // Audio: mid drives rotation (up to ~10× at drama=200).
+  float audioSpd = ctx.audioAlive ? (1.0f + 6.0f * ctx.audioMid) : 1.0f;
   if (ctx.frame != prevFrame) {
     float now = (float)ctx.millisNow;
     float spnScale = 0.1f + (float)ctx.param2 * (0.6f / 255.0f);
-    float spd = (float)ctx.speed * spnScale;
+    float spd = (float)ctx.speed * spnScale * audioSpd;
     phaseA += (int32_t)(sinf(now / 4500.0f) * spd);
     phaseB += (int32_t)(sinf(now / 3700.0f) * spd);
     phaseC += (int32_t)(sinf(now / 5200.0f) * spd);
@@ -530,6 +568,9 @@ void renderGalaxy(EffectCtx& ctx) {
   uint8_t pb = (uint8_t)phaseB;
   uint8_t pc = (uint8_t)phaseC;
 
+  // Audio: rms pulses the background brightness so the whole field breathes.
+  uint8_t audioBgBoost = ctx.audioAlive ? (uint8_t)(ctx.audioRms * 110.0f) : 0;
+
   for (int y = 0; y < ctx.h; y++) {
     for (int x = 0; x < ctx.w; x++) {
       uint8_t sx = (x * 255) / ctx.w;
@@ -537,13 +578,25 @@ void renderGalaxy(EffectCtx& ctx) {
       uint8_t h = ctx.baseHue + 180
                   + sin8(sx + pa) / 3
                   + cos8(sy + pb) / 3;
-      uint8_t v = sin8(sx + sy + pc) / 3 + 40;
+      uint8_t v = qadd8(sin8(sx + sy + pc) / 3 + 40, audioBgBoost);
       ctx.leds[ctx.xy(x, y)] = CHSV(h, 230, v);
     }
   }
-  if (random8() < 15) {
-    ctx.leds[ctx.xy(random8(ctx.w), random8(ctx.h))] =
-      CHSV(ctx.baseHue + 180 + random8(40), 80, 200);
+  // Audio: beat triggers many star spawns (up to ~5 stars per frame on a hit),
+  // rms cranks star brightness.
+  uint8_t starThreshold = 15;
+  uint8_t starV = 200;
+  uint8_t starCount = 1;
+  if (ctx.audioAlive) {
+    starThreshold = (uint8_t)constrain(15 + (int)(ctx.audioBeatEnv * 120.0f), 0, 240);
+    starV = (uint8_t)constrain((int)(150.0f + ctx.audioRms * 105.0f), 0, 255);
+    if (ctx.audioBeatEnv > 0.5f) starCount = 1 + (uint8_t)(ctx.audioBeatEnv * 4.0f);
+  }
+  for (uint8_t s = 0; s < starCount; s++) {
+    if (random8() < starThreshold) {
+      ctx.leds[ctx.xy(random8(ctx.w), random8(ctx.h))] =
+        CHSV(ctx.baseHue + 180 + random8(40), 80, starV);
+    }
   }
 }
 
@@ -581,13 +634,18 @@ void renderRipple(EffectCtx& ctx) {
 void renderChevrons(EffectCtx& ctx) {
   int mid = ctx.w / 2;
   int hSpan = 60;
+  // Audio: bass scales scroll speed (up to ~3.5×); rms boosts wave amplitude.
+  float audioMotion = ctx.audioAlive ? (1.0f + 2.5f * ctx.audioBass) : 1.0f;
+  uint16_t audioFrame = (uint16_t)((float)ctx.frame * audioMotion);
+  float audioAmp = ctx.audioAlive ? (1.0f + 0.5f * ctx.audioRms) : 1.0f;
   for (int y = 0; y < ctx.h; y++) {
     for (int x = 0; x < ctx.w; x++) {
       int dx = abs(x - mid);
       uint8_t chevMul = 8 + (ctx.param2 >> 2);
-      uint8_t wave = sin8(dx * chevMul + y * 45 - ctx.frame);
+      uint8_t wave = sin8(dx * chevMul + y * 45 - audioFrame);
       uint8_t h = ctx.baseHue + wave / 3 + (y * hSpan) / ctx.h;
       uint8_t v = scale8(wave, wave);
+      v = (uint8_t)constrain((int)((float)v * audioAmp), 0, 255);
       if (v < 25) v = 25;
       ctx.leds[ctx.xy(x, y)] = CHSV(h, 255, v);
     }
@@ -596,26 +654,53 @@ void renderChevrons(EffectCtx& ctx) {
 
 void renderStripes(EffectCtx& ctx) {
   const int hSpan = 90;
+  // Audio: treble drives shimmer rate; bass aggressively widens stripes;
+  // rms boosts overall brightness; beat flashes the whole frame.
+  uint8_t shimSpdBoost = ctx.audioAlive ? (uint8_t)(ctx.audioTreble * 250.0f) : 0;
+  uint8_t audioBoost   = ctx.audioAlive ? (uint8_t)(ctx.audioRms    * 80.0f)  : 0;
+  uint8_t beatFlash    = ctx.audioAlive ? (uint8_t)(ctx.audioBeatEnv * 100.0f) : 0;
+  uint8_t stripeMul = 3;
+  if (ctx.audioAlive) {
+    // Stronger bass → much wider stripes (mul=1 = single huge band)
+    float bassFactor = 1.0f - 0.8f * ctx.audioBass;  // 1.0 .. -0.2 (clamped)
+    int mul = (int)((float)3 * bassFactor + 0.5f);
+    stripeMul = (uint8_t)constrain(mul, 1, 8);
+  }
   for (int y = 0; y < ctx.h; y++) {
     uint8_t sy = (y * 255) / ctx.h;
-    uint8_t wave = sin8(sy * 3 + ctx.frame);
+    uint8_t wave = sin8(sy * stripeMul + ctx.frame);
     uint8_t h = ctx.baseHue + (y * hSpan) / ctx.h;
-    uint8_t v = wave;
+    uint8_t v = qadd8(wave, qadd8(audioBoost, beatFlash));
     uint8_t shimMul = 4 + (ctx.param2 >> 3);
     for (int x = 0; x < ctx.w; x++) {
-      uint8_t shimmer = sin8(x * shimMul + ctx.frame / 3) / 8;
+      uint8_t shimmer = sin8(x * shimMul + (ctx.frame + shimSpdBoost) / 3) / 8;
       ctx.leds[ctx.xy(x, y)] = CHSV(h + shimmer, 240, v);
     }
   }
 }
 
 void renderChecker(EffectCtx& ctx) {
-  uint8_t shift = ctx.frame >> 4;
+  // Audio: beat onset bumps the shift step (visible flip on every beat);
+  // rms widens the contrast between fg/bg squares.
+  static uint8_t beatShiftAccum = 0;
+  static float   prevBeatEnv    = 0.0f;
+  if (ctx.audioAlive && ctx.audioBeatEnv > 0.5f && ctx.audioBeatEnv > prevBeatEnv) {
+    beatShiftAccum++;
+  }
+  prevBeatEnv = ctx.audioBeatEnv;
+
+  uint8_t shift = (uint8_t)((ctx.frame >> 4) + beatShiftAccum);
+  uint8_t fgV = 220, bgV = 180;
+  if (ctx.audioAlive) {
+    // contrast widens with rms: fg brighter, bg darker
+    fgV = (uint8_t)constrain((int)(180.0f + 75.0f * ctx.audioRms), 0, 255);
+    bgV = (uint8_t)constrain((int)(180.0f - 100.0f * ctx.audioRms), 30, 255);
+  }
   for (int y = 0; y < ctx.h; y++) {
     for (int x = 0; x < ctx.w; x++) {
       bool on = ((x + y + shift) & 1);
       uint8_t h = on ? ctx.baseHue : ctx.param2;
-      uint8_t v = on ? 220 : 180;
+      uint8_t v = on ? fgV : bgV;
       uint8_t pulse = sin8(ctx.frame / 2) / 4;
       v = qadd8(v, on ? pulse : 0);
       ctx.leds[ctx.xy(x, y)] = CHSV(h, 255, v);
@@ -624,15 +709,22 @@ void renderChecker(EffectCtx& ctx) {
 }
 
 void renderScanline(EffectCtx& ctx) {
-  uint8_t pos = (ctx.frame >> 3) % (ctx.h * 2);
+  // Audio: bass accelerates travel; beatEnv brightens trail; rms extends trail length.
+  float audioSpd = ctx.audioAlive ? (1.0f + 2.5f * ctx.audioBass) : 1.0f;
+  uint16_t audioFrame = (uint16_t)((float)ctx.frame * audioSpd);
+  uint8_t pos = (audioFrame >> 3) % (ctx.h * 2);
   uint8_t row = (pos < ctx.h) ? pos : (ctx.h * 2 - 1 - pos);
 
   int trail = 1 + (ctx.param2 >> 6);
+  if (ctx.audioAlive) {
+    trail = (int)constrain((int)((float)trail * (1.0f + 1.5f * ctx.audioRms)), 1, 6);
+  }
+  uint8_t haloBoost = ctx.audioAlive ? (uint8_t)(ctx.audioBeatEnv * 100.0f) : 0;
   for (int y = 0; y < ctx.h; y++) {
     int dist = abs(y - (int)row);
     uint8_t v;
     if (dist == 0) v = 255;
-    else if (dist <= trail) v = 130 - (dist - 1) * 35;
+    else if (dist <= trail) v = qadd8(130 - (dist - 1) * 35, haloBoost);
     else v = 20;
 
     uint8_t h = ctx.baseHue + (y * 45) / ctx.h + sin8(ctx.frame / 2) / 4;
@@ -645,17 +737,24 @@ void renderScanline(EffectCtx& ctx) {
 
 void renderPerlin(EffectCtx& ctx) {
   uint16_t zoom = 64 + ctx.param2;
+  // Audio: bass scales scroll velocity; mid shifts the hue base; treble adds
+  // high-frequency detail through the third sin layer.
+  float audioScroll = ctx.audioAlive ? (1.0f + 2.0f * ctx.audioBass) : 1.0f;
+  uint16_t audioFrame = (uint16_t)((float)ctx.frame * audioScroll);
+  uint8_t audioHue = ctx.baseHue + (ctx.audioAlive ? (uint8_t)(ctx.audioMid * 80.0f) : 0);
+  uint8_t audioDetail = ctx.audioAlive ? (uint8_t)(ctx.audioTreble * 120.0f) : 0;
   for (int y = 0; y < ctx.h; y++) {
     for (int x = 0; x < ctx.w; x++) {
       uint8_t sxBase = (x * 255) / ctx.w;
       uint8_t syBase = (y * 255) / ctx.h;
       uint8_t sx = (uint8_t)((uint16_t)sxBase * zoom / 128);
       uint8_t sy = (uint8_t)((uint16_t)syBase * zoom / 128);
-      uint8_t n1 = sin8(sx * 2 + ctx.frame + sin8(sy * 3 + ctx.frame / 2));
-      uint8_t n2 = sin8(sy * 3 - ctx.frame / 3 + cos8(sx * 2 + ctx.frame / 4));
-      uint8_t n3 = sin8((sx + sy) + ctx.frame / 2);
+      uint8_t n1 = sin8(sx * 2 + audioFrame + sin8(sy * 3 + audioFrame / 2));
+      uint8_t n2 = sin8(sy * 3 - audioFrame / 3 + cos8(sx * 2 + audioFrame / 4));
+      uint8_t n3 = sin8((sx + sy) + audioFrame / 2);
       uint8_t val = (n1 / 3 + n2 / 3 + n3 / 3);
-      uint8_t h = ctx.baseHue + scale8(val, 170);
+      val = qadd8(val, scale8(n3, audioDetail));
+      uint8_t h = audioHue + scale8(val, 170);
       uint8_t v = val / 2 + 100;
       ctx.leds[ctx.xy(x, y)] = CHSV(h, 220, v);
     }
@@ -667,9 +766,14 @@ void renderDistorsion(EffectCtx& ctx) {
   const uint8_t w = 1 + (ctx.param2 >> 5);
   const uint8_t hue = ctx.baseHue;
 
-  uint16_t a  = ctx.frame >> 2;
-  uint16_t a2 = a >> 1;
-  uint16_t a3 = a / 3;
+  // Audio: bass / mid / treble each drive one of the three color-channel
+  // time phases. Natural 3-band-to-3-channel fit.
+  float audioR = ctx.audioAlive ? (1.0f + 3.0f * ctx.audioBass)   : 1.0f;
+  float audioG = ctx.audioAlive ? (1.0f + 3.0f * ctx.audioMid)    : 1.0f;
+  float audioB = ctx.audioAlive ? (1.0f + 3.0f * ctx.audioTreble) : 1.0f;
+  uint16_t a  = (uint16_t)((float)(ctx.frame >> 2) * audioR);
+  uint16_t a2 = (uint16_t)((float)(a >> 1)         * audioG);
+  uint16_t a3 = (uint16_t)((float)(a / 3)          * audioB);
 
   uint16_t cx  = ((uint16_t)sin8((a3     ) & 0xFF) * ctx.w) >> 8;
   uint16_t cy  = ((uint16_t)sin8((a3 + 32) & 0xFF) * ctx.h) >> 8;
@@ -757,7 +861,12 @@ void renderSnakes(EffectCtx& ctx) {
     snakeInit(s, want, ctx.w, ctx.h);
   }
 
-  float speedfactor = (float)ctx.speed / 100.0f + 0.005f;
+  // Audio: bass scales snake speed (+ up to 4×); rms scales trail brightness.
+  float audioSpd = ctx.audioAlive ? (1.0f + 3.0f * ctx.audioBass) : 1.0f;
+  float speedfactor = ((float)ctx.speed / 100.0f + 0.005f) * audioSpd;
+  uint8_t audioTrailV = ctx.audioAlive
+    ? (uint8_t)constrain((int)(120.0f + 135.0f * ctx.audioRms), 60, 255)
+    : 255;
 
   for (uint16_t i = 0; i < ctx.numLeds; i++) ctx.leds[i] = CRGB::Black;
 
@@ -813,7 +922,7 @@ void renderSnakes(EffectCtx& ctx) {
       hx = (ctx.w + hx + dx) % ctx.w;
       hy = (ctx.h + hy + dy) % ctx.h;
       uint8_t bodyHue = baseH + (uint8_t)((m + s.subY[i]) * 4);
-      ctx.leds[ctx.xy(hx, hy)] += CRGB(CHSV(bodyHue, 255, 255));
+      ctx.leds[ctx.xy(hx, hy)] += CRGB(CHSV(bodyHue, 255, audioTrailV));
 
       if (temp & 0b01) {
         temp >>= 1;
@@ -841,12 +950,17 @@ void renderSinusoid(EffectCtx& ctx) {
   uint8_t variant = ((uint16_t)ctx.param2 * 9) / 256;
   if (variant > 8) variant = 8;
 
+  // Audio: bass scales emitter size (wavelength); mid scales phase velocity;
+  // treble adds sparkle accents per pixel.
+  const float audioSize  = ctx.audioAlive ? (1.0f + 1.0f * ctx.audioBass) : 1.0f;
+  const float audioPhase = ctx.audioAlive ? (1.0f + 2.5f * ctx.audioMid)  : 1.0f;
+  const float audioSparkleP = ctx.audioAlive ? (ctx.audioTreble * 80.0f) : 0.0f;
   const float speedfactor = 1.0f;
-  const float e_s3_size   = 5.0f;
+  const float e_s3_size   = 5.0f * audioSize;
   const float _scale      = 1.0f;
   const float emitterX    = ctx.w * 0.5f;
   const float emitterY    = ctx.h * 0.5f;
-  const float time_shift  = (float)ctx.frame;
+  const float time_shift  = (float)ctx.frame * audioPhase;
 
   float c1x = e_s3_size * sinf(speedfactor * 0.003f  * time_shift) - emitterX;
   float c1y = e_s3_size * cosf(speedfactor * 0.0022f * time_shift) - emitterY;
@@ -956,6 +1070,10 @@ void renderSinusoid(EffectCtx& ctx) {
       if (v1) c += CRGB(CHSV(hueA, 255, v1));
       if (v2) c += CRGB(CHSV(hueB, 255, v2));
       if (v3) c += CRGB(CHSV(hueC, 255, v3));
+      // Treble sparkle: random small white-ish additive pixels at high treble.
+      if (audioSparkleP > 0.5f && random8() < (uint8_t)audioSparkleP) {
+        c += CRGB(60, 60, 60);
+      }
       ctx.leds[ctx.xy(x, y)] = c;
     }
   }
@@ -974,7 +1092,13 @@ void renderPuzzle(EffectCtx& ctx) {
     puzzleInit(s, ctx.w, ctx.h, psize);
   }
 
-  CRGBPalette16 pal = puzzleRotatedHeat(ctx.baseHue);
+  // Audio: mid drives palette hue; beat adds extra hue jolt for visible accent
+  // on every beat (the slide motion alone is too subtle to read as audio).
+  uint8_t audioHueShift = 0;
+  if (ctx.audioAlive) {
+    audioHueShift = (uint8_t)(ctx.audioMid * 60.0f + ctx.audioBeatEnv * 90.0f);
+  }
+  CRGBPalette16 pal = puzzleRotatedHeat(ctx.baseHue + audioHueShift);
 
   for (uint8_t x = 0; x < s.pcols; x++) {
     for (uint8_t y = 0; y < s.prows; y++) {
@@ -983,7 +1107,9 @@ void renderPuzzle(EffectCtx& ctx) {
   }
 
   uint8_t slideMul = 4 + (ctx.param2 >> 5);
-  int16_t shspeed = ctx.speed * slideMul;
+  // Audio: rms aggressively scales slide speed; beat onset adds a transient burst.
+  float audioSpd = ctx.audioAlive ? (1.0f + 5.0f * ctx.audioRms + 2.5f * ctx.audioBeatEnv) : 1.0f;
+  int16_t shspeed = (int16_t)((float)(ctx.speed * slideMul) * audioSpd);
   if (shspeed < 16) shspeed = 16;
 
   switch (s.etap) {
@@ -1114,17 +1240,22 @@ void renderXorcery(EffectCtx& ctx) {
   const float h_base  = sinf(t2);
   const float modAmp  = pbTriangle(t3) * 10.0f + 4.0f * sinf(t4);
 
+  // Audio: bass scales xor pattern scale; mid adds hue drift; beat shifts the
+  // z-axis XOR offset (creates a momentary kaleidoscopic jump on each beat).
+  float audioScale = ctx.audioAlive ? (1.0f + 1.5f * ctx.audioBass) : 1.0f;
   const uint8_t maxDim = (ctx.w > ctx.h) ? ctx.w : ctx.h;
-  float xorFactor = (float)maxDim * 0.5f;
+  float xorFactor = (float)maxDim * 0.5f * audioScale;
   const float minXor = 5.0f + (float)ctx.param2 * (10.0f / 255.0f);
   if (xorFactor < minXor) xorFactor = minXor;
 
-  const int zi = (int)(xorFactor * -0.5f);
+  int zi = (int)(xorFactor * -0.5f);
+  if (ctx.audioAlive) zi += (int)(ctx.audioBeatEnv * 30.0f);
 
   const uint8_t denomW = (ctx.w > 1) ? (ctx.w - 1) : 1;
   const uint8_t denomH = (ctx.h > 1) ? (ctx.h - 1) : 1;
 
-  const float hueShift = (float)ctx.baseHue / 255.0f;
+  const float hueShift = (float)ctx.baseHue / 255.0f
+                       + (ctx.audioAlive ? (ctx.audioMid * 0.3f) : 0.0f);
 
   for (int y = 0; y < ctx.h; y++) {
     float yn = (float)y / (float)denomH;
@@ -1160,17 +1291,32 @@ void renderXorcery(EffectCtx& ctx) {
 void renderHiphotic(EffectCtx& ctx) {
   static uint16_t hipPhase  = 0;
   static uint16_t prevFrame = 0xFFFF;
+  // Audio: mid scales phase advancement rate.
+  float audioPhase = ctx.audioAlive ? (1.0f + 2.0f * ctx.audioMid) : 1.0f;
   if (ctx.frame != prevFrame) {
     uint8_t adv = ctx.speed / 4;
     if (adv == 0) adv = 1;
+    adv = (uint8_t)constrain((int)((float)adv * audioPhase), 1, 255);
     hipPhase += adv;
     prevFrame = ctx.frame;
   }
   uint8_t a = (uint8_t)hipPhase;
 
   uint8_t maxMul = 6 + (uint8_t)((uint16_t)ctx.param2 * 22 / 255);
-  uint8_t mulX = beatsin8(10, 2, maxMul);
-  uint8_t mulY = beatsin8(12, 2, maxMul);
+  uint8_t mulX, mulY;
+  if (ctx.audioAlive) {
+    // Audio: bass drives the grid multiplier (replaces beatsin8 "breathing").
+    // Beat onset adds a transient pulse for visible accents.
+    float spread = (float)(maxMul - 2);  // 0..22ish
+    float base = 2.0f + ctx.audioBass * spread;
+    float pulse = ctx.audioBeatEnv * 4.0f;
+    mulX = (uint8_t)constrain((int)(base + pulse + 0.5f), 2, (int)maxMul);
+    // Slight offset on Y so X/Y don't collapse to the same value
+    mulY = (uint8_t)constrain((int)(base * 0.9f + pulse + 0.5f), 2, (int)maxMul);
+  } else {
+    mulX = beatsin8(10, 2, maxMul);
+    mulY = beatsin8(12, 2, maxMul);
+  }
 
   for (int y = 0; y < ctx.h; y++) {
     for (int x = 0; x < ctx.w; x++) {
