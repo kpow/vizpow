@@ -29,6 +29,7 @@ extern char    weatherLon[12];
 extern struct ProxLightState proxLight;
 extern struct BotSounds botSounds;
 extern struct AudioSpectrum audioSpectrum;
+extern uint8_t audioDrama;
 #endif
 
 // ── Load ────────────────────────────────────────────────────────────────────
@@ -63,6 +64,8 @@ void loadSettings() {
   botSounds.volume    = prefs.getUChar("sndVol", 120);
   if (botSounds.volume > 0) botSounds.setVolume(botSounds.volume);
   audioSpectrum.setEnabled(prefs.getBool("audioFx", false));
+  audioDrama = prefs.getUChar("audioDrm", AUDIO_DRAMA_DEFAULT);
+  if (audioDrama > 200) audioDrama = AUDIO_DRAMA_DEFAULT;
   // Force full brightness — override any stale NVS dim value
   lcdBrightness = 255;
   #endif
@@ -97,6 +100,7 @@ void saveSettings() {
   prefs.putBool ("sndOn",   botSounds.enabled);
   prefs.putUChar("sndVol",  botSounds.volume);
   prefs.putBool ("audioFx", audioSpectrum.enabled);
+  prefs.putUChar("audioDrm", audioDrama);
   #endif
 
   prefs.end();

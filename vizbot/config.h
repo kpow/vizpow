@@ -161,7 +161,13 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.1.2"
+#define FIRMWARE_VERSION "3.1.3"
+
+// Audio-reactive ambient effects — global drama / sensitivity (0..200).
+// 0 = effects render as if no audio; 100 = tasteful default (audio fields
+// pass through unscaled); 200 = dramatic (audio fields scaled up to 2×).
+// Persisted in NVS, exposed via web UI slider.
+#define AUDIO_DRAMA_DEFAULT 100
 
 #if defined(BOARD_ESP32S3_MATRIX)
   #define BOARD_TYPE "esp32s3-matrix"
