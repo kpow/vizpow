@@ -2,7 +2,7 @@
 
 A motion-reactive display controller platform for wearable/portable/alternate displays. Supports three firmware targets across multiple hardware boards:
 
-- **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, vizCloud connectivity, ESP-NOW mesh, info mode, and 25 facial expressions
+- **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, vizCloud connectivity, ESP-NOW mesh, info mode, 25 facial expressions, audio-reactive effects, kaleidoscope mode, and StackChan robot base support
 - **vizPow** (ESP32-S3) — Full-featured LED controller with IMU, LCD display, touch control, and 4 display modes
 - **vizPow 8266** (ESP8266) — Lightweight WiFi-only port with 2 display modes (ambient + emoji)
 
@@ -140,6 +140,9 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **ESP-NOW Mesh**: Peer-to-peer mesh networking between vizBot devices for coordinated WLED display and state sharing
 - **Multi-Board Support**: Runs on Waveshare ESP32-S3-Touch-LCD-1.69, ESP32-S3-LCD-1.3, ESP32-S3-Matrix, and M5Stack Core S3 — select target via PlatformIO environment
 - **Resolution-Independent Effects**: Hi-res ambient effects adapt to any LCD size (240x280 or 320x240)
+- **Audio-Reactive Effects**: 512-point FFT spectrum analysis drives 4 ambient effects (Plasma, Ripple, ZVortex, Bumpmap) — bass, mid, treble, beat detection via Core S3 dual MEMS mic (toggleable)
+- **Kaleidoscope Mode**: Post-processing symmetry for ambient effects — 5 modes: vertical mirror, horizontal mirror, H+V, 6-slice radial, 8-slice radial (web UI dropdown, NVS persisted)
+- **StackChan Robot Base**: Full K151-R robot base support — dual SCS0009 servos (yaw/pitch), 12x WS2812C LED ring, Si12T capacitive head touch, INA226 battery monitor, PY32 IO expander. Idle behaviors, touch reactions, mood-ring LEDs, audio-reactive base lighting
 
 ### vizPow (ESP32-S3)
 - **4 Display Modes**: Motion-reactive, ambient, emoji, and bot companion
@@ -228,6 +231,26 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Audio**: AW88298 1W I2S speaker (fallback), SAM2695 MIDI Synthesizer Unit via Grove Port C (optional)
 - **Notes**: LCD reset/backlight via AW9523 I2C expander, all managed by M5Unified library. A `DisplayProxy` wrapper provides a unified API so all existing rendering code works unchanged. MIDI synth uses Serial2 UART at 31250 baud (TX=GPIO17, RX=GPIO18).
 
+### StackChan Robot Base (M5Stack Core S3 + K151-R)
+
+- **Base**: [M5Stack StackChan K151-R](https://shop.m5stack.com/products/stackchan-base-k151-r) robot base with pan/tilt head
+- **MCU**: M5Stack Core S3 (same as above) mounted on the K151-R base
+- **Servos**: 2x SCS0009 serial bus servos (UART1, 1MHz baud, TX=GPIO6, RX=GPIO7)
+  - ID 1: Yaw (left/right), ID 2: Pitch (up/down, 25-85 degrees)
+- **IO Expander**: PY32L020 (I2C 0x6F) — drives servo power (VM_EN) and WS2812C LED ring
+- **Base LEDs**: 12x WS2812C ring (driven via IO expander IO pin 13)
+- **Head Touch**: Si12T 3-zone capacitive touch panel (I2C 0x68)
+- **Battery Monitor**: INA226 voltage/current sensor (I2C 0x41)
+- **Camera**: OV2640 (deferred to future release)
+
+| Peripheral | Interface | Address/Pins |
+|------------|-----------|-------------|
+| PY32 IO Expander | I2C | 0x6F |
+| SCS0009 Servos | UART1 1MHz | TX=6, RX=7 |
+| Si12T Touch | I2C | 0x68 |
+| INA226 Battery | I2C | 0x41 |
+| WS2812C LEDs | IO Expander pin 13 | - |
+
 ### ESP8266 (NodeMCU/Wemos D1 Mini)
 
 - **MCU**: ESP8266 (160MHz, WiFi)
@@ -266,9 +289,10 @@ Board selection is handled by PlatformIO build environments — each environment
 
 | Environment | Board | Target | Notes |
 |-------------|-------|--------|-------|
+| `stackchan` | M5Stack Core S3 + K151-R Base | TARGET_CORES3 | Core S3 + robot base (servos, touch, LEDs, battery) |
+| `m5cores3` | M5Stack Core S3 | TARGET_CORES3 | 320x240 IPS, FT6336 touch, 16MB flash, QSPI PSRAM |
 | `lcd-169` | Waveshare ESP32-S3-Touch-LCD-1.69 | TARGET_LCD | 240x280 ST7789, CST816 touch, 16MB flash, OPI PSRAM |
 | `lcd-13` | Waveshare ESP32-S3-LCD-1.3 | TARGET_LCD | 240x240 ST7789VW, no touch, battery, 16MB flash, OPI PSRAM |
-| `m5cores3` | M5Stack Core S3 | TARGET_CORES3 | 320x240 IPS, FT6336 touch, 16MB flash, QSPI PSRAM |
 | `matrix` | Waveshare ESP32-S3-Matrix | TARGET_LED | 8x8 LED only, 4MB flash, custom partitions |
 
 ### vizPow Environments
@@ -305,9 +329,10 @@ cd vizbot && pio device monitor
 #### vizBot Environments
 
 ```bash
+pio run -e stackchan -t upload  # StackChan robot base (Core S3 + K151-R)
+pio run -e m5cores3 -t upload   # M5Stack Core S3 (standalone)
 pio run -e lcd-169 -t upload    # Waveshare LCD 1.69 (touch)
 pio run -e lcd-13 -t upload     # Waveshare LCD 1.3 (no touch, battery)
-pio run -e m5cores3 -t upload   # M5Stack Core S3
 pio run -e matrix -t upload     # Waveshare Matrix (LED only)
 ```
 
@@ -328,8 +353,9 @@ All versions pinned in `platformio.ini` — no manual installation needed.
 | FastLED | 3.10.3 | vizbot, vizpow |
 | SensorLib | 0.4.0 | vizbot, vizpow |
 | LovyanGFX | 1.2.19 | vizbot (LCD targets) |
-| M5Unified | 0.2.13 | vizbot (CoreS3 only) |
+| M5Unified | 0.2.13 | vizbot (CoreS3 / StackChan) |
 | M5-SAM2695 | latest | vizbot (CoreS3 MIDI synth) |
+| arduinoFFT | 2.0.4 | vizbot (CoreS3 / StackChan audio spectrum) |
 | ArduinoJson | 7.4.3 | vizbot |
 | GFX Library for Arduino | 1.6.5 | vizpow (LCD target) |
 
@@ -408,23 +434,47 @@ vizBot features a **neo-brutalist** web control panel — thick black borders, h
 
 ### Ambient Effects (all platforms)
 
-| Effect | Description |
-|--------|-------------|
-| Plasma | Classic color blend |
-| Rainbow | Diagonal rainbow wave |
-| Fire | Rising flames |
-| Ocean | Perlin noise water |
-| Matrix | Falling rain drops |
-| Lava | Flowing lava lamp |
-| Aurora | Northern lights |
-| Confetti | Colorful bursts |
-| Galaxy | Spinning galaxy |
-| Heart | Pulsing heart animation |
-| Donut | Rotating donut shape |
+16 ambient effects, 4 of which are audio-reactive on Core S3 / StackChan:
+
+| Effect | Description | Audio-Reactive |
+|--------|-------------|:-:|
+| Plasma | Classic color blend | Bass scales phase velocity |
+| Rainbow | Diagonal rainbow wave | |
+| Fire | Rising flames | |
+| Ocean | Perlin noise water | |
+| Matrix | Falling rain drops | |
+| Lava | Flowing lava lamp | |
+| Aurora | Northern lights | |
+| Confetti | Colorful bursts | |
+| Galaxy | Spinning galaxy | |
+| Heart | Pulsing heart animation | |
+| Donut | Rotating donut shape | |
+| Ripple | Expanding ring pulses | Beat triggers pulses |
+| ZVortex | Spinning vortex | Mid scales spin speed |
+| Bumpmap | Bumpy color terrain | RMS scales brightness |
+| Noise | Perlin noise field | |
+| Starburst | Radiating star lines | |
+
+### Audio-Reactive Mode (Core S3 / StackChan)
+
+When enabled, the ES7210 dual MEMS microphone feeds a 512-point FFT pipeline that produces bass, mid, treble, RMS, and beat envelope values. Four ambient effects respond to these values for music-reactive animation. Toggle via web UI or touch menu; persisted in NVS. Other effects are unaffected (time-based animation continues normally).
+
+### Kaleidoscope Mode
+
+Post-processing symmetry applied to all ambient effects on all render surfaces (LED, pixel, hi-res LCD). Selectable from the web UI dropdown and persisted in NVS.
+
+| Mode | Description |
+|------|-------------|
+| Off | No symmetry (default) |
+| Vertical | Left-right mirror |
+| Horizontal | Top-bottom mirror |
+| H+V | Both mirrors combined |
+| 6-Slice | Radial 6-way symmetry |
+| 8-Slice | Radial 8-way symmetry |
 
 ### Hi-Res LCD Effects (LCD targets)
 
-When hi-res mode is enabled, ambient effects render at full 240x280 LCD resolution instead of the 8x8 LED grid. All 11 ambient effects have hi-res variants.
+When hi-res mode is enabled, ambient effects render at full LCD resolution (240x280 or 320x240) instead of the 8x8 LED grid. All 16 ambient effects have hi-res variants. Kaleidoscope applies to hi-res output as well.
 
 ### Emoji Mode (vizPow only)
 
@@ -573,6 +623,19 @@ When running multiple vizbots, each device needs a unique network identity. vizB
 | `/wled/config?ip=X&enabled=0\|1&r=R&g=G&b=B&speed=N` | Set WLED IP, enable/disable, text color, scroll speed |
 | `/wled/test` | Test WLED connectivity |
 
+### StackChan Controls (StackChan only)
+
+| Endpoint | Description |
+|----------|-------------|
+| `/bot/servo?x=N&y=N&t=MS` | Move servos (x=yaw tenths, y=pitch tenths, t=duration) |
+| `/bot/servo/home` | Return servos to home position |
+| `/bot/baseled?mode=N` | Set base LED mode (0=off, 1=mood, 2=audio, 3=glow) |
+| `/bot/baseled?r=R&g=G&b=B` | Set all base LEDs to solid color |
+| `/bot/touch` | Read head touch state (JSON) |
+| `/bot/battery` | Read battery voltage and current (JSON) |
+| `/bot/audiofx?v=0\|1` | Toggle audio-reactive effects |
+| `/bot/kscope?v=N` | Set kaleidoscope mode (0-5) |
+
 ### Device Identity (vizBot)
 
 | Endpoint | Description |
@@ -607,6 +670,10 @@ Settings are automatically saved to NVS flash and restored on boot:
 | `devName` | String | Custom device name (empty = MAC fallback) |
 | `wledIP` | String | WLED device IP address |
 | `wledOn` | bool | WLED integration enabled |
+| `kscope` | uint8_t | Kaleidoscope mode (0-5) |
+| `audioFx` | bool | Audio-reactive effects toggle (Core S3) |
+| `sndOn` | bool | Sound enabled (Core S3) |
+| `sndVol` | uint8_t | Sound volume (Core S3) |
 
 WiFi credentials are stored separately in the `vizwifi` NVS namespace with a `verified` flag — only auto-connect if previously successful.
 
@@ -616,11 +683,11 @@ WiFi credentials are stored separately in the `vizwifi` NVS namespace with a `ve
 vizpow/
 ├── vizbot/                      # ESP32-S3 bot companion (dual-core architecture)
 │   ├── vizbot.ino               # Main sketch — setup(), dual-core task launch
-│   ├── config.h                 # Hardware pins, WiFi/mDNS config, board selection (3 targets)
+│   ├── config.h                 # Hardware pins, WiFi/mDNS config, board selection (4 targets)
 │   ├── layout.h                 # Resolution-independent UI layout (derived from LCD_WIDTH/HEIGHT)
 │   ├── device_id.h              # Per-device unique SSID/mDNS from eFuse MAC or custom name
 │   ├── system_status.h          # SystemStatus struct — tracks subsystem health
-│   ├── boot_sequence.h          # Visual boot diagnostics on LCD (9 stages)
+│   ├── boot_sequence.h          # Visual boot diagnostics on LCD (two-column for StackChan)
 │   ├── task_manager.h           # FreeRTOS tasks, I2C mutex, command queue
 │   ├── wifi_provisioning.h      # STA connection, NVS credentials, provisioning state machine
 │   ├── settings.h               # NVS persistence layer (debounced writes)
@@ -630,12 +697,15 @@ vizpow/
 │   ├── bot_eyes.h               # Eye/pupil/brow/mouth rendering, look-around, blink
 │   ├── bot_sayings.h            # Categorized speech bubble phrase pools
 │   ├── bot_overlays.h           # Speech bubbles, time, weather, notification overlays
+│   ├── bot_sounds.h             # Sound system — M5.Speaker + SAM2695 MIDI synth
 │   ├── info_mode.h              # Info mode — weather dashboard with mini eyes
 │   ├── weather_data.h           # Open-Meteo API client, geocoding, forecast parsing
 │   ├── weather_icons.h          # Weather condition icons (44px sprites)
 │   ├── cloud_client.h           # vizCloud HTTPS client — registration, sync, command dispatch
 │   ├── content_cache.h          # LittleFS cloud content caching (sayings, personalities)
 │   ├── esp_now_mesh.h           # ESP-NOW peer-to-peer mesh networking
+│   ├── midi_synth.h             # SAM2695 MIDI synth driver — 37 sequences, GM instruments
+│   ├── ota_update.h             # OTA firmware update client (GitHub releases)
 │   ├── wled_display.h           # WLED integration — DDP pixel control, state management
 │   ├── wled_emoji.h             # WLED emoji sprite slideshow mode
 │   ├── wled_font.h              # 3x5 pixel font for WLED text rendering
@@ -643,12 +713,21 @@ vizpow/
 │   ├── wled_scheduled_content.h # Periodic weather/emoji content cycling on WLED
 │   ├── touch_control.h          # Touch menu gestures and UI (shared I2C mutex)
 │   ├── audio_analysis.h         # Microphone audio analysis (Core S3 — spike, speech, silence)
+│   ├── audio_spectrum.h         # 512-point FFT spectrum — bass/mid/treble/beat for audio FX
 │   ├── proximity_light.h        # Proximity/light sensor (Core S3 — peek-a-boo, cover detection)
-│   ├── effects_ambient.h        # 11 ambient effects (resolution-independent hi-res variants)
+│   ├── effects_ambient.h        # 16 ambient effects + kaleidoscope + hi-res variants
 │   ├── palettes.h               # 15 color palette definitions
 │   ├── emoji_sprites.h          # Pixel art sprite data for WLED emoji display
 │   ├── display_lcd.h            # LovyanGFX LCD rendering + DisplayProxy initialization
 │   ├── tween.h                  # TweenManager — 16-slot animation engine with 8 easing functions
+│   ├── stackchan_base.h         # StackChan hardware — servos, LEDs, touch, battery, IO expander
+│   ├── stackchan_idle.h         # StackChan idle behavior — sweeps, presets, expressions
+│   ├── stackchan_leds.h         # StackChan base LED modes — mood ring, audio, glow
+│   ├── stackchan_touch.h        # StackChan head touch reactions — pet, double-tap recenter
+│   ├── drivers/                 # StackChan peripheral drivers
+│   │   ├── PY32IOExpander/      # PY32L020 GPIO/LED expander driver
+│   │   ├── FTServo/             # SCS0009 serial bus servo driver (SCSCL)
+│   │   └── Si12T/               # Si12T capacitive touch panel driver
 │   └── partitions.csv           # Custom partition table (+2MB app space on 4MB boards)
 ├── vizpow/                      # ESP32-S3 version (full-featured, single-threaded)
 │   ├── vizpow.ino               # Main sketch — setup(), loop(), shake detection
@@ -733,6 +812,10 @@ The boot sequence populates a `SystemStatus` struct. If a subsystem fails (IMU, 
 - [x] Proximity-reactive expressions (Core S3) — peek-a-boo, hand wave, cover detection
 - [x] Neo-brutalist web control panel — two-column dashboard with collapsible sections
 - [x] LCD 1.3 board support (Waveshare ESP32-S3-LCD-1.3, 240x240, no touch, battery)
+- [x] MIDI synthesizer — SAM2695 on Grove Port C, 37 multi-voice sequences
+- [x] StackChan robot base — K151-R with servos, LEDs, touch, battery monitor
+- [x] Audio-reactive ambient effects — FFT spectrum analysis drives 4 effects via Core S3 mic
+- [x] Kaleidoscope mode — 5 post-processing symmetry modes for all ambient effects
 - [ ] Bluetooth Low Energy control
 - [ ] Custom effect creator
 - [ ] Enclosure design for wearable medallion
@@ -752,4 +835,7 @@ MIT License - see [LICENSE](LICENSE) file.
 - [FastLED](https://github.com/FastLED/FastLED) — LED animation library
 - [SensorLib](https://github.com/lewisxhe/SensorLib) — IMU driver
 - [LovyanGFX](https://github.com/lovyan03/LovyanGFX) — LCD graphics library (DMA SPI)
+- [M5Unified](https://github.com/m5stack/M5Unified) — M5Stack hardware abstraction
+- [arduinoFFT](https://github.com/kosme/arduinoFFT) — FFT library for audio spectrum analysis
 - [Waveshare](https://www.waveshare.com/) — Hardware
+- [M5Stack](https://m5stack.com/) — Core S3 and StackChan robot base hardware
