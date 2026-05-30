@@ -1643,25 +1643,11 @@ void handleScHeadPreset() {
   }
   String name = server.hasArg("name") ? server.arg("name") : "nod";
 
-  // Presets use home pitch as anchor, all angles in tenths of degrees
-  constexpr int homePitch = SC_SERVO_Y_HOME_DEG * 10;
+  // Angles in tenths of degrees
   if (name == "nod") {
-    // Dip down 15° from home, return — 3 cycles
-    for (int i = 0; i < 3; i++) {
-      scMovePitch(homePitch - 150, 250);
-      delay(250);
-      scMovePitch(homePitch, 250);
-      delay(250);
-    }
+    scNodGesture();    // shared with head-touch front-tap reaction
   } else if (name == "shake") {
-    // Hold home pitch, swing yaw ±25° — 3 cycles, return center
-    for (int i = 0; i < 3; i++) {
-      scMoveYaw(250, 200);
-      delay(200);
-      scMoveYaw(-250, 200);
-      delay(200);
-    }
-    scMoveYaw(0, 250);
+    scShakeGesture();  // shared with head-touch back-tap reaction
   } else if (name == "lookup") {
     scMovePitch(900, 500);   // Full up (90 degrees)
   } else if (name == "lookdown") {
