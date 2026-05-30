@@ -128,19 +128,36 @@ void Si12T::enable_channel(void)
     SI12T_Readregister(SI12T_CAL_HOLD2_ADDR, &data);
 }
 
-void Si12T::read_touch_result()
+// Returns true if the I2C read succeeded. On failure the previous
+// touch_result is left untouched; callers must treat the result as invalid.
+bool Si12T::read_touch_result()
 {
-    readRegister(SI12T_OUTPUT1_ADDR, &this->touch_result, 1);
+    return readRegister(SI12T_OUTPUT1_ADDR, &this->touch_result, 1);
 }
 
 void Si12T::parse_touch_result()
 {
-    int index = 0;
-    memset(this->point_type, 0, sizeof(this->point_type));
-    for (int j = 0; j < 6; j += 2) {
-        this->point_type[index] = (this->touch_result >> j) & 0x03;
-        index++;
+    memset(this->point_type, OUTPUT_NONE, sizeof(this->point_type));
+
+    // Reject obvious bus-noise / read-error patterns:
+    //  - 0xFF: floating/stuck SDA pulls every bit high (all zones HIGH).
+    //  - all three zones reporting a touch at once is physically implausible
+    //    on a 3-pad head sensor and is the signature of a glitched read.
+    if (this->touch_result == 0xFF) {
+        return;
     }
+
+    uint8_t pts[3];
+    int pressedZones = 0;
+    for (int j = 0, index = 0; j < 6; j += 2, index++) {
+        pts[index] = (this->touch_result >> j) & 0x03;
+        if (pts[index] != OUTPUT_NONE) pressedZones++;
+    }
+    if (pressedZones >= 3) {
+        return;  // leave all zones as OUTPUT_NONE
+    }
+
+    memcpy(this->point_type, pts, sizeof(this->point_type));
 }
 
 #endif // BOARD_HAS_STACKCHAN_BASE
