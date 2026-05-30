@@ -182,7 +182,9 @@ inline bool scInitBaseLeds() {
 }
 
 inline bool scInitHeadTouch() {
-  scTouch = std::make_unique<Si12T>(SI12T_Type_Low, SI12T_Sensitivity_Level_0, &m5::In_I2C);
+  // Match M5Stack StackChan-BSP: higher sensitivity gives clean, reliable reads.
+  // (The previous Low/Level_0 ran the pads at the noise floor → jittery/phantom.)
+  scTouch = std::make_unique<Si12T>(SI12T_Type_High, SI12T_Sensitivity_Level_4, &m5::In_I2C);
   scTouch->begin();
 
   // Verify by reading touch result
@@ -308,8 +310,14 @@ inline int scReadServoPos(uint8_t id) {
 
 inline void scReadTouch() {
   if (scTouch && sysStatus.scHeadTouchReady) {
-    scTouch->read_touch_result();
-    scTouch->parse_touch_result();
+    if (scTouch->read_touch_result()) {
+      scTouch->parse_touch_result();
+    } else {
+      // I2C read failed — don't trust stale data, report no touch this frame.
+      scTouch->point_type[0] = OUTPUT_NONE;
+      scTouch->point_type[1] = OUTPUT_NONE;
+      scTouch->point_type[2] = OUTPUT_NONE;
+    }
   }
 }
 
@@ -333,6 +341,46 @@ inline float scGetBatteryVoltage() {
 inline float scGetBatteryCurrent() {
   if (!scBattMon) return 0.0f;
   return scBattMon->getShuntCurrent();
+}
+
+// ============================================================================
+// Nod / Shake gestures (blocking — shared by web presets and head touch)
+// ============================================================================
+// These are the exact, proven move sequences the web UI head presets use. They
+// block briefly (~1.5s) while the SCS0009 interpolates each move. An optional
+// `pump` callback is invoked during the dwell delays so a caller can keep e.g.
+// the sound engine ticking (botSounds.update()) without coupling this layer to it.
+
+inline void scGestureDelay(uint16_t ms, void (*pump)()) {
+  uint32_t start = millis();
+  while (millis() - start < ms) {
+    if (pump) pump();
+    delay(4);
+  }
+}
+
+// Nod "yes": dip pitch 15° below home and back, 3 cycles, ending at home.
+inline void scNodGesture(void (*pump)() = nullptr) {
+  if (!sysStatus.scServoYReady) return;
+  constexpr int home = SC_SERVO_Y_HOME_DEG * 10;
+  for (int i = 0; i < 3; i++) {
+    scMovePitch(home - 150, 250);
+    scGestureDelay(250, pump);
+    scMovePitch(home, 250);
+    scGestureDelay(250, pump);
+  }
+}
+
+// Shake "no": hold pitch, swing yaw ±25°, 3 cycles, recenter.
+inline void scShakeGesture(void (*pump)() = nullptr) {
+  if (!sysStatus.scServoXReady) return;
+  for (int i = 0; i < 3; i++) {
+    scMoveYaw(250, 200);
+    scGestureDelay(200, pump);
+    scMoveYaw(-250, 200);
+    scGestureDelay(200, pump);
+  }
+  scMoveYaw(0, 250);
 }
 
 #endif // BOARD_HAS_STACKCHAN_BASE
