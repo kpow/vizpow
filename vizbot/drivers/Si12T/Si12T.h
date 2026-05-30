@@ -62,7 +62,7 @@ public:
     void set_Ctrl1(void);
     void set_Ctrl2(void);
 
-    void read_touch_result();
+    bool read_touch_result();
     void parse_touch_result();
 
     uint8_t sens_type  = SI12T_Type_Low;

@@ -469,9 +469,12 @@ void loop() {
   {
     uint8_t touchResult = scTouch_state.update();
     if (touchResult == 1) {
-      scFirePetReaction(scTouch_state.pendingTapZone, botMode.personalityIndex);
-    } else if (touchResult == 2) {
-      scFireRecenter(botMode.personalityIndex);
+      // Single tap — front half = nod, back half = shake (middle ignored)
+      if (scTouch_state.lastTapZone == SC_ZONE_BACK) {
+        scFireShake();
+      } else {
+        scFireNod();
+      }
     } else if (touchResult == 3) {
       scFireChillMode();
     }

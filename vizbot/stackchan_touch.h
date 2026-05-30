@@ -9,150 +9,118 @@
 #include "stackchan_leds.h"
 
 // ============================================================================
-// Head Touch State Machine
+// Head Touch State Machine (M5Stack StackChan-BSP model)
 // ============================================================================
-// Polls Si12T each frame. Detects:
-//   - Single tap: any zone press→release triggers pet reaction
-//   - Double-tap center: two center taps within 400ms → recenter head
-//   - Long press: hold any zone 2+ seconds → chill mode (10 min)
+// The Si12T exposes THREE pads in a line along the TOP of the head, ordered
+// Front → Middle → Back (NOT left/center/right — confirmed against the official
+// m5stack/StackChan-BSP touch_sensor driver). We normalize raw point_type so:
+//   zone 0 = FRONT, zone 1 = MIDDLE, zone 2 = BACK
 //
-// Touch zones: 0=left, 1=center, 2=right
+// Debounce uses M5Unified's proven m5::Button_Class (the same class the BSP builds
+// its touch gestures on). We fire on the IMMEDIATE click (release edge) so a tap
+// responds the instant you lift — capacitive pads are often held >0.5s, which the
+// multi-click/hold machinery would otherwise misread as a "hold" and drop. Events:
+//   - Tap FRONT → nod   (yes)
+//   - Tap BACK  → shake (no)   [middle pad ignored — every tap is front or back]
+//   - Hold 2s   → chill mode (10 min)
+//
+// The tapped zone is recovered by tracking each pad's peak intensity during the
+// press and reading it on the release edge.
+
+#include <M5Unified.h>  // m5::Button_Class
 
 // Forward declarations
 struct BotModeState;
 extern BotModeState botMode;
 
+enum ScTapZone : uint8_t { SC_ZONE_FRONT = 0, SC_ZONE_MIDDLE = 1, SC_ZONE_BACK = 2 };
+
 struct ScTouchState {
-  // Previous frame state per zone
-  uint8_t prevZone[3] = { OUTPUT_NONE, OUTPUT_NONE, OUTPUT_NONE };
+  m5::Button_Class headBtn;
 
-  // Double-tap tracking (center zone only)
-  unsigned long lastCenterTapMs = 0;
-  bool waitingForDoubleTap = false;
+  // Peak intensity per normalized zone during the current/last contact.
+  uint8_t peak[3] = { 0, 0, 0 };
+  bool    rawPressed = false;       // previous-frame raw pressed state (for peak reset)
+  uint8_t lastTapZone = SC_ZONE_MIDDLE;
 
-  // Debounce
-  unsigned long lastReactionMs = 0;
-  static constexpr uint16_t DEBOUNCE_MS = 300;
-  static constexpr uint16_t DOUBLE_TAP_WINDOW_MS = 400;
+  // 2s hold → chill. Detected via pressedFor() with a one-shot latch so the
+  // Button_Class hold threshold can stay short (snappy click resolution).
+  bool holdFired = false;
+  static constexpr uint16_t SC_CHILL_HOLD_MS = 2000;
 
-  // Single tap held in suspense during double-tap window
-  bool pendingSingleTap = false;
-  uint8_t pendingTapZone = 0;
-  unsigned long pendingTapAt = 0;
-
-  // Long press tracking
-  bool anyPressed = false;
-  unsigned long pressStartMs = 0;
-  bool longPressFired = false;
-  static constexpr uint16_t SC_LONG_PRESS_MS = 2000;
-
-  // Chill mode
+  // Chill mode (10 min quiet) — owned here; read by the main loop's idle gate.
   bool chillMode = false;
   unsigned long chillEndMs = 0;
   static constexpr uint32_t CHILL_DURATION_MS = 600000;  // 10 minutes
 
   void init() {
-    memset(prevZone, OUTPUT_NONE, sizeof(prevZone));
-    lastCenterTapMs = 0;
-    waitingForDoubleTap = false;
-    lastReactionMs = 0;
-    pendingSingleTap = false;
-    anyPressed = false;
-    longPressFired = false;
+    // Hold threshold parked well above any plausible tap so a lingering finger
+    // still registers as a click on release (Button_Class would otherwise convert
+    // a >threshold press into a "hold" and never emit a click). The 2s chill hold
+    // is detected independently via pressedFor().
+    headBtn.setHoldThresh(8000);
+    headBtn.setDebounceThresh(35);  // a touch firmer than the 10ms default → quieter
+    peak[0] = peak[1] = peak[2] = 0;
+    rawPressed = false;
+    lastTapZone = SC_ZONE_MIDDLE;
+    holdFired = false;
     chillMode = false;
     chillEndMs = 0;
   }
 
-  // Returns: 0=nothing, 1=single tap, 2=double-tap recenter, 3=long-press chill
+  // Returns: 0=nothing, 1=tap (see lastTapZone), 3=hold → chill
   uint8_t update() {
     if (!sysStatus.scHeadTouchReady) return 0;
 
     unsigned long now = millis();
 
-    // Check chill mode expiry
-    if (chillMode && now >= chillEndMs) {
-      chillMode = false;
-    }
+    if (chillMode && now >= chillEndMs) chillMode = false;
 
-    // Read fresh touch data
+    // Read fresh touch data, normalize Front→Middle→Back (BSP reverses raw index).
     scReadTouch();
+    uint8_t inten[3] = {
+      scGetTouchZone(2),  // FRONT
+      scGetTouchZone(1),  // MIDDLE
+      scGetTouchZone(0),  // BACK
+    };
+    bool pressed = (inten[0] || inten[1] || inten[2]);
 
-    uint8_t curZone[3];
-    for (int i = 0; i < 3; i++) {
-      curZone[i] = scGetTouchZone(i);
+    // Track per-zone peak intensity; reset on a fresh contact.
+    if (pressed && !rawPressed) {
+      peak[0] = peak[1] = peak[2] = 0;
+    }
+    if (pressed) {
+      for (int z = 0; z < 3; z++) if (inten[z] > peak[z]) peak[z] = inten[z];
+    }
+    rawPressed = pressed;
+
+    headBtn.setRawState(now, pressed);
+
+    // 2s hold → chill (one-shot latch).
+    if (headBtn.isPressed() && !holdFired && headBtn.pressedFor(SC_CHILL_HOLD_MS)) {
+      holdFired = true;
+      return 3;
     }
 
-    // Check if anything is currently pressed
-    bool nowPressed = (curZone[0] != OUTPUT_NONE ||
-                       curZone[1] != OUTPUT_NONE ||
-                       curZone[2] != OUTPUT_NONE);
-
-    uint8_t result = 0;
-
-    // Long press detection: any zone held for 2+ seconds
-    if (nowPressed && !anyPressed) {
-      // Just started pressing
-      pressStartMs = now;
-      longPressFired = false;
-    }
-    if (nowPressed && !longPressFired && (now - pressStartMs >= SC_LONG_PRESS_MS)) {
-      // Long press triggered!
-      longPressFired = true;
-      pendingSingleTap = false;
-      waitingForDoubleTap = false;
-      lastReactionMs = now;
-      result = 3;
-    }
-    anyPressed = nowPressed;
-
-    // Skip tap detection if long press just fired
-    if (longPressFired) {
-      memcpy(prevZone, curZone, sizeof(prevZone));
-      return result;
+    // Immediate tap on release. A release that merely ends a chill-hold is
+    // consumed here so it doesn't also fire a tap reaction.
+    if (headBtn.wasClicked()) {
+      if (holdFired) { holdFired = false; return 0; }
+      // Require a FULL-strength hit (level 3) on the front or back pad. A real
+      // finger easily reaches it; stray capacitive noise (e.g. a ceiling fan)
+      // only nudges a pad to level 1, so it's rejected. Middle pad is ignored.
+      bool frontHigh = peak[SC_ZONE_FRONT] >= OUTPUT_HIGH;
+      bool backHigh  = peak[SC_ZONE_BACK]  >= OUTPUT_HIGH;
+      if (!frontHigh && !backHigh) return 0;
+      // Back wins ties; otherwise whichever end reached full strength.
+      lastTapZone = (backHigh && peak[SC_ZONE_BACK] >= peak[SC_ZONE_FRONT])
+                      ? SC_ZONE_BACK : SC_ZONE_FRONT;
+      return 1;
     }
 
-    // Detect release events (was pressed, now not)
-    for (int z = 0; z < 3; z++) {
-      bool wasPressed = (prevZone[z] != OUTPUT_NONE);
-      bool isPressed  = (curZone[z] != OUTPUT_NONE);
+    if (headBtn.isReleased()) holdFired = false;
 
-      if (wasPressed && !isPressed && (now - lastReactionMs > DEBOUNCE_MS)) {
-        if (z == 1) {
-          // Center zone — check for double-tap
-          if (waitingForDoubleTap && (now - lastCenterTapMs < DOUBLE_TAP_WINDOW_MS)) {
-            pendingSingleTap = false;
-            waitingForDoubleTap = false;
-            lastReactionMs = now;
-            result = 2;
-          } else {
-            lastCenterTapMs = now;
-            waitingForDoubleTap = true;
-            pendingSingleTap = true;
-            pendingTapZone = z;
-            pendingTapAt = now;
-          }
-        } else {
-          // Left or right — immediate single tap
-          lastReactionMs = now;
-          pendingSingleTap = false;
-          waitingForDoubleTap = false;
-          result = 1;
-          pendingTapZone = z;
-        }
-      }
-    }
-
-    // Fire pending single tap if double-tap window expired
-    if (pendingSingleTap && (now - pendingTapAt >= DOUBLE_TAP_WINDOW_MS)) {
-      pendingSingleTap = false;
-      waitingForDoubleTap = false;
-      lastReactionMs = now;
-      result = 1;
-      pendingTapZone = 1;
-    }
-
-    memcpy(prevZone, curZone, sizeof(prevZone));
-    return result;
+    return 0;
   }
 };
 
@@ -219,6 +187,59 @@ inline void scFirePetReaction(uint8_t zone, uint8_t personalityIndex) {
   botMode.registerInteraction();
   botMode.shakeReacting = true;
   botMode.shakeReactEnd = millis() + 1500;
+}
+
+// ============================================================================
+// Nod / Shake — front tap = "yes", back tap = "no"
+// ============================================================================
+// Uses the proven blocking nod/shake gestures from stackchan_base.h (the same
+// ones the web UI head presets call), paired with a face change, a spoken
+// phrase, and a synth sound. The gesture pumps botSounds.update() while it runs.
+
+static const char* const SC_NOD_PHRASES[]   = { "Yep!", "Mhm", "For sure", "Totally", "Yeah!" };
+static const char* const SC_SHAKE_PHRASES[] = { "Nope", "No way", "Uh-uh", "Nuh-uh", "Nah" };
+
+// Randomized sound pools (thematic: nod=positive, shake=negative).
+#ifdef TARGET_CORES3
+static const MidiSequenceId SC_NOD_SOUNDS[]   = { SEQ_CONFIRM, SEQ_SUCCESS, SEQ_HAPPY_HUM, SEQ_COIN, SEQ_PING };
+static const MidiSequenceId SC_SHAKE_SOUNDS[] = { SEQ_SHAKE_RATTLE, SEQ_DISMISS, SEQ_ERROR, SEQ_SAD_SIGH, SEQ_CURIOUS_BEEP };
+inline void scPlayRandomSound(const MidiSequenceId* pool, uint8_t n) {
+  botSounds.play(pool[random(0, n)]);
+}
+#endif
+
+// Pump fed to the blocking nod/shake gestures so the synth keeps ticking while
+// the servos move (the gesture briefly blocks the render loop).
+inline void scGesturePumpSound() {
+#ifdef TARGET_CORES3
+  botSounds.update();
+#endif
+}
+
+inline void scFireNod() {
+  botMode.face.transitionTo(EXPR_HAPPY, 150);
+  botMode.speechBubble.show(SC_NOD_PHRASES[random(0, 5)], 2500);
+  scLeds.flash(80, 255, 120, 300);
+  botMode.registerInteraction();
+  botMode.shakeReacting = true;
+  botMode.shakeReactEnd = millis() + 2500;  // cover the blocking gesture + tail
+#ifdef TARGET_CORES3
+  scPlayRandomSound(SC_NOD_SOUNDS, sizeof(SC_NOD_SOUNDS) / sizeof(SC_NOD_SOUNDS[0]));
+#endif
+  scNodGesture(scGesturePumpSound);  // proven web-preset nod (blocking, pumps sound)
+}
+
+inline void scFireShake() {
+  botMode.face.transitionTo(EXPR_ANNOYED, 150);
+  botMode.speechBubble.show(SC_SHAKE_PHRASES[random(0, 5)], 2500);
+  scLeds.flash(255, 80, 40, 300);
+  botMode.registerInteraction();
+  botMode.shakeReacting = true;
+  botMode.shakeReactEnd = millis() + 2500;  // cover the blocking gesture + tail
+#ifdef TARGET_CORES3
+  scPlayRandomSound(SC_SHAKE_SOUNDS, sizeof(SC_SHAKE_SOUNDS) / sizeof(SC_SHAKE_SOUNDS[0]));
+#endif
+  scShakeGesture(scGesturePumpSound);  // proven web-preset shake (blocking, pumps sound)
 }
 
 // ============================================================================
