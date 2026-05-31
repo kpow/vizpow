@@ -163,7 +163,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
               </div>
             </div>
             <div style="margin-top:10px">
-              <div class="trow"><span>Kaleidoscope</span><select id="kscopeSelect" onchange="setKscope(this.value)" style="font-size:12px;padding:2px 6px"></select></div>
+              <div class="srow"><span>Kaleidoscope</span><span id="kscopeModeVal" style="font-weight:bold">Off</span></div>
+              <input type="range" id="kscopeMode" min="0" max="5" step="1" value="0" list="kscopeTicks">
+              <datalist id="kscopeTicks"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option><option value="4"></option><option value="5"></option></datalist>
+              <div class="srow" style="margin-top:8px"><span>Spin</span><span id="kscopeSpinVal">64</span></div>
+              <input type="range" id="kscopeSpin" min="0" max="255" value="64">
+              <div class="srow" style="margin-top:8px"><span>Blend</span><span id="kscopeBlendVal">255</span></div>
+              <input type="range" id="kscopeBlend" min="0" max="255" value="255">
+              <div class="srow" style="margin-top:8px"><span>Slice Offset</span><span id="kscopeSliceVal">0</span></div>
+              <input type="range" id="kscopeSlice" min="0" max="255" value="0">
             </div>
           </div>
         </div>
@@ -365,11 +373,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       ).join('');
       const acBtn = document.getElementById('autoCycleBtn');
       if (acBtn) acBtn.textContent = autoCycleOn ? '⏸ Stop Auto' : '▶ Auto';
-      const ksel = document.getElementById('kscopeSelect');
-      if (ksel) {
-        ksel.innerHTML = kscopeNames.map((name, i) =>
-          `<option value="${i}" ${kscopeMode===i?'selected':''}>${name}</option>`
-        ).join('');
+      const kmodeEl = document.getElementById('kscopeMode');
+      if (kmodeEl) {
+        kmodeEl.value = kscopeMode;
+        document.getElementById('kscopeModeVal').textContent = kscopeNames[kscopeMode] || kscopeMode;
       }
     }
 
@@ -477,7 +484,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     function setAmbient(i) { curAmbient = i; autoCycleOn = false; render(); api('/bot/ambient?v=' + i + '&lock=1'); }
     function toggleAutoCycle() { autoCycleOn = !autoCycleOn; render(); api('/bot/autocycle?v=' + (autoCycleOn ? '1' : '0')); }
     function toggleAudioFx() { audioFxOn = !audioFxOn; document.getElementById('audioFxToggle').className = 'tog ' + (audioFxOn ? 'on' : ''); api('/bot/audiofx?v=' + (audioFxOn ? '1' : '0')); }
-    function setKscope(v) { kscopeMode = parseInt(v); api('/bot/kscope?v=' + kscopeMode); }
+    function setKscope(v) {
+      kscopeMode = parseInt(v);
+      document.getElementById('kscopeModeVal').textContent = kscopeNames[kscopeMode] || kscopeMode;
+      api('/bot/kscope?v=' + kscopeMode);
+    }
+    document.getElementById('kscopeMode').oninput = function() {
+      document.getElementById('kscopeModeVal').textContent = kscopeNames[parseInt(this.value)] || this.value;
+    };
+    document.getElementById('kscopeMode').onchange = function() { setKscope(this.value); };
 
     document.getElementById('brightness').oninput = function() {
       document.getElementById('brightnessVal').textContent = this.value;
@@ -497,6 +512,19 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     document.getElementById('audioDrama').onchange = function() {
       api('/bot/audiodrama?v=' + this.value);
     };
+
+    document.getElementById('kscopeSpin').oninput = function() {
+      document.getElementById('kscopeSpinVal').textContent = this.value;
+    };
+    document.getElementById('kscopeSpin').onchange = function() { api('/bot/kscope/spin?v=' + this.value); };
+    document.getElementById('kscopeBlend').oninput = function() {
+      document.getElementById('kscopeBlendVal').textContent = this.value;
+    };
+    document.getElementById('kscopeBlend').onchange = function() { api('/bot/kscope/blend?v=' + this.value); };
+    document.getElementById('kscopeSlice').oninput = function() {
+      document.getElementById('kscopeSliceVal').textContent = this.value;
+    };
+    document.getElementById('kscopeSlice').onchange = function() { api('/bot/kscope/slice?v=' + this.value); };
 
     async function getState() {
       try {
@@ -541,6 +569,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         }
         if (state.kscope !== undefined) {
           kscopeMode = state.kscope;
+          const km = document.getElementById('kscopeMode');
+          if (km) { km.value = kscopeMode; document.getElementById('kscopeModeVal').textContent = kscopeNames[kscopeMode] || kscopeMode; }
+        }
+        if (state.kscopeSpin !== undefined) {
+          document.getElementById('kscopeSpin').value = state.kscopeSpin;
+          document.getElementById('kscopeSpinVal').textContent = state.kscopeSpin;
+        }
+        if (state.kscopeBlend !== undefined) {
+          document.getElementById('kscopeBlend').value = state.kscopeBlend;
+          document.getElementById('kscopeBlendVal').textContent = state.kscopeBlend;
+        }
+        if (state.kscopeSlice !== undefined) {
+          document.getElementById('kscopeSlice').value = state.kscopeSlice;
+          document.getElementById('kscopeSliceVal').textContent = state.kscopeSlice;
         }
         if (state.infoActive !== undefined) {
           infoOn = state.infoActive;
@@ -945,6 +987,9 @@ void handleState() {
                 ",\"hiRes\":" + (hiResMode ? "true" : "false") +
                 ",\"ambientEffect\":" + String(effectIndex) +
                 ",\"kscope\":" + String(kaleidoscopeMode) +
+                ",\"kscopeSpin\":" + String(kaleidoscopeSpin) +
+                ",\"kscopeBlend\":" + String(kaleidoscopeBlend) +
+                ",\"kscopeSlice\":" + String(kaleidoscopeSlice) +
                 ",\"sys\":{" +
                   "\"lcd\":" + (sysStatus.lcdReady ? "true" : "false") +
                   ",\"leds\":" + (sysStatus.ledsReady ? "true" : "false") +
@@ -1134,6 +1179,33 @@ void handleKscope() {
   }
   server.send(200, "application/json",
     String("{\"kscope\":") + String(kaleidoscopeMode) + "}");
+}
+
+void handleKscopeSpin() {
+  if (server.hasArg("v")) {
+    kaleidoscopeSpin = (uint8_t)constrain(server.arg("v").toInt(), 0, 255);
+    markSettingsDirty();
+  }
+  server.send(200, "application/json",
+    String("{\"kscopeSpin\":") + String(kaleidoscopeSpin) + "}");
+}
+
+void handleKscopeBlend() {
+  if (server.hasArg("v")) {
+    kaleidoscopeBlend = (uint8_t)constrain(server.arg("v").toInt(), 0, 255);
+    markSettingsDirty();
+  }
+  server.send(200, "application/json",
+    String("{\"kscopeBlend\":") + String(kaleidoscopeBlend) + "}");
+}
+
+void handleKscopeSlice() {
+  if (server.hasArg("v")) {
+    kaleidoscopeSlice = (uint8_t)constrain(server.arg("v").toInt(), 0, 255);
+    markSettingsDirty();
+  }
+  server.send(200, "application/json",
+    String("{\"kscopeSlice\":") + String(kaleidoscopeSlice) + "}");
 }
 
 // ============================================================================
@@ -1828,6 +1900,9 @@ void setupWebServer() {
   server.on("/bot/ambient", handleBotAmbient);
   server.on("/bot/autocycle", handleAutoCycle);
   server.on("/bot/kscope", handleKscope);
+  server.on("/bot/kscope/spin", handleKscopeSpin);
+  server.on("/bot/kscope/blend", handleKscopeBlend);
+  server.on("/bot/kscope/slice", handleKscopeSlice);
   server.on("/bot/personality", handleBotPersonality);
   server.on("/bot/personality/rotation", handleBotPersonalityRotation);
 

@@ -93,88 +93,117 @@ static const char* const KSCOPE_NAMES[] = {
   "Off", "Vertical", "Horizontal", "H+V", "6-Slice", "8-Slice"
 };
 
-uint8_t kaleidoscopeMode = KSCOPE_OFF;
+uint8_t kaleidoscopeMode  = KSCOPE_OFF;
+// Kaleidoscope parameters ported from noodle-v2. All 0..255.
+uint8_t kaleidoscopeSpin  = 64;    // rotational auto-spin rate; spin01 = v/128 (0..~2)
+uint8_t kaleidoscopeBlend = 255;   // 0 = original effect, 255 = full kaleidoscope
+uint8_t kaleidoscopeSlice = 0;     // pans mirror modes / rotates the sampled wedge
 
-// Apply kaleidoscope symmetry to a CRGB buffer in-place
+// Reusable scratch buffer — sized to the largest surface so the fold never
+// allocates per frame. Hi-res is always the biggest when an LCD is present.
+#if defined(HIRES_ENABLED)
+  #define KALEIDO_MAX_PX (HIRES_COLS * HIRES_ROWS)
+#else
+  #define KALEIDO_MAX_PX (MATRIX_WIDTH * MATRIX_HEIGHT)
+#endif
+static CRGB kaleidoScratch[KALEIDO_MAX_PX];
+
+// Apply kaleidoscope symmetry to a row-major CRGB buffer in-place.
+// Ported from noodle-v2 (src/tasks/matrix_task.cpp applyKaleidoscope). Adds
+// time-based spin (rotational modes), a 0..1 blend, a slice offset, edge-clamped
+// sampling (no black-hole corners), and a static scratch buffer (no per-frame
+// malloc). Modes map: Vertical→mirror-H, Horizontal→mirror-V, H+V→4-fold,
+// 6/8-Slice→N-fold rotational wedge.
 inline void applyKaleidoscope(CRGB* buf, uint8_t w, uint8_t h) {
   if (kaleidoscopeMode == KSCOPE_OFF) return;
+  uint16_t count = (uint16_t)w * h;
+  if (count == 0 || count > KALEIDO_MAX_PX) return;
 
-  uint8_t cx = w / 2;
-  uint8_t cy = h / 2;
+  const float blend01 = kaleidoscopeBlend / 255.0f;
+  if (blend01 <= 0.004f) return;   // < 1/255 — indistinguishable from off
 
-  switch (kaleidoscopeMode) {
+  const float pivX = 0.5f * (float)w;
+  const float pivY = 0.5f * (float)h;
+  const float TWO_PI_F = 6.2831853f;
 
-    case KSCOPE_VERT:
-      // Mirror left half to right (reflect across vertical center)
-      for (uint8_t y = 0; y < h; y++) {
-        for (uint8_t x = 0; x < cx; x++) {
-          buf[y * w + (w - 1 - x)] = buf[y * w + x];
+  const bool  rotational = (kaleidoscopeMode == KSCOPE_6SLICE ||
+                            kaleidoscopeMode == KSCOPE_8SLICE);
+  const int   N       = (kaleidoscopeMode == KSCOPE_6SLICE) ? 6 : 8;
+  const float wedge   = TWO_PI_F / (float)N;
+  const float halfW   = wedge * 0.5f;
+  const float slice01 = kaleidoscopeSlice / 255.0f;
+
+  // Spin: rotational modes only. spin01 = v/128 (0..~2); 1.0 ≈ 1 rev / 5 s.
+  const float spin01  = kaleidoscopeSpin / 128.0f;
+  const float spinAng = rotational
+                          ? spin01 * (float)millis() * (TWO_PI_F / 5000.0f)
+                          : 0.0f;
+  const float sliceAng = rotational ? slice01 * wedge : 0.0f;
+
+  // Mirror-mode source pan (applied after the fold), signed pixels.
+  const int panX = (int)((slice01 - 0.5f) * (float)w);
+  const int panY = (int)((slice01 - 0.5f) * (float)h);
+
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      int sx = x, sy = y;
+      switch (kaleidoscopeMode) {
+        case KSCOPE_VERT: {            // mirror L↔R across the vertical axis
+          int piv = (int)(pivX + 0.5f);
+          if (x >= piv) sx = 2 * piv - x;
+          sx = ((sx + panX) % (int)w + (int)w) % (int)w;
+          break;
         }
-      }
-      break;
-
-    case KSCOPE_HORIZ:
-      // Mirror top half to bottom (reflect across horizontal center)
-      for (uint8_t y = 0; y < cy; y++) {
-        for (uint8_t x = 0; x < w; x++) {
-          buf[(h - 1 - y) * w + x] = buf[y * w + x];
+        case KSCOPE_HORIZ: {           // mirror T↔B across the horizontal axis
+          int piv = (int)(pivY + 0.5f);
+          if (y >= piv) sy = 2 * piv - y;
+          sy = ((sy + panY) % (int)h + (int)h) % (int)h;
+          break;
         }
-      }
-      break;
-
-    case KSCOPE_HV:
-      // Mirror top-left quadrant to all four quadrants
-      for (uint8_t y = 0; y < cy; y++) {
-        for (uint8_t x = 0; x < cx; x++) {
-          CRGB c = buf[y * w + x];
-          buf[y * w + (w - 1 - x)]           = c;  // top-right
-          buf[(h - 1 - y) * w + x]            = c;  // bottom-left
-          buf[(h - 1 - y) * w + (w - 1 - x)]  = c;  // bottom-right
+        case KSCOPE_HV: {              // 4-fold quadrant mirror
+          int pX = (int)(pivX + 0.5f);
+          int pY = (int)(pivY + 0.5f);
+          if (x >= pX) sx = 2 * pX - x;
+          if (y >= pY) sy = 2 * pY - y;
+          sx = ((sx + panX) % (int)w + (int)w) % (int)w;
+          break;
         }
-      }
-      break;
-
-    case KSCOPE_6SLICE:
-    case KSCOPE_8SLICE: {
-      // Radial kaleidoscope — fold all pixels into one wedge, mirror to fill
-      // Must copy buffer first: in-place read+write corrupts source pixels
-      uint16_t total = (uint16_t)w * h;
-      CRGB* tmp = (CRGB*)malloc(total * sizeof(CRGB));
-      if (!tmp) break;  // OOM — skip gracefully
-      memcpy(tmp, buf, total * sizeof(CRGB));
-
-      float fcx = (float)w * 0.5f;
-      float fcy = (float)h * 0.5f;
-      // 6-slice = π/3 (60°), 8-slice = π/4 (45°)
-      float sector = (kaleidoscopeMode == KSCOPE_6SLICE)
-                        ? 1.0471976f    // π/3
-                        : 0.7853982f;   // π/4
-
-      for (uint8_t y = 0; y < h; y++) {
-        for (uint8_t x = 0; x < w; x++) {
-          float dx = (float)x - fcx;
-          float dy = (float)y - fcy;
-          float angle = atan2f(dy, dx);
-          float radius = sqrtf(dx * dx + dy * dy);
-          // Normalize to [0, 2π)
-          if (angle < 0) angle += 6.2831853f;
-          // Fold into first sector
-          float foldedAngle = fmodf(angle, sector);
-          // Mirror alternate sectors for seamless kaleidoscope joins
-          int sectorIdx = (int)(angle / sector);
-          if (sectorIdx & 1) foldedAngle = sector - foldedAngle;
-          // Map back to source coordinates
-          int sx = (int)(fcx + radius * cosf(foldedAngle) + 0.5f);
-          int sy = (int)(fcy + radius * sinf(foldedAngle) + 0.5f);
-          if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
-            buf[y * w + x] = tmp[sy * w + sx];
-          } else {
-            buf[y * w + x] = CRGB::Black;
-          }
+        case KSCOPE_6SLICE:
+        case KSCOPE_8SLICE: {          // N-fold rotational wedge
+          float dx = (float)x + 0.5f - pivX;
+          float dy = (float)y + 0.5f - pivY;
+          float r   = sqrtf(dx * dx + dy * dy);
+          float ang = atan2f(dy, dx) - spinAng - sliceAng;
+          // Fold into one wedge, then mirror inside it so adjacent slices are
+          // flipped — matches a real two-mirror kaleidoscope's geometry.
+          ang = fmodf(ang, wedge);
+          if (ang < 0.0f)  ang += wedge;
+          if (ang > halfW) ang = wedge - ang;
+          sx = (int)(pivX + r * cosf(ang));
+          sy = (int)(pivY + r * sinf(ang));
+          break;
         }
+        default: break;
       }
-      free(tmp);
-      break;
+      // Clamp source to nearest edge — no black holes at the wedge corners.
+      if (sx < 0)  sx = 0;
+      if (sx >= w) sx = w - 1;
+      if (sy < 0)  sy = 0;
+      if (sy >= h) sy = h - 1;
+      kaleidoScratch[y * w + x] = buf[sy * w + sx];
+    }
+  }
+
+  // Blend the folded image back into buf.
+  if (blend01 >= 0.996f) {
+    memcpy(buf, kaleidoScratch, count * sizeof(CRGB));
+  } else {
+    const uint16_t a   = (uint16_t)(blend01 * 256.0f);
+    const uint16_t inv = 256 - a;
+    for (uint16_t i = 0; i < count; i++) {
+      buf[i].r = (uint8_t)(((uint16_t)buf[i].r * inv + (uint16_t)kaleidoScratch[i].r * a) >> 8);
+      buf[i].g = (uint8_t)(((uint16_t)buf[i].g * inv + (uint16_t)kaleidoScratch[i].g * a) >> 8);
+      buf[i].b = (uint8_t)(((uint16_t)buf[i].b * inv + (uint16_t)kaleidoScratch[i].b * a) >> 8);
     }
   }
 }
