@@ -23,6 +23,9 @@ extern uint8_t botBackgroundStyle;
 extern uint8_t lcdBrightness;
 extern bool    hiResMode;
 extern uint8_t kaleidoscopeMode;
+extern uint8_t kaleidoscopeSpin;
+extern uint8_t kaleidoscopeBlend;
+extern uint8_t kaleidoscopeSlice;
 extern char    weatherLat[12];
 extern char    weatherLon[12];
 #ifdef TARGET_CORES3
@@ -51,6 +54,9 @@ void loadSettings() {
   hiResMode          = prefs.getBool ("hiRes",    hiResMode);
   kaleidoscopeMode   = prefs.getUChar("kscope",   0);
   if (kaleidoscopeMode >= KSCOPE_MODE_COUNT) kaleidoscopeMode = 0;
+  kaleidoscopeSpin   = prefs.getUChar("kscopeSpin",  64);
+  kaleidoscopeBlend  = prefs.getUChar("kscopeBlend", 255);
+  kaleidoscopeSlice  = prefs.getUChar("kscopeSlice", 0);
 
   // Weather location
   String lat = prefs.getString("wLat", weatherLat);
@@ -93,6 +99,9 @@ void saveSettings() {
   prefs.putUChar("bgStyle", botBackgroundStyle);
   prefs.putBool ("hiRes",   hiResMode);
   prefs.putUChar("kscope",  kaleidoscopeMode);
+  prefs.putUChar("kscopeSpin",  kaleidoscopeSpin);
+  prefs.putUChar("kscopeBlend", kaleidoscopeBlend);
+  prefs.putUChar("kscopeSlice", kaleidoscopeSlice);
   prefs.putString("wLat",   weatherLat);
   prefs.putString("wLon",   weatherLon);
 
