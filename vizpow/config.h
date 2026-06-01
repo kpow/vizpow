@@ -27,8 +27,8 @@
   #define POWER_SAVE_ENABLED
   #define AUTO_WIFI_USB_DETECT       // WiFi ON when USB host detected, OFF on battery
   #define USB_DETECT_DELAY_MS 1500   // Time to wait for USB host enumeration at boot
-  #define DEFAULT_BRIGHTNESS 250
-  #define MAX_LED_POWER_MA 200       // FastLED auto-scales to this limit
+  #define DEFAULT_BRIGHTNESS 170     // dimmed for battery use in dark rooms (~20% then ~15%)
+  #define MAX_LED_POWER_MA 136       // lower power cap governs bright effects; FastLED auto-scales
   #define WIFI_TX_POWER WIFI_POWER_8_5dBm  // Reduced TX - phone is nearby
   #define FRAME_DELAY_EMOJI_STATIC 100     // 10 FPS - static image
   #define FRAME_DELAY_EMOJI_FADING 50      // 20 FPS - smooth crossfade
@@ -39,6 +39,8 @@
 #elif defined(TARGET_LCD)
   #define DISPLAY_LCD_ONLY
   #define HIRES_ENABLED  // Hi-res ambient effects on LCD
+  #define LCD_WIDTH  240
+  #define LCD_HEIGHT 280
   // Full power profile for USB-powered LCD board
   #define DEFAULT_BRIGHTNESS 250
   #define INTRO_DURATION_MS 2000
@@ -100,18 +102,20 @@
 
 // Effect counts
 #define NUM_MOTION_EFFECTS 7
-#define NUM_AMBIENT_EFFECTS 11
+#define NUM_AMBIENT_EFFECTS 16   // noodle-v2 pattern set (ported from vizbot)
 #define NUM_PALETTES 15
 
 // Emoji settings
 #define MAX_EMOJI_QUEUE 16
 
-// Shake-to-change-mode settings
-#define SHAKE_THRESHOLD 2.0      // Acceleration magnitude to count as a shake (g)
-#define SHAKE_COUNT 3            // Number of shakes needed to trigger mode change
-#define SHAKE_WINDOW_MS 1500     // Time window to count shakes (ms)
-#define SHAKE_COOLDOWN_MS 2000   // Cooldown after mode change (ms)
-#define RANDOM_EMOJI_COUNT 8     // Number of random emojis to add when entering emoji mode
+// Shake gesture settings (short shake = within mode / kaleido; long shake = mode change)
+#define SHAKE_THRESHOLD 2.0f           // peak magnitude that marks a real shake (g)
+#define SHAKE_SUSTAIN_THRESHOLD 1.4f   // magnitude that keeps a shake "alive" between peaks (g)
+#define LONG_SHAKE_MS 800              // continuous shaking >= this = long shake (mode change)
+#define SHAKE_GAP_TOLERANCE 3          // below-sustain polls allowed mid-shake before the burst ends
+#define SHORT_SHAKE_MIN_FRAMES 2       // min above-sustain polls for a real short shake
+#define SHAKE_ACTION_COOLDOWN_MS 350   // minimum gap between shake-triggered actions
+#define RANDOM_EMOJI_COUNT 8           // random emojis added when entering emoji mode
 
 // Debug serial output (comment out to save ~700 bytes of flash)
 // #define DEBUG_SERIAL
