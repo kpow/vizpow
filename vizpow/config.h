@@ -39,6 +39,8 @@
 #elif defined(TARGET_LCD)
   #define DISPLAY_LCD_ONLY
   #define HIRES_ENABLED  // Hi-res ambient effects on LCD
+  #define LCD_WIDTH  240
+  #define LCD_HEIGHT 280
   // Full power profile for USB-powered LCD board
   #define DEFAULT_BRIGHTNESS 250
   #define INTRO_DURATION_MS 2000
@@ -100,7 +102,7 @@
 
 // Effect counts
 #define NUM_MOTION_EFFECTS 7
-#define NUM_AMBIENT_EFFECTS 11
+#define NUM_AMBIENT_EFFECTS 16   // noodle-v2 pattern set (ported from vizbot)
 #define NUM_PALETTES 15
 
 // Emoji settings
