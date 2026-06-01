@@ -59,11 +59,14 @@ unsigned long lastPaletteChange = 0;
 float accelX = 0, accelY = 0, accelZ = 0;
 float gyroX = 0, gyroY = 0, gyroZ = 0;
 
-// Shake detection state
-unsigned long shakeTimestamps[SHAKE_COUNT];
-uint8_t shakeIndex = 0;
-unsigned long lastModeChange = 0;
-bool wasShaking = false;  // Track if we were above threshold last frame
+// Shake detection state (short vs long shake)
+unsigned long shakeStartMs = 0;        // when the current shake burst began (0 = idle)
+uint16_t      shakeAboveFrames = 0;    // above-sustain polls this burst
+uint8_t       shakeGapFrames = 0;      // consecutive below-sustain polls (burst-end detect)
+bool          longShakeFired = false;  // long shake already handled this burst
+bool          peakShakeSeen = false;   // a real peak (> SHAKE_THRESHOLD) occurred this burst
+unsigned long lastShakeActionMs = 0;   // debounce between shake actions
+bool          firstShakePending = true;// next Ambient short shake toggles the kaleidoscope
 
 // Shuffle bags for random-without-repeats cycling
 // Use 16 (NUM_AMBIENT_EFFECTS) as it's the larger of the two
@@ -226,10 +229,7 @@ void setup() {
   // Set initial palette
   currentPalette = palettes[0];
 
-  // Initialize shake detection
-  for (uint8_t i = 0; i < SHAKE_COUNT; i++) {
-    shakeTimestamps[i] = 0;
-  }
+  // Shake detection state is initialized at declaration.
 
   // Initialize shuffle bags
   resetEffectShuffle();
@@ -267,72 +267,111 @@ void readIMU() {
 }
 
 // Check for shake gesture to change mode
+// Quick LED wipe across the matrix to signal a mode change (long shake).
+void modeChangeSweep() {
+  FastLED.clear();
+  for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+      leds[XY(x, y)] = CRGB(40, 40, 70);
+    }
+    showDisplay();
+    delay(22);
+  }
+  FastLED.clear();
+  showDisplay();
+}
+
+// Enter a mode fresh: randomize what shows, kaleido off, arm the kaleido toggle.
+void enterModeRandom(uint8_t mode) {
+  currentMode = mode;
+  resetEffectShuffle();              // size the shuffle bag for the new mode
+  kaleidoscopeMode = KSCOPE_OFF;
+  firstShakePending = true;          // first short shake on the new pattern toggles kaleido
+  if (mode == MODE_EMOJI) {
+    emojiQueueCount = 0;
+    addRandomEmojis(RANDOM_EMOJI_COUNT);   // random icons
+  } else {
+    effectIndex = nextShuffledEffect();    // random starting effect
+  }
+  lastChange = millis();
+}
+
+// Advance to the next item within the current mode (short-shake browse).
+void advanceWithinMode() {
+  if (currentMode == MODE_EMOJI) {
+    emojiQueueCount = 0;
+    addRandomEmojis(RANDOM_EMOJI_COUNT);   // fresh random emoji set
+  } else {
+    int count = (currentMode == MODE_MOTION) ? NUM_MOTION_EFFECTS : NUM_AMBIENT_EFFECTS;
+    effectIndex = (effectIndex + 1) % count;
+  }
+  lastChange = millis();
+  FastLED.clear();
+}
+
+// Short shake: first short shake on an Ambient pattern toggles the kaleidoscope;
+// otherwise advance to the next item (the new item arrives plain, kaleido armed).
+void doShortShake() {
+  if (currentMode == MODE_AMBIENT && firstShakePending) {
+    kaleidoscopeMode = (kaleidoscopeMode == KSCOPE_OFF) ? KSCOPE_6SLICE : KSCOPE_OFF;
+    firstShakePending = false;
+  } else {
+    advanceWithinMode();
+    kaleidoscopeMode = KSCOPE_OFF;
+    firstShakePending = true;        // re-arm the kaleido toggle for the new item
+  }
+}
+
+// Long shake: change to the next top-level mode with a quick LED sweep.
+void doLongShake() {
+  modeChangeSweep();
+  enterModeRandom((currentMode + 1) % NUM_MODES);
+}
+
+// Poll the IMU magnitude and classify shakes as short (quick burst) or
+// long (sustained >= LONG_SHAKE_MS). Called several times per frame.
 void checkModeShake() {
   unsigned long now = millis();
+  float mag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
+  bool active = mag > SHAKE_SUSTAIN_THRESHOLD;
 
-  // Skip if in cooldown period
-  if (now - lastModeChange < SHAKE_COOLDOWN_MS) {
-    return;
-  }
-
-  // Calculate acceleration magnitude (subtract 1g for gravity)
-  float magnitude = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
-  bool isShaking = magnitude > SHAKE_THRESHOLD;
-
-  // Detect shake event (transition from not-shaking to shaking)
-  if (isShaking && !wasShaking) {
-    // Record this shake timestamp
-    shakeTimestamps[shakeIndex] = now;
-    shakeIndex = (shakeIndex + 1) % SHAKE_COUNT;
-
-    // Count shakes within the window
-    uint8_t validShakes = 0;
-    for (uint8_t i = 0; i < SHAKE_COUNT; i++) {
-      if (now - shakeTimestamps[i] < SHAKE_WINDOW_MS) {
-        validShakes++;
-      }
+  if (active) {
+    if (shakeStartMs == 0) {          // a new burst begins
+      shakeStartMs       = now;
+      shakeAboveFrames   = 0;
+      shakeGapFrames     = 0;
+      longShakeFired     = false;
+      peakShakeSeen      = false;
     }
+    if (shakeAboveFrames < 0xFFFF) shakeAboveFrames++;
+    shakeGapFrames = 0;
+    if (mag > SHAKE_THRESHOLD) peakShakeSeen = true;
 
-    // If enough shakes, act on the gesture
-    if (validShakes >= SHAKE_COUNT) {
-      if (currentMode == MODE_AMBIENT && kaleidoscopeMode == KSCOPE_OFF) {
-        // First shake while on the regular patterns: engage the 6-slice
-        // kaleidoscope on the SAME pattern (no mode/effect change).
-        kaleidoscopeMode = KSCOPE_6SLICE;
-      } else {
-        // Otherwise advance to the next mode (kaleido off), and randomize
-        // what shows on entry rather than always starting at index 0.
-        kaleidoscopeMode = KSCOPE_OFF;
-        currentMode = (currentMode + 1) % NUM_MODES;
-        resetEffectShuffle();  // size the shuffle bag for the new mode
-        if (currentMode == MODE_EMOJI) {
-          emojiQueueCount = 0;
-          addRandomEmojis(RANDOM_EMOJI_COUNT);   // random icons each entry
-        } else {
-          effectIndex = nextShuffledEffect();    // random starting effect
-        }
+    // Long shake: held past the duration threshold (fires once per burst).
+    if (!longShakeFired && peakShakeSeen &&
+        (now - shakeStartMs) >= LONG_SHAKE_MS &&
+        (now - lastShakeActionMs) >= SHAKE_ACTION_COOLDOWN_MS) {
+      longShakeFired    = true;
+      lastShakeActionMs = now;
+      doLongShake();
+    }
+  } else if (shakeStartMs != 0) {     // maybe the end of a burst
+    shakeGapFrames++;
+    if (shakeGapFrames > SHAKE_GAP_TOLERANCE) {
+      // Burst ended. A real, short burst (not already a long shake) = short shake.
+      if (!longShakeFired && peakShakeSeen &&
+          shakeAboveFrames >= SHORT_SHAKE_MIN_FRAMES &&
+          (now - lastShakeActionMs) >= SHAKE_ACTION_COOLDOWN_MS) {
+        lastShakeActionMs = now;
+        doShortShake();
       }
-
-      lastChange = now;
-      lastModeChange = now;
-      FastLED.clear();
-
-      // Clear shake timestamps to prevent immediate re-trigger
-      for (uint8_t i = 0; i < SHAKE_COUNT; i++) {
-        shakeTimestamps[i] = 0;
-      }
-
-      // Brief flash to acknowledge the shake
-      for (int i = 0; i < NUM_LEDS; i++) {
-        leds[i] = CRGB(50, 50, 50);
-      }
-      showDisplay();
-      delay(100);
-      FastLED.clear();
+      shakeStartMs     = 0;
+      shakeAboveFrames = 0;
+      shakeGapFrames   = 0;
+      longShakeFired   = false;
+      peakShakeSeen    = false;
     }
   }
-
-  wasShaking = isShaking;
 }
 
 void loop() {
