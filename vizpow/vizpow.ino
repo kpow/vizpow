@@ -293,21 +293,28 @@ void checkModeShake() {
       }
     }
 
-    // If enough shakes, change mode
+    // If enough shakes, act on the gesture
     if (validShakes >= SHAKE_COUNT) {
-      // Cycle to next mode: MOTION -> AMBIENT -> EMOJI -> MOTION
-      uint8_t nextMode = (currentMode + 1) % 3;
-
-      // Handle mode-specific entry logic
-      if (nextMode == MODE_EMOJI && emojiQueueCount == 0) {
-        addRandomEmojis(RANDOM_EMOJI_COUNT);
+      if (currentMode == MODE_AMBIENT && kaleidoscopeMode == KSCOPE_OFF) {
+        // First shake while on the regular patterns: engage the 6-slice
+        // kaleidoscope on the SAME pattern (no mode/effect change).
+        kaleidoscopeMode = KSCOPE_6SLICE;
+      } else {
+        // Otherwise advance to the next mode (kaleido off), and randomize
+        // what shows on entry rather than always starting at index 0.
+        kaleidoscopeMode = KSCOPE_OFF;
+        currentMode = (currentMode + 1) % NUM_MODES;
+        resetEffectShuffle();  // size the shuffle bag for the new mode
+        if (currentMode == MODE_EMOJI) {
+          emojiQueueCount = 0;
+          addRandomEmojis(RANDOM_EMOJI_COUNT);   // random icons each entry
+        } else {
+          effectIndex = nextShuffledEffect();    // random starting effect
+        }
       }
 
-      currentMode = nextMode;
-      effectIndex = 0;
       lastChange = now;
       lastModeChange = now;
-      resetEffectShuffle();  // Reshuffle for the new mode's effect count
       FastLED.clear();
 
       // Clear shake timestamps to prevent immediate re-trigger
@@ -315,7 +322,7 @@ void checkModeShake() {
         shakeTimestamps[i] = 0;
       }
 
-      // Brief flash to indicate mode change
+      // Brief flash to acknowledge the shake
       for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = CRGB(50, 50, 50);
       }
