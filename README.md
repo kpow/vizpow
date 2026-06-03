@@ -1,12 +1,11 @@
 # vizPow
 
-A motion-reactive display controller platform for wearable/portable/alternate displays. Supports three firmware targets across multiple hardware boards:
+A motion-reactive display controller platform for wearable/portable/alternate displays. Supports two firmware targets across multiple hardware boards:
 
 - **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, vizCloud connectivity, ESP-NOW mesh, info mode, 25 facial expressions, fully audio-reactive ambient effects (all 16) with adjustable reactivity, kaleidoscope mode, and StackChan robot base support
 - **vizPow** (ESP32-S3) — Full-featured LED controller with IMU, LCD display, touch control, and 4 display modes
-- **vizPow 8266** (ESP8266) — Lightweight WiFi-only port with 2 display modes (ambient + emoji)
 
-Supported boards: Waveshare ESP32-S3-Touch-LCD-1.69, Waveshare ESP32-S3-LCD-1.3, Waveshare ESP32-S3-Matrix, M5Stack Core S3, and ESP8266 (NodeMCU/Wemos D1 Mini).
+Supported boards: Waveshare ESP32-S3-Touch-LCD-1.69, Waveshare ESP32-S3-LCD-1.3, Waveshare ESP32-S3-Matrix, and M5Stack Core S3.
 
 All platforms drive an 8x8 WS2812B LED matrix (64 LEDs) with a neo-brutalist web control panel for control from any phone or browser. LCD targets render to their full screen resolution (240x280 ST7789, 240x240 ST7789VW on LCD 1.3, 320x240 IPS on M5Stack). Each vizBot device gets a unique network identity (SSID and mDNS hostname) derived from its MAC address, with optional user-settable custom names.
 
@@ -101,14 +100,14 @@ On subsequent boots, verified credentials auto-connect in the background. The AP
 
 ### WiFi Modes by Platform
 
-| Aspect | vizBot | vizPow (ESP32) | vizPow 8266 |
-|--------|--------|----------------|-------------|
-| **WiFi Mode** | AP + STA (dual provisioning) | AP-only | AP-only |
-| **Captive Portal** | DNS wildcard + detection endpoints | None | None |
-| **mDNS** | `vizbot-xxxx.local` (per-device, user-settable) | None | None |
-| **Persistent Credentials** | NVS flash (verified flag) | Flash (SSID/pass) | None |
-| **Server** | WebServer on Core 0 FreeRTOS task | Synchronous WebServer | ESP8266WebServer |
-| **Concurrent Clients** | Non-blocking (Core 0 dedicated) | Blocking (~100ms/request) | Blocking |
+| Aspect | vizBot | vizPow (ESP32) |
+|--------|--------|----------------|
+| **WiFi Mode** | AP + STA (dual provisioning) | AP-only |
+| **Captive Portal** | DNS wildcard + detection endpoints | None |
+| **mDNS** | `vizbot-xxxx.local` (per-device, user-settable) | None |
+| **Persistent Credentials** | NVS flash (verified flag) | Flash (SSID/pass) |
+| **Server** | WebServer on Core 0 FreeRTOS task | Synchronous WebServer |
+| **Concurrent Clients** | Non-blocking (Core 0 dedicated) | Blocking (~100ms/request) |
 
 ### NTP and Weather (vizBot)
 
@@ -156,12 +155,6 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Motion Control**: Accelerometer and gyroscope-driven animations with tunable sensitivity
 - **WiFi Configuration**: Home network credentials configurable via web API, saved to flash
 - **Web Interface**: Control via WiFi AP from any phone/browser
-
-### vizPow 8266 (ESP8266)
-- **2 Display Modes**: Ambient and emoji (no IMU/motion mode)
-- **13 Ambient Effects** + **41 Emoji Sprites**
-- **Web Interface**: Same control UI as ESP32 (minus motion tab)
-- **Lightweight**: Runs on ESP8266 with PROGMEM-optimized sprite storage
 
 ## Hardware
 
@@ -250,16 +243,6 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 | Si12T Touch | I2C | 0x68 |
 | INA226 Battery | I2C | 0x41 |
 | WS2812C LEDs | IO Expander pin 13 | - |
-
-### ESP8266 (NodeMCU/Wemos D1 Mini)
-
-- **MCU**: ESP8266 (160MHz, WiFi)
-- **Display**: 8x8 WS2812B LED Matrix (64 LEDs)
-- **No IMU, LCD, or touch**
-
-| Function | GPIO |
-|----------|------|
-| LED Data | 2 |
 
 ## Boot Sequence (vizBot)
 
@@ -378,7 +361,6 @@ Binaries are in each project's `.pio/build/<env>/` directory.
 2. On your phone, connect to WiFi:
    - vizBot: `vizBot-XXXX` (unique per device, e.g. `vizBot-A3F2`) / password: `12345678` (captive portal auto-opens the control page)
    - vizPow ESP32: `VizPow` / password: `12345678`
-   - vizPow 8266: `VizPow-8266` / password: `12345678`
 3. Open browser: `http://192.168.4.1` (or `http://vizbot-xxxx.local` for vizBot)
 
 ### Shake to Change Mode (vizPow ESP32 only)
@@ -757,14 +739,6 @@ vizpow/
 │   ├── touch_control.h          # Touch menu gestures and UI
 │   ├── web_server.h             # Web UI HTML + API handlers
 │   └── SensorQMI8658.hpp        # IMU driver
-├── vizpow_8266/                 # ESP8266 port (WiFi + LEDs only)
-│   ├── vizpow_8266.ino          # Main sketch — 2 modes, no IMU/LCD/touch
-│   ├── config.h                 # ESP8266 pin config (GPIO2)
-│   ├── palettes.h               # Same 15 palettes
-│   ├── effects_ambient.h        # 11 ambient effects
-│   ├── effects_emoji.h          # Emoji queue and display
-│   ├── emoji_sprites.h          # 41 sprites (PROGMEM optimized)
-│   └── web_server.h             # Web UI (2-mode variant)
 ├── pix-art-converter/           # Pixel art sprite creation tool
 │   └── pix-art.html             # Browser-based 8x8 sprite editor
 ├── scripts/                     # Helper scripts
@@ -794,7 +768,6 @@ The boot sequence populates a `SystemStatus` struct. If a subsystem fails (IMU, 
 - [x] Shake-to-change-mode gesture control
 - [x] Hi-res LCD rendering mode
 - [x] Touch menu control
-- [x] ESP8266 lightweight port
 - [x] Bot companion mode with 25 expressions and 3 personalities (+ cloud-managed)
 - [x] Ambient overlay — bot face over animated backgrounds
 - [x] NTP time sync with web-configurable WiFi
