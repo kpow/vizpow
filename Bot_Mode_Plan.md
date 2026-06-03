@@ -372,7 +372,6 @@ Bot Mode should be built with the awareness that a cloud-based application contr
 |------------------------|----------------------------------|-----------------------------------------------------------------------------------|
 | **Item**               | **Decision**                     | **Rationale**                                                                     |
 | LED matrix interaction | None. Bot Mode is LCD-only.      | LED matrix runs independently. Keeps Bot Mode self-contained and avoids coupling. |
-| ESP8266 support        | No. Bot Mode is TARGET_LCD only. | Requires LCD, touch, and IMU. ESP8266 has none of these.                          |
 | TARGET_LED support     | No. Requires LCD.                | TARGET_LED has no display for character rendering.                                |
 | Sound                  | Not in scope.                    | No speaker/DAC on current hardware. Could be added later with external module.    |
 | Bluetooth control      | Not in scope.                    | Planned separately on the VizPow roadmap.                                         |
