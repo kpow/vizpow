@@ -107,6 +107,9 @@ float gyroX = 0, gyroY = 0, gyroZ = 0;
 char weatherLat[12] = WEATHER_LAT_DEFAULT;
 char weatherLon[12] = WEATHER_LON_DEFAULT;
 
+// Time zone (runtime, saved to NVS) — POSIX TZ string, default US Eastern
+char timezoneTZ[TZ_BUF_LEN] = TZ_DEFAULT;
+
 // Auto-brightness (toggled by cloud command)
 bool autoBrightnessEnabled = false;
 static unsigned long lastAutoBrightnessMs = 0;
