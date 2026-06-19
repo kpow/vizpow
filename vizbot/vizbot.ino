@@ -398,8 +398,11 @@ void setup() {
     initMesh();  // ESP-NOW mesh discovery (requires AP interface active)
   }
 
-  // Cloud sync now runs inside wifiServerTask via pollCloudSync() —
-  // no separate task needed. initCloudClient() already called above.
+  // Cloud sync runs in its own Core 0 task so its blocking TLS work never
+  // starves the HTTP server (keeps the control page responsive).
+  #ifdef CLOUD_ENABLED
+  startCloudTask();
+  #endif
 }
 
 void loop() {
