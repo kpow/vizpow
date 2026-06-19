@@ -340,10 +340,17 @@ static int cloudPost(const char* url, const String& body, String& response) {
       DBGLN("Cloud: temp file failed, falling back to direct");
       useFile = false;
     } else {
+      // Response cap. The full payload (e.g. registration ~43KB) must be
+      // captured or the JSON is truncated → IncompleteInput → registration
+      // never completes and the client retries forever. Boards with PSRAM can
+      // hold the temp String + parse (the large alloc lands in PSRAM, and the
+      // read happens after TLS closes); without PSRAM we stay conservative to
+      // avoid OOM. Runtime check covers every target uniformly.
+      const int CLOUD_MAX_RESPONSE = psramFound() ? 65536 : 16384;
       while ((read_len = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
         tmp.write((uint8_t*)buf, read_len);
         totalRead += read_len;
-        if (totalRead > 16384) break;
+        if (totalRead > CLOUD_MAX_RESPONSE) break;
       }
       tmp.close();
 
@@ -829,12 +836,19 @@ void pollCloudSync() {
 
   // Register if needed
   if (!cloudMeta.registered || strlen(cloudMeta.botId) == 0) {
+    static uint8_t regFails = 0;
     cloudRegister();
     if (!cloudMeta.registered) {
-      uint32_t wait = (cloudBackoffSec > 0) ? cloudBackoffSec : 10;
+      // Progressive backoff so a persistently failing handshake (e.g. TLS
+      // -0x0050) doesn't retry on a tight loop: 10s, 20s, 40s … capped at 5min.
+      if (regFails < 5) regFails++;
+      uint32_t wait = (cloudBackoffSec > 0)
+        ? cloudBackoffSec
+        : min((uint32_t)(10u << (regFails - 1)), (uint32_t)300);
       cloudNextPollMs = now + wait * 1000;
       return;
     }
+    regFails = 0;  // registered — reset backoff
   }
 
   // Sync at poll interval

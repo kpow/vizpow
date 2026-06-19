@@ -450,18 +450,53 @@ void wifiServerTask(void* param) {
       pollWifiConnectTask();             // connect request + STA poll
       pollWledDisplay();                 // WLED text send + restore
       pollWeatherFetch();                // Weather API fetch (if requested)
-      #ifdef CLOUD_ENABLED
-      pollCloudSync();                   // Cloud registration + sync (TLS)
-      pollScheduledCommands();           // Execute scheduled commands at their target time
-      #endif
       pollScheduledContent();              // Periodic weather + emoji cycles
       pollMeshBroadcast();               // ESP-NOW mesh broadcast + stale eviction
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP
     }
+    // NOTE: cloud sync (blocking TLS, up to CLOUD_CONNECT_TIMEOUT) runs in its
+    // own task (cloudTask) so a slow/failing handshake never freezes HTTP and
+    // backs up control-page requests. See startCloudTask().
     vTaskDelay(pdMS_TO_TICKS(2));  // ~500 req/s max, yields to WiFi stack
   }
 }
+
+#ifdef CLOUD_ENABLED
+// Dedicated cloud task. Cloud networking is synchronous/blocking (TLS handshake
+// + multi-KB streamed to LittleFS); running it here instead of in wifiServerTask
+// means that while it blocks on the socket, FreeRTOS schedules the HTTP task,
+// keeping the web UI responsive. The cloud client only touches thread-safe
+// primitives (command queue, NVS, its own LittleFS temp file) — never the
+// WebServer or display — so this is race-free.
+static StackType_t cloudTaskStack[8192];   // 8KB in BSS (mbedTLS handshake stack)
+static StaticTask_t cloudTaskTCB;
+TaskHandle_t cloudTaskHandle = nullptr;
+
+void cloudTask(void* param) {
+  for (;;) {
+    if (wifiEnabled) {
+      pollCloudSync();                   // Cloud registration + sync (TLS)
+      pollScheduledCommands();           // Execute scheduled commands at their target time
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));      // cloud is not latency-sensitive
+  }
+}
+
+void startCloudTask() {
+  cloudTaskHandle = xTaskCreateStaticPinnedToCore(
+    cloudTask,         // Task function
+    "cloud",           // Name
+    8192,              // Stack depth (StackType_t = uint8_t on ESP-IDF, so bytes)
+    nullptr,           // Parameter
+    1,                 // Priority (low — same as wifi server, below WiFi stack)
+    cloudTaskStack,    // Stack buffer (BSS)
+    &cloudTaskTCB,     // TCB (BSS)
+    0                  // Core 0 (protocol CPU)
+  );
+  DBGLN("Cloud task started on Core 0 (static 8KB)");
+}
+#endif
 
 // Call after WiFi AP + web server are up (end of boot sequence)
 void startWifiTask() {
