@@ -202,6 +202,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           <div class="srow"><span>Volume</span><span id="volumeVal">120</span></div>
           <input type="range" id="volume" min="0" max="255" value="120">
           <div class="trow"><span>Time Overlay</span><div class="tog" id="botTimeToggle" onclick="toggleBotTime()"></div></div>
+          <div class="trow"><span>Time Zone</span>
+            <select id="tzSelect" onchange="setTimezone(this.value)" class="sel">
+              <option value="EST5EDT,M3.2.0,M11.1.0">Eastern (ET)</option>
+              <option value="CST6CDT,M3.2.0,M11.1.0">Central (CT)</option>
+              <option value="MST7MDT,M3.2.0,M11.1.0">Mountain (MT)</option>
+              <option value="MST7">Arizona (MST)</option>
+              <option value="PST8PDT,M3.2.0,M11.1.0">Pacific (PT)</option>
+              <option value="AKST9AKDT,M3.2.0,M11.1.0">Alaska (AKT)</option>
+              <option value="HST10">Hawaii (HST)</option>
+              <option value="UTC0">UTC</option>
+              <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
+              <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET)</option>
+            </select>
+          </div>
           <div class="trow"><span>Hi-Res Background</span><div class="tog" id="hiResToggle" onclick="toggleHiRes()"></div></div>
           <div style="border-top:1px solid #eee;margin-top:10px;padding-top:10px">
             <div class="trow"><span>Firmware <span id="fwVer" style="font-weight:700"></span></span><a href="/update" style="display:inline-block;padding:5px 12px;background:#FFD23F;border:2px solid #000;box-shadow:2px 2px 0 0 #000;font-weight:700;font-size:11px;text-transform:uppercase;color:#000;text-decoration:none">Update</a></div>
@@ -430,6 +444,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       document.getElementById('botTimeToggle').className = 'tog ' + (botTimeOn ? 'on' : '');
       api('/bot/time?v=' + (botTimeOn ? 1 : 0));
     }
+    function setTimezone(tz) {
+      api('/settings/timezone?tz=' + encodeURIComponent(tz));
+    }
     let hiResOn = false;
     function toggleHiRes() {
       hiResOn = !hiResOn;
@@ -541,6 +558,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         if (state.timeOverlay !== undefined) {
           botTimeOn = state.timeOverlay;
           document.getElementById('botTimeToggle').className = 'tog ' + (botTimeOn ? 'on' : '');
+        }
+        if (state.timezone) {
+          var tzSel = document.getElementById('tzSelect');
+          if (tzSel) tzSel.value = state.timezone;
         }
         if (state.hiRes !== undefined) {
           hiResOn = state.hiRes;
@@ -972,6 +993,8 @@ extern String getWledStatusJson();
 extern struct InfoModeData infoMode;
 extern char weatherLat[12];
 extern char weatherLon[12];
+extern char timezoneTZ[TZ_BUF_LEN];
+extern void applyTimezone();  // defined in settings.h (included after this header)
 
 // Cloud status accessors (defined in cloud_client.h when CLOUD_ENABLED)
 #ifdef CLOUD_ENABLED
@@ -1013,6 +1036,7 @@ void handleState() {
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
+                ",\"timezone\":\"" + String(timezoneTZ) + "\"" +
                 ",\"device\":\"" + String(apSSID) + "\"" +
                 ",\"hostname\":\"" + String(mdnsHostname) + ".local\"" +
                 ",\"deviceName\":\"" + String(apSSID) + "\"" +
@@ -1120,6 +1144,23 @@ void handleBotTime() {
       cmdToggleTimeOverlay();
     } else {
       cmdSetTimeOverlay(server.arg("v").toInt() == 1);
+    }
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+void handleSetTimezone() {
+  if (server.hasArg("tz")) {
+    String tz = server.arg("tz");
+    if (tz.length() > 0 && tz.length() < sizeof(timezoneTZ)) {
+      strncpy(timezoneTZ, tz.c_str(), sizeof(timezoneTZ) - 1);
+      timezoneTZ[sizeof(timezoneTZ) - 1] = '\0';
+      applyTimezone();  // update local-time display immediately
+      // Re-apply NTP servers so the offset takes effect now (no-op if offline)
+      configTzTime(timezoneTZ, "pool.ntp.org", "time.nist.gov");
+      markSettingsDirty();
+      Serial.print("Timezone set: ");
+      Serial.println(timezoneTZ);
     }
   }
   server.send(200, "text/plain", "OK");
@@ -1895,6 +1936,7 @@ void setupWebServer() {
   server.on("/bot/expression", handleBotExpression);
   server.on("/bot/say", handleBotSay);
   server.on("/bot/time", handleBotTime);
+  server.on("/settings/timezone", handleSetTimezone);
   server.on("/bot/hires", handleBotHiRes);
   server.on("/bot/background", handleBotBackground);
   server.on("/bot/ambient", handleBotAmbient);
