@@ -76,6 +76,21 @@ inline bool scInitVmEn() {
   return true;
 }
 
+// Cold-boot ping helper. On a warm reset VM_EN stays HIGH and the servos are
+// already up, so they answer the first ping instantly. On a *cold* first boot
+// VM_EN has only just risen and the SCS0009 needs time to start — and any
+// power-on noise on the half-duplex line can corrupt the first frame. Rather
+// than guess a fixed settle delay, retry until the servo actually responds or
+// we hit the deadline. (Ping() flushes the RX line internally each call.)
+inline bool scPingServo(uint8_t id, uint32_t timeoutMs = 1500) {
+  uint32_t start = millis();
+  do {
+    if (scServoBus.Ping(id) >= 0) return true;
+    delay(50);
+  } while (millis() - start < timeoutMs);
+  return false;
+}
+
 inline bool scInitServoX() {
   if (!sysStatus.scVmEnReady) {
     DBGLN("  Servo X: no power");
@@ -96,10 +111,8 @@ inline bool scInitServoX() {
     DBGLN("  Servo bus: UART1 @ 1MHz");
   }
 
-  // Ping yaw servo (ID 1), then read position
-  delay(100);
-  int ping = scServoBus.Ping(SC_SERVO_X_ID);
-  if (ping < 0) {
+  // Ping yaw servo (ID 1) — retries through cold-boot servo start-up — then read position
+  if (!scPingServo(SC_SERVO_X_ID)) {
     DBG("  Servo X: ping failed (err=");
     DBG(scServoBus.getLastError());
     DBGLN(")");
@@ -110,7 +123,7 @@ inline bool scInitServoX() {
   bool ok = (pos >= 0);
   if (ok) {
     DBG("  Servo X: ID=");
-    DBG(ping);
+    DBG(SC_SERVO_X_ID);
     DBG(" pos=");
     DBGLN(pos);
   } else {
@@ -127,9 +140,8 @@ inline bool scInitServoY() {
     return false;
   }
 
-  // Ping pitch servo (ID 2), then read position
-  int ping = scServoBus.Ping(SC_SERVO_Y_ID);
-  if (ping < 0) {
+  // Ping pitch servo (ID 2) — retries through cold-boot servo start-up — then read position
+  if (!scPingServo(SC_SERVO_Y_ID)) {
     DBG("  Servo Y: ping failed (err=");
     DBG(scServoBus.getLastError());
     DBGLN(")");
@@ -140,7 +152,7 @@ inline bool scInitServoY() {
   bool ok = (pos >= 0);
   if (ok) {
     DBG("  Servo Y: ID=");
-    DBG(ping);
+    DBG(SC_SERVO_Y_ID);
     DBG(" pos=");
     DBGLN(pos);
   } else {
