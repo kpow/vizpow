@@ -80,6 +80,57 @@ void snowDrawAndStep() {
 }
 
 // ============================================================================
+// Onboard NeoPixel "spark" — occasional rainbow glow on GPIO8
+// ============================================================================
+bool          g_sparkActive = false;
+unsigned long g_sparkStart  = 0;
+unsigned long g_nextSparkAt = 0;
+
+// h:0-360, s/v:0-1 -> r/g/b:0-1
+void hsv2rgb(float h, float s, float v, float &r, float &g, float &b) {
+  float c = v * s;
+  float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+  float m = v - c;
+  float rr, gg, bb;
+  if      (h <  60) { rr = c; gg = x; bb = 0; }
+  else if (h < 120) { rr = x; gg = c; bb = 0; }
+  else if (h < 180) { rr = 0; gg = c; bb = x; }
+  else if (h < 240) { rr = 0; gg = x; bb = c; }
+  else if (h < 300) { rr = x; gg = 0; bb = c; }
+  else              { rr = c; gg = 0; bb = x; }
+  r = rr + m; g = gg + m; b = bb + m;
+}
+
+void sparkSchedule() { g_nextSparkAt = millis() + (unsigned long)random(SPARK_MIN_MS, SPARK_MAX_MS); }
+void sparkFire()     { g_sparkActive = true; g_sparkStart = millis(); Serial.println("[spark] fire"); }
+
+// Call every loop pass. Dark when idle; rainbow sweep with fade in/out when firing.
+void sparkUpdate() {
+  if (!g_sparkActive) {
+    if (millis() >= g_nextSparkAt) sparkFire();
+    return;
+  }
+  unsigned long el = millis() - g_sparkStart;
+  if (el >= SPARK_DURATION_MS) {
+    g_sparkActive = false;
+    rgbLedWrite(NEOPIXEL_PIN, 0, 0, 0);   // back to dark
+    sparkSchedule();
+    return;
+  }
+  // continuous rainbow drift — slow cycle = smooth glide between colors
+  float hue = fmodf((float)el / (float)SPARK_CYCLE_MS * 360.0f, 360.0f);
+  // fixed short fade in/out so a long burst stays mostly full-bright
+  const float fin = 800.0f, fout = 1200.0f;
+  float env = 1.0f;
+  if (el < fin) env = (float)el / fin;
+  else if (el > (float)SPARK_DURATION_MS - fout) env = (float)(SPARK_DURATION_MS - el) / fout;
+  float r, g, b;
+  hsv2rgb(hue, 1.0f, 1.0f, r, g, b);
+  float k = env * SPARK_MAX_BRIGHT * 255.0f;
+  rgbLedWrite(NEOPIXEL_PIN, (uint8_t)(r * k), (uint8_t)(g * k), (uint8_t)(b * k));
+}
+
+// ============================================================================
 // Expression / sleep helpers
 // ============================================================================
 void applyExpression(uint8_t v) {
@@ -225,6 +276,7 @@ void ctlSetInfo(bool on) {
   } else if (g_mode == MODE_INFO) exitInfo();
 }
 void ctlSetSnow(bool on)         { g_lastInputMs = millis(); g_snow = on; }
+void ctlSpark()                  { g_lastInputMs = millis(); sparkFire(); }
 void ctlSetContrast(uint8_t c)   { g_lastInputMs = millis(); g_contrast = c; gfxDev.setContrast(c); }
 void ctlSay(const char* text) {
   g_lastInputMs = millis();
@@ -311,6 +363,9 @@ void setup() {
   look.init();
   snowInit();
 
+  rgbLedWrite(NEOPIXEL_PIN, 0, 0, 0);   // NeoPixel dark at boot
+  g_nextSparkAt = millis() + SPARK_FIRST_MS;
+
   String where = webBegin();         // join wifi or start AP + captive portal
   if (!webIsAP()) {                  // start NTP clock sync once on a network
     configTzTime(TZ_POSIX, NTP_SERVER_1, NTP_SERVER_2);
@@ -325,6 +380,7 @@ void setup() {
 
 void loop() {
   webLoop();                          // keep web control responsive every pass
+  sparkUpdate();                      // occasional NeoPixel glow (dark when idle)
 
   // ---- WiFi signal readout (gated; rssi also lives in /state) ----
 #if WIFI_RSSI_LOG
