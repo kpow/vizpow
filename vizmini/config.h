@@ -18,15 +18,15 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.4.2"
+#define FIRMWARE_VERSION "0.5.0"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
-// NOTE: GPIO8 and GPIO9 are C3 strapping pins. GPIO9 is BOOT; GPIO8 often
-// drives the onboard LED and must read HIGH at reset. Using them for I2C is
-// fine *after* boot (the bus idles high via pull-ups), but do not hold the
-// touch/SDA/SCL lines low during power-up or the board may fail to boot.
+// NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
+// hardwired to GPIO8, so we keep the OLED off GPIO8 and drive the NeoPixel
+// there. I2C SDA moved to GPIO10 (adjacent to SCL on GPIO9) — re-plug that one
+// DuPont wire from the GPIO8 header to GPIO10. GPIO9 is BOOT; idling high is fine.
 #define TOUCH_PIN   7      // TTP223 digital output (HIGH while touched)
-#define OLED_SDA    8      // I2C data
+#define OLED_SDA    10     // I2C data  (moved off GPIO8 to free the NeoPixel)
 #define OLED_SCL    9      // I2C clock
 
 // TTP223 modules are typically active-HIGH. Set to 0 if yours is active-LOW.
@@ -72,6 +72,18 @@
 
 #define DEFAULT_CONTRAST       180      // OLED contrast / "brightness" (0-255)
 #define SNOW_DEFAULT_ON        1        // little falling-snow ambiance by default
+
+// ---- Onboard NeoPixel "spark" (WS2812 on GPIO8) ----------------------------
+// Long rainbow bursts that glow through the yeti's skin, separated by short
+// dark gaps — on more than it's off (~70% duty), but still clearly cycling.
+#define NEOPIXEL_PIN       8           // onboard WS2812 data
+#define SPARK_FIRST_MS     4000        // first burst ~4s after boot
+#define SPARK_MIN_MS       8000        // dark gap between bursts: 8s ...
+#define SPARK_MAX_MS       18000       // ... to 18s (shorter than the burst)
+#define SPARK_DURATION_MS  30000       // each rainbow burst lasts ~30s (the "on")
+#define SPARK_MAX_BRIGHT   1.0f        // full brightness (bleeds through the skin)
+#define SPARK_CYCLE_MS     12000       // time for one full rainbow rotation
+                                       // (higher = gentler, smoother color drift)
 
 // ---- Touch gestures --------------------------------------------------------
 #define DOUBLE_TAP_MS  450      // two touches within this window = double-tap

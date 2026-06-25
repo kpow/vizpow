@@ -17,6 +17,7 @@ extern void   ctlSetSleep(bool sleeping);
 extern void   ctlSetInfo(bool on);
 extern void   ctlSetContrast(uint8_t c);
 extern void   ctlSetSnow(bool on);
+extern void   ctlSpark();
 extern String ctlStateJson();
 
 // ============================================================================
@@ -73,6 +74,7 @@ label{font-size:12px;color:#7d8590}
 <button onclick="g('/bot/sleep?v=1')">Sleep</button>
 <button onclick="g('/bot/sleep?v=0')">Wake</button>
 <button onclick="snow()">Snow</button>
+<button onclick="g('/bot/spark')">Spark</button>
 </div></div>
 
 <script>
@@ -142,6 +144,7 @@ inline void handleSleep()      { ctlSetSleep(argU8("v", 0) != 0);           serv
 inline void handleInfo()       { ctlSetInfo(argU8("v", 1) != 0);            server.send(200, "text/plain", "ok"); }
 inline void handleContrast()   { ctlSetContrast(argU8("v", DEFAULT_CONTRAST)); server.send(200, "text/plain", "ok"); }
 inline void handleSnow()       { ctlSetSnow(argU8("v", 1) != 0);            server.send(200, "text/plain", "ok"); }
+inline void handleSpark()      { ctlSpark();                                server.send(200, "text/plain", "ok"); }
 inline void handleState()      { server.send(200, "application/json", ctlStateJson()); }
 
 inline void handleNotFound() {
@@ -161,6 +164,7 @@ inline void registerRoutes() {
   server.on("/bot/sleep", handleSleep);
   server.on("/bot/info", handleInfo);
   server.on("/bot/snow", handleSnow);
+  server.on("/bot/spark", handleSpark);
   server.on("/contrast", handleContrast);
   server.on("/state", handleState);
   server.onNotFound(handleNotFound);
