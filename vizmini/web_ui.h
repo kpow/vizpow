@@ -13,7 +13,6 @@
 // ---- Control hooks implemented in vizmini.ino ------------------------------
 extern void   ctlSetExpression(uint8_t v);
 extern void   ctlSay(const char* text);
-extern void   ctlSetSleep(bool sleeping);
 extern void   ctlSetInfo(bool on);
 extern void   ctlSetContrast(uint8_t c);
 extern void   ctlSetSnow(bool on);
@@ -71,8 +70,6 @@ label{font-size:12px;color:#7d8590}
 <input id=c type=range min=10 max=255 value=180 oninput="g('/contrast?v='+this.value)">
 <div class=row>
 <button onclick="g('/bot/info?v=1')">Time/Wx</button>
-<button onclick="g('/bot/sleep?v=1')">Sleep</button>
-<button onclick="g('/bot/sleep?v=0')">Wake</button>
 <button onclick="snow()">Snow</button>
 <button onclick="g('/bot/spark')">Spark</button>
 </div></div>
@@ -140,7 +137,6 @@ inline void handleWifiSave() {
 
 inline void handleExpression() { ctlSetExpression(argU8("v", EXPR_NEUTRAL)); server.send(200, "text/plain", "ok"); }
 inline void handleSay()        { ctlSay(server.arg("text").c_str());        server.send(200, "text/plain", "ok"); }
-inline void handleSleep()      { ctlSetSleep(argU8("v", 0) != 0);           server.send(200, "text/plain", "ok"); }
 inline void handleInfo()       { ctlSetInfo(argU8("v", 1) != 0);            server.send(200, "text/plain", "ok"); }
 inline void handleContrast()   { ctlSetContrast(argU8("v", DEFAULT_CONTRAST)); server.send(200, "text/plain", "ok"); }
 inline void handleSnow()       { ctlSetSnow(argU8("v", 1) != 0);            server.send(200, "text/plain", "ok"); }
@@ -161,7 +157,6 @@ inline void registerRoutes() {
   server.on("/wifi/save", HTTP_POST, handleWifiSave);
   server.on("/bot/expression", handleExpression);
   server.on("/bot/say", handleSay);
-  server.on("/bot/sleep", handleSleep);
   server.on("/bot/info", handleInfo);
   server.on("/bot/snow", handleSnow);
   server.on("/bot/spark", handleSpark);

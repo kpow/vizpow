@@ -71,7 +71,6 @@
 
 // ---- Behavior --------------------------------------------------------------
 #define FRAME_INTERVAL_MS      40       // ~25 FPS render cap
-#define IDLE_SLEEP_MS          120000   // auto-sleep after 2 min of no input
 #define SAY_DEFAULT_MS         4000     // how long "say" text stays up
 #define STARTLE_MS             900      // surprised reaction when touched
 
