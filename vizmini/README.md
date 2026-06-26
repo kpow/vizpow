@@ -1,8 +1,8 @@
 # vizMini 🐾
 
 A pocket-sized, standalone **vizbot** for a tiny yeti body powered by an
-**ESP32-C3 Super Mini** with a **1.3" monochrome I2C OLED**, a **TTP223 touch
-pad**, and the board's **onboard WS2812 NeoPixel**. It keeps the soul of the
+**ESP32-C3 Super Mini** with a **1.3" monochrome I2C OLED**, a **pushbutton**,
+and the board's **onboard WS2812 NeoPixel**. It keeps the soul of the
 full vizbot — the expressive procedural face — on a one-color 128×64 screen.
 
 ## What it does
@@ -10,11 +10,11 @@ full vizbot — the expressive procedural face — on a one-color 128×64 screen
 - **Expressive face** — all 25 vizbot expressions (happy, sad, dizzy, love,
   glitch, sassy…) with blinking, idle eye look-around, smooth tweened
   transitions, and a light falling-snow ambiance.
-- **Touch** (GPIO7, TTP223 — edge-detected so brief taps always register):
-  - **Tap** → cycle to the next expression
-  - **Long-press or double-tap** → enter **Time / Weather** mode
-  - **In info mode:** tap → flip Time ↔ Weather · long-press → back to the face
-  - **Any touch while asleep** → wake up
+- **Button** (GPIO7 → GND, internal pull-up, active-LOW, debounced):
+  - **Press** → cycle to the next expression
+  - **Long-press or double-press** → enter **Time / Weather** mode
+  - **In info mode:** press → flip Time ↔ Weather · long-press → back to the face
+  - **Any press while asleep** → wake up
 - **Time + Weather** — NTP clock and Open-Meteo weather (free, no API key) as
   two full-screen views that **auto-flip every 30s**. Set your location and
   timezone in `config.h`.
@@ -35,11 +35,15 @@ Not included: cloud/personality sync, sound.
 
 | Signal | C3 Super Mini pin | Notes |
 |--------|-------------------|-------|
-| Touch OUT | GPIO7 | TTP223 digital output (active-HIGH default) |
+| Button | GPIO7 ↔ GND | momentary pushbutton; internal pull-up, active-LOW (no VCC) |
 | NeoPixel | GPIO8 | onboard WS2812 (hardwired) |
 | OLED SCL | GPIO9 | BOOT strapping pin — don't hold low at boot |
 | OLED SDA | **GPIO10** | moved off GPIO8 so the NeoPixel can use it |
-| OLED + touch VCC / GND | 3V3 / GND | |
+| OLED VCC / GND | 3V3 / GND | |
+
+> A plain pushbutton replaced a TTP223 capacitive pad, which false-triggered
+> from board/WiFi/NeoPixel supply & EMI noise. A mechanical switch is immune to
+> it; firmware debounces in `touch_input.h`.
 
 > **Note:** the OLED's SDA lives on **GPIO10**, not GPIO8 — GPIO8 carries the
 > onboard NeoPixel. (The C3 SuperMini's u.FL external-antenna connector is
@@ -98,7 +102,7 @@ variant.
 | `vizmini.ino` | setup/loop, touch gestures, sleep, NeoPixel spark, info mode, overlays |
 | `config.h` | pins, OLED driver, face transform, spark + weather tunables |
 | `gfx_mono.h` | `GfxDevice` 1-bit adapter + the U8g2 display object |
-| `touch_input.h` | TTP223 edge-detect: press + long-press |
+| `touch_input.h` | pushbutton debounce/noise-reject: press + long-press |
 | `weather.h` | Open-Meteo fetch/parse + 1-bit weather icons |
 | `web_ui.h` | WiFi provisioning, captive portal, auto-reconnect, control page, `/state` |
 | `tween.h`, `bot_faces.h`, `bot_eyes.h` | **verbatim** vizbot face engine |
