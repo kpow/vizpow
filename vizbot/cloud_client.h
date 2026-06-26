@@ -243,9 +243,11 @@ static String buildSyncBody() {
   state["freeHeap"] = ESP.getFreeHeap();
   state["uptime"] = millis() / 1000;
 
-  // NTP time (ISO-8601 UTC)
+  // NTP time (ISO-8601 UTC) — always UTC regardless of the display timezone.
+  // time() returns UTC epoch seconds; gmtime_r keeps the breakdown in UTC.
+  time_t nowSec = time(nullptr);
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo, 0)) {
+  if (nowSec > 1000000000 && gmtime_r(&nowSec, &timeinfo)) {  // >2001 ⇒ NTP synced
     char timeBuf[25];
     strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
     state["ntpTime"] = timeBuf;
