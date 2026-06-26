@@ -23,37 +23,50 @@ enum TouchEvent : uint8_t {
 class TouchInput {
 public:
   void begin() {
-    pinMode(TOUCH_PIN, INPUT);
-    _prev = pressedNow();
-    _pressStart = 0;
+    pinMode(TOUCH_PIN, INPUT_PULLUP);   // button to GND; pull-up idles the pin HIGH
+    _score = 0;
+    _stable = false;
     _longFired = false;
+    _lastMs = millis();
+    _pressStart = 0;
   }
 
-  // Call every frame. Fires PRESS on the rising edge (no debounce — the TTP223
-  // output is already a clean digital signal, and its touch pulses can be
-  // shorter than a debounce window). Returns at most one event per call.
+  // Call every frame. Leaky integrator: high time adds to a score, lows subtract
+  // (faster), with hysteresis. A mostly-high real touch — even with fast chatter
+  // dropouts — accumulates past PRESS_ON; isolated phantom blips decay before
+  // they count. (Sustained false-latches still leak; those need the hardware
+  // decoupling cap / sensitivity fix on the TTP223.)
   TouchEvent update() {
     unsigned long now = millis();
-    bool r = pressedNow();
-    TouchEvent out = TOUCH_NONE;
+    int dt = (int)(now - _lastMs);
+    _lastMs = now;
+    if (dt < 0) dt = 0; else if (dt > 50) dt = 50;   // clamp big gaps
 
-    if (r && !_prev) {               // ---- rising edge: act immediately ----
-      _pressStart = now;
-      _longFired = false;
+    if (pressedNow()) _score += dt;
+    else              _score -= dt + dt / 2;          // decay 1.5x on lows
+    if (_score < 0) _score = 0; else if (_score > SCORE_MAX) _score = SCORE_MAX;
+
+    TouchEvent out = TOUCH_NONE;
+    if (!_stable && _score >= PRESS_ON) {             // press
+      _stable = true; _pressStart = now; _longFired = false;
       out = TOUCH_PRESS;
-    } else if (r && !_longFired && (now - _pressStart) >= LONG_MS) {
-      _longFired = true;             // ---- held long enough ----
+    } else if (_stable && _score <= PRESS_OFF) {      // release
+      _stable = false;
+    }
+    if (_stable && !_longFired && (now - _pressStart) >= LONG_MS) {
+      _longFired = true;
       out = TOUCH_LONG_PRESS;
     }
-
-    _prev = r;
     return out;
   }
 
-  bool isHeld() const { return _prev; }
+  bool isHeld() const { return _stable; }
 
 private:
-  static const uint16_t LONG_MS = 1200;  // deliberate hold -> sleep
+  static const int      SCORE_MAX = 70;
+  static const int      PRESS_ON  = 30;   // ~30 ms net high to register
+  static const int      PRESS_OFF = 8;
+  static const uint16_t LONG_MS   = 1200; // deliberate hold -> info mode
 
   bool pressedNow() {
     int v = digitalRead(TOUCH_PIN);
@@ -64,9 +77,9 @@ private:
 #endif
   }
 
-  bool _prev;
-  bool _longFired;
-  unsigned long _pressStart;
+  int  _score;
+  bool _stable, _longFired;
+  unsigned long _lastMs, _pressStart;
 };
 
 #endif // TOUCH_INPUT_H
