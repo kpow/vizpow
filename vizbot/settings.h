@@ -28,12 +28,23 @@ extern uint8_t kaleidoscopeBlend;
 extern uint8_t kaleidoscopeSlice;
 extern char    weatherLat[12];
 extern char    weatherLon[12];
+extern char    timezoneTZ[TZ_BUF_LEN];
 #ifdef TARGET_CORES3
 extern struct ProxLightState proxLight;
 extern struct BotSounds botSounds;
 extern struct AudioSpectrum audioSpectrum;
 extern uint8_t audioDrama;
 #endif
+
+// ── Timezone ──────────────────────────────────────────────────────────────────
+// Apply the current POSIX TZ string to the C library so getLocalTime() and
+// strftime() render in the chosen zone (with automatic DST).  configTzTime()
+// also calls this internally on NTP setup, but we apply it here too so local
+// conversions are correct even before/without an NTP resync.
+void applyTimezone() {
+  setenv("TZ", timezoneTZ, 1);
+  tzset();
+}
 
 // ── Load ────────────────────────────────────────────────────────────────────
 void loadSettings() {
@@ -63,6 +74,12 @@ void loadSettings() {
   String lon = prefs.getString("wLon", weatherLon);
   strncpy(weatherLat, lat.c_str(), sizeof(weatherLat) - 1);
   strncpy(weatherLon, lon.c_str(), sizeof(weatherLon) - 1);
+
+  // Time zone (POSIX TZ string)
+  String tz = prefs.getString("tz", timezoneTZ);
+  strncpy(timezoneTZ, tz.c_str(), sizeof(timezoneTZ) - 1);
+  timezoneTZ[sizeof(timezoneTZ) - 1] = '\0';
+  applyTimezone();
 
   #ifdef TARGET_CORES3
   // Core S3 sensor settings
@@ -104,6 +121,7 @@ void saveSettings() {
   prefs.putUChar("kscopeSlice", kaleidoscopeSlice);
   prefs.putString("wLat",   weatherLat);
   prefs.putString("wLon",   weatherLon);
+  prefs.putString("tz",     timezoneTZ);
 
   #ifdef TARGET_CORES3
   prefs.putBool ("sndOn",   botSounds.enabled);

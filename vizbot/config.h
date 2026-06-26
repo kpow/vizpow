@@ -161,7 +161,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.1.15"
+#define FIRMWARE_VERSION "3.1.16"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -241,6 +241,12 @@
 #define SHAKE_SUSTAIN_THRESHOLD     1.2f   // Accel magnitude for sustained shake detection
 #define WEATHER_LAT_DEFAULT         "37.54"
 #define WEATHER_LON_DEFAULT         "-77.43"
+
+// Time zone — POSIX TZ string used by NTP (configTzTime) and local-time display.
+// Default is US Eastern, which auto-handles EST/EDT daylight saving.
+// Persisted in NVS, overridable via the settings page (a curated list of zones).
+#define TZ_DEFAULT                  "EST5EDT,M3.2.0,M11.1.0"
+#define TZ_BUF_LEN                  48
 
 // ============================================================================
 // MIDI Synthesizer (SAM2695 via Grove Port C)
