@@ -43,7 +43,6 @@ TouchInput    touch;
 
 uint8_t  g_expr      = EXPR_NEUTRAL;
 uint8_t  g_prevExpr  = EXPR_NEUTRAL;   // expression to restore after a startle
-bool     g_sleeping  = false;
 bool     g_snow      = SNOW_DEFAULT_ON;
 uint8_t  g_contrast  = DEFAULT_CONTRAST;
 
@@ -139,23 +138,7 @@ void applyExpression(uint8_t v) {
   face.transitionTo(v);
 }
 
-void enterSleep() {
-  g_sleeping = true;
-  face.loadExpression(EXPR_NEUTRAL);
-  face.eyeMode    = EYE_CLOSED;     // drowsy closed eyes
-  face.mouthType  = MOUTH_LINE;
-  face.browVisible = false;
-}
-
-void wake() {
-  if (!g_sleeping) return;
-  g_sleeping = false;
-  blink.init();
-  applyExpression(g_expr);
-}
-
 void startle() {
-  if (g_sleeping) return;
   g_prevExpr = g_expr;
   face.transitionTo(EXPR_SURPRISED, 120);
   g_startleUntil = millis() + STARTLE_MS;
@@ -266,13 +249,12 @@ void exitInfo() {
 // ============================================================================
 // Web control hooks (declared extern in web_ui.h)
 // ============================================================================
-void ctlSetExpression(uint8_t v) { g_lastInputMs = millis(); if (g_mode == MODE_INFO) exitInfo(); wake(); applyExpression(v); }
-void ctlSetSleep(bool s)         { g_lastInputMs = millis(); if (g_mode == MODE_INFO) exitInfo(); s ? enterSleep() : wake(); }
+void ctlSetExpression(uint8_t v) { g_lastInputMs = millis(); if (g_mode == MODE_INFO) exitInfo(); applyExpression(v); }
 void ctlSetInfo(bool on) {
   g_lastInputMs = millis();
   if (on) {
     if (g_mode == MODE_INFO) toggleInfoView();
-    else { wake(); enterInfo(); }
+    else enterInfo();
   } else if (g_mode == MODE_INFO) exitInfo();
 }
 void ctlSetSnow(bool on)         { g_lastInputMs = millis(); g_snow = on; }
@@ -280,7 +262,6 @@ void ctlSpark()                  { g_lastInputMs = millis(); sparkFire(); }
 void ctlSetContrast(uint8_t c)   { g_lastInputMs = millis(); g_contrast = c; gfxDev.setContrast(c); }
 void ctlSay(const char* text) {
   g_lastInputMs = millis();
-  wake();
   strncpy(g_sayText, text, sizeof(g_sayText) - 1);
   g_sayText[sizeof(g_sayText) - 1] = 0;
   g_sayUntil = millis() + SAY_DEFAULT_MS;
@@ -293,7 +274,6 @@ String ctlStateJson() {
   s += "\"ap\":" + String(webIsAP() ? "true" : "false") + ",";
   s += "\"expr\":" + String(g_expr) + ",";
   s += "\"mode\":\"" + String(g_mode == MODE_INFO ? "info" : "face") + "\",";
-  s += "\"sleeping\":" + String(g_sleeping ? "true" : "false") + ",";
   s += "\"snow\":" + String(g_snow ? "true" : "false") + ",";
   s += "\"contrast\":" + String(g_contrast);
   s += "}";
@@ -303,17 +283,6 @@ String ctlStateJson() {
 // ============================================================================
 // Overlays drawn directly on the buffer (unscaled, screen-space)
 // ============================================================================
-void drawZzz() {
-  u8g2.setDrawColor(1);
-  u8g2.setFont(u8g2_font_6x10_tf);
-  unsigned long t = millis();
-  const char* z[3] = { "z", "z", "Z" };
-  for (uint8_t i = 0; i < 3; i++) {
-    int16_t drift = (int16_t)((t / 120 + i * 4) % 6);
-    u8g2.drawStr(96 + i * 7, 22 - i * 7 - drift, z[i]);
-  }
-}
-
 void drawSayText() {
   u8g2.setFont(u8g2_font_6x12_tf);
   int16_t w = u8g2.getStrWidth(g_sayText);
@@ -423,8 +392,6 @@ void loop() {
     if (g_mode == MODE_INFO) {
       if (ev == TOUCH_PRESS) toggleInfoView();        // single touch flips view
       else if (ev == TOUCH_LONG_PRESS) exitInfo();    // hold to leave
-    } else if (g_sleeping) {
-      if (ev == TOUCH_PRESS) wake();                  // any touch wakes the yeti
     } else if (ev == TOUCH_LONG_PRESS) {
       enterInfo();                                    // hold -> time/weather
     } else if (ev == TOUCH_PRESS) {
@@ -444,9 +411,6 @@ void loop() {
     return;
   }
 
-  // ---- auto-sleep when idle (face mode only) ----
-  if (!g_sleeping && (millis() - g_lastInputMs) > IDLE_SLEEP_MS) enterSleep();
-
   // ---- end a startle reaction ----
   if (g_startleUntil && millis() > g_startleUntil) {
     g_startleUntil = 0;
@@ -459,18 +423,12 @@ void loop() {
 
   tweenManager.update();
   face.update();
-  if (!g_sleeping) {
-    face.blinkAmount = blink.update();
-    look.update(face.dynamicPupilX, face.dynamicPupilY);
-  } else {
-    face.blinkAmount = 0;
-    face.dynamicPupilX = face.dynamicPupilY = 0;
-  }
+  face.blinkAmount = blink.update();
+  look.update(face.dynamicPupilX, face.dynamicPupilY);
 
   u8g2.clearBuffer();
   if (g_snow) snowDrawAndStep();
   renderBotFace(face, /*bgColor=*/0x0000);
-  if (g_sleeping) drawZzz();
   if (g_sayText[0] && millis() < g_sayUntil) drawSayText();
   else g_sayText[0] = 0;
   u8g2.sendBuffer();
