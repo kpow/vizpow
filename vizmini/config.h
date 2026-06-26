@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.5.0"
+#define FIRMWARE_VERSION "0.5.1"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
@@ -29,8 +29,10 @@
 #define OLED_SDA    10     // I2C data  (moved off GPIO8 to free the NeoPixel)
 #define OLED_SCL    9      // I2C clock
 
-// TTP223 modules are typically active-HIGH. Set to 0 if yours is active-LOW.
-#define TOUCH_ACTIVE_HIGH 1
+// Input on GPIO7 is now a momentary pushbutton wired GPIO7 -> button -> GND,
+// using the internal pull-up: idle reads HIGH, pressed reads LOW (active-LOW).
+// (Was 1 for the active-HIGH TTP223 capacitive pad, which false-triggered.)
+#define TOUCH_ACTIVE_HIGH 0
 
 // Set to 1 to log raw GPIO7 state + gesture events over serial (debugging).
 #define TOUCH_DEBUG 0
@@ -38,6 +40,9 @@
 // Set to 1 to log WiFi RSSI to serial every 3s (antenna testing). The rssi
 // value stays available in /state regardless.
 #define WIFI_RSSI_LOG 0
+
+// 1 = WiFi on (web control + time/weather); 0 = run fully offline.
+#define WIFI_ENABLED 1
 
 // ---- OLED driver -----------------------------------------------------------
 // Pick the controller in your panel. 1.3" 4-pin modules are most often SH1106;
@@ -76,6 +81,7 @@
 // ---- Onboard NeoPixel "spark" (WS2812 on GPIO8) ----------------------------
 // Long rainbow bursts that glow through the yeti's skin, separated by short
 // dark gaps — on more than it's off (~70% duty), but still clearly cycling.
+#define SPARK_ENABLED      1           // 1 = onboard NeoPixel spark on; 0 = never driven
 #define NEOPIXEL_PIN       8           // onboard WS2812 data
 #define SPARK_FIRST_MS     4000        // first burst ~4s after boot
 #define SPARK_MIN_MS       8000        // dark gap between bursts: 8s ...
