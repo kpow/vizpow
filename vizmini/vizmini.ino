@@ -366,10 +366,16 @@ void setup() {
   rgbLedWrite(NEOPIXEL_PIN, 0, 0, 0);   // NeoPixel dark at boot
   g_nextSparkAt = millis() + SPARK_FIRST_MS;
 
-  String where = webBegin();         // join wifi or start AP + captive portal
+  String where;
+#if WIFI_ENABLED
+  where = webBegin();                // join wifi or start AP + captive portal
   if (!webIsAP()) {                  // start NTP clock sync once on a network
     configTzTime(TZ_POSIX, NTP_SERVER_1, NTP_SERVER_2);
   }
+#else
+  WiFi.mode(WIFI_OFF);               // TEMP: radio fully off for the noise test
+  where = "wifi-off-test";
+#endif
   splash(where);
   Serial.printf("[vizMini] %s  ->  %s\n", webIsAP() ? "AP" : "STA", where.c_str());
   delay(2000);
@@ -379,8 +385,8 @@ void setup() {
 }
 
 void loop() {
-  webLoop();                          // keep web control responsive every pass
-  sparkUpdate();                      // occasional NeoPixel glow (dark when idle)
+  if (WIFI_ENABLED) webLoop();        // keep web control responsive every pass
+  if (SPARK_ENABLED) sparkUpdate();   // occasional NeoPixel glow (dark when idle)
 
   // ---- WiFi signal readout (gated; rssi also lives in /state) ----
 #if WIFI_RSSI_LOG
