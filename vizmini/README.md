@@ -14,7 +14,6 @@ full vizbot — the expressive procedural face — on a one-color 128×64 screen
   - **Press** → cycle to the next expression
   - **Long-press or double-press** → enter **Time / Weather** mode
   - **In info mode:** press → flip Time ↔ Weather · long-press → back to the face
-  - **Any press while asleep** → wake up
 - **Time + Weather** — NTP clock and Open-Meteo weather (free, no API key) as
   two full-screen views that **auto-flip every 30s**. Set your location and
   timezone in `config.h`.
@@ -26,8 +25,9 @@ full vizbot — the expressive procedural face — on a one-color 128×64 screen
   the skin: ~30s bursts with short dark gaps (on more than off), full
   brightness, ~12s smooth color drift. Fires automatically and via the web
   **Spark** button. All timing/brightness tunable via `SPARK_*` in `config.h`.
-- **Auto-sleep** — drowsy closed eyes + drifting `Zzz` after 2 min idle (or the
-  web Sleep button); any touch wakes it.
+- **Web OTA update** — flash new firmware over WiFi from the `/update` page (or
+  the **⬆ Firmware update** link on the control page). No cable after the first
+  install; it writes to the spare app slot, so an interrupted upload won't brick it.
 
 Not included: cloud/personality sync, sound.
 
@@ -63,6 +63,19 @@ First boot has no saved Wi-Fi, so it starts the **vizMini-XXXX** hotspot. Join
 it, the captive page pops up, enter your SSID/password, and it reboots onto your
 network. The boot splash and serial log show the address to reach it
 (`http://vizmini.local` or the printed IP).
+
+Each build also publishes a versioned image to the repo-root `builds/` folder
+(`builds/vizmini-c3-v<version>.bin`, newest 3 kept) via `name_firmware.py`.
+
+### Updating over the air (OTA)
+
+After the first USB flash, update without a cable — open
+`http://vizmini.local/update` (or the **⬆ Firmware update** link on the control
+page), pick `builds/vizmini-c3-v<version>.bin`, and flash. Or in one line:
+
+```sh
+curl -F "firmware=@builds/vizmini-c3-v<version>.bin" http://vizmini.local/update
+```
 
 ## How the port works
 
@@ -104,5 +117,6 @@ variant.
 | `gfx_mono.h` | `GfxDevice` 1-bit adapter + the U8g2 display object |
 | `touch_input.h` | pushbutton debounce/noise-reject: press + long-press |
 | `weather.h` | Open-Meteo fetch/parse + 1-bit weather icons |
-| `web_ui.h` | WiFi provisioning, captive portal, auto-reconnect, control page, `/state` |
+| `web_ui.h` | WiFi provisioning, captive portal, auto-reconnect, control page, `/state`, OTA |
+| `name_firmware.py` | post-build: publish versioned image to `builds/` |
 | `tween.h`, `bot_faces.h`, `bot_eyes.h` | **verbatim** vizbot face engine |

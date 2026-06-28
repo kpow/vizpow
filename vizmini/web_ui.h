@@ -7,6 +7,7 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include <Update.h>
 #include "config.h"
 #include "bot_faces.h"   // for EXPR_* names / BOT_NUM_EXPRESSIONS
 
@@ -74,6 +75,8 @@ label{font-size:12px;color:#7d8590}
 <button onclick="g('/bot/spark')">Spark</button>
 </div></div>
 
+<div class=card><a href="/update" style="color:#58a6ff;text-decoration:none">&#8593; Firmware update</a></div>
+
 <script>
 var X=["neutral","happy","sad","surprised","chill","angry","love","dizzy","thinking",
 "excited","mischief","skeptical","worried","confused","proud","shy","annoyed","focused",
@@ -104,7 +107,47 @@ padding:11px;font-size:15px;margin-top:8px}label{font-size:12px;color:#7d8590}
 <form action="/wifi/save" method="POST">
 <label>Network (SSID)</label><input name=ssid required>
 <label>Password</label><input name=pass type=password>
-<button type=submit>Save &amp; reboot</button></form></body></html>
+<button type=submit>Save &amp; reboot</button></form>
+<p style="margin-top:16px"><a href="/update" style="color:#58a6ff">Firmware update</a></p></body></html>
+)HTML";
+
+static const char UPDATE_HTML[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>vizMini update</title><style>
+:root{color-scheme:dark}body{margin:0;background:#0b0f14;color:#e6edf3;
+font:15px system-ui,sans-serif;padding:18px}h1{font-size:18px;margin:0 0 4px}
+.sub{color:#7d8590;font-size:12px;margin-bottom:14px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px}
+input[type=file]{width:100%;margin:8px 0;color:#e6edf3}
+button{width:100%;background:#238636;color:#fff;border:0;border-radius:8px;
+padding:11px;font-size:15px;margin-top:6px}button:disabled{opacity:.5}
+progress{width:100%;height:14px;margin-top:10px}#msg{margin-top:10px;font-size:14px}
+a{color:#58a6ff}.hint{color:#7d8590;font-size:12px;margin-top:10px}
+</style></head><body>
+<h1>vizMini firmware</h1><div class=sub id=ver>checking&hellip;</div>
+<div class=card>
+<input type=file id=f accept=".bin">
+<button id=b onclick=up()>Flash firmware</button>
+<progress id=pg max=100 value=0 hidden></progress>
+<div id=msg></div>
+<div class=hint>Upload <code>.pio/build/c3-oled/firmware.bin</code>.</div>
+</div>
+<p><a href="/">&larr; back</a></p>
+<script>
+fetch('/state').then(r=>r.json()).then(s=>{ver.textContent='running v'+s.fw}).catch(function(){ver.textContent=''});
+function M(t){msg.textContent=t}
+function up(){
+ var fl=f.files[0]; if(!fl){M('Pick a firmware.bin first.');return;}
+ b.disabled=true; pg.hidden=false; M('Uploading…');
+ var fd=new FormData(); fd.append('firmware',fl);
+ var x=new XMLHttpRequest(); x.open('POST','/update');
+ x.upload.onprogress=function(e){if(e.lengthComputable)pg.value=Math.round(e.loaded/e.total*100)};
+ x.onload=function(){if(x.status==200&&x.responseText.slice(0,2)=='OK'){M('✅ Success — rebooting. Reconnect in ~10s.')}else{M('❌ Failed: '+x.responseText);b.disabled=false}};
+ x.onerror=function(){M('Connection lost (the device may be rebooting if the upload finished).')};
+ x.send(fd);
+}
+</script></body></html>
 )HTML";
 
 // ============================================================================
@@ -143,6 +186,29 @@ inline void handleSnow()       { ctlSetSnow(argU8("v", 1) != 0);            serv
 inline void handleSpark()      { ctlSpark();                                server.send(200, "text/plain", "ok"); }
 inline void handleState()      { server.send(200, "application/json", ctlStateJson()); }
 
+// ---- OTA firmware update (writes to the spare app slot, then reboots) ------
+inline void handleUpdatePage() { server.send_P(200, "text/html", UPDATE_HTML); }
+
+inline void handleUpdateUpload() {
+  HTTPUpload& up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    Serial.printf("[ota] start: %s\n", up.filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) Serial.printf("[ota] ok: %u bytes\n", (unsigned)up.totalSize);
+    else Update.printError(Serial);
+  }
+}
+
+inline void handleUpdateDone() {
+  bool ok = !Update.hasError();
+  server.sendHeader("Connection", "close");
+  server.send(200, "text/plain", ok ? "OK rebooting" : (String("FAIL ") + Update.errorString()));
+  if (ok) { delay(400); ESP.restart(); }
+}
+
 inline void handleNotFound() {
   if (g_apMode) {  // captive-portal: bounce everything back to setup
     server.sendHeader("Location", String("http://") + g_apIP.toString(), true);
@@ -162,6 +228,8 @@ inline void registerRoutes() {
   server.on("/bot/spark", handleSpark);
   server.on("/contrast", handleContrast);
   server.on("/state", handleState);
+  server.on("/update", HTTP_GET, handleUpdatePage);
+  server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.onNotFound(handleNotFound);
 }
 
