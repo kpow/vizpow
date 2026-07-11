@@ -86,6 +86,7 @@ struct WledDisplayData {
   uint8_t textIx;            // 0-255 (kept for NVS compatibility)
   uint8_t r, g, b;           // text color
   bool hologramMode;         // horizontal mirror for Pepper's ghost prism
+  bool flipHorizontal;       // swap physical strip direction for left→right wired targets
 
   // Pixel buffer — 256 pixels × 3 bytes RGB (BSS, not stack)
   uint8_t pixelBuffer[WLED_PIXEL_BYTES];
@@ -166,6 +167,7 @@ void loadWledSettings() {
   wledData.g           = prefs.getUChar("wledG", 255);
   wledData.b           = prefs.getUChar("wledB", 255);
   wledData.hologramMode = prefs.getBool("hologram", false);
+  wledData.flipHorizontal = prefs.getBool("wledFlipH", false);
   #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
   extern bool hologramMirrorLCD;
   hologramMirrorLCD = wledData.hologramMode;
@@ -205,6 +207,7 @@ void saveWledSettings() {
   prefs.putUChar("wledG", wledData.g);
   prefs.putUChar("wledB", wledData.b);
   prefs.putBool("hologram", wledData.hologramMode);
+  prefs.putBool("wledFlipH", wledData.flipHorizontal);
 
   prefs.end();
   WLED_DBGLN("WLED settings saved");
@@ -254,7 +257,10 @@ static void wledRemapPixels(uint8_t* ddpOut, const uint8_t* logicalBuf) {
   for (uint8_t y = 0; y < WLED_DISPLAY_HEIGHT; y++) {
     for (uint8_t x = 0; x < WLED_DISPLAY_WIDTH; x++) {
       uint16_t srcOff = (y * WLED_DISPLAY_WIDTH + x) * 3;
-      uint16_t ledIdx = y * WLED_DISPLAY_WIDTH + (WLED_DISPLAY_WIDTH - 1 - x); // all rows: right→left
+      // Default strip is wired right→left per row. A target wired left→right
+      // renders text mirrored; flipHorizontal swaps the mapping direction.
+      uint8_t physX = wledData.flipHorizontal ? x : (WLED_DISPLAY_WIDTH - 1 - x);
+      uint16_t ledIdx = y * WLED_DISPLAY_WIDTH + physX;
       uint16_t dstOff = ledIdx * 3;
       ddpOut[dstOff]     = logicalBuf[srcOff];
       ddpOut[dstOff + 1] = logicalBuf[srcOff + 1];
@@ -792,6 +798,11 @@ void wledSetHologram(bool on) {
   saveWledSettings();
 }
 
+void wledSetFlipHorizontal(bool on) {
+  wledData.flipHorizontal = on;
+  saveWledSettings();
+}
+
 String getWledStatusJson() {
   String json = "{\"enabled\":";
   json += wledData.enabled ? "true" : "false";
@@ -811,6 +822,8 @@ String getWledStatusJson() {
   json += wledData.b;
   json += ",\"hologram\":";
   json += wledData.hologramMode ? "true" : "false";
+  json += ",\"flipH\":";
+  json += wledData.flipHorizontal ? "true" : "false";
   json += "}";
   return json;
 }
