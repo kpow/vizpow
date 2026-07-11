@@ -282,6 +282,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           <div id="wledStatus"></div>
           <div class="trow"><span>Forward Speech</span><div class="tog" id="wledToggle" onclick="toggleWled()"></div></div>
           <div class="trow"><span>Hologram Mode</span><div class="tog" id="hologramToggle" onclick="toggleHologram()"></div></div>
+          <div class="trow"><span>Flip Text (H)</span><div class="tog" id="flipHToggle" onclick="toggleFlipH()"></div></div>
           <div class="row" style="margin-top:8px">
             <input type="text" id="wledIP" placeholder="WLED IP" class="inp flex1" maxlength="15">
             <button onclick="setWledIP()">Set</button>
@@ -758,6 +759,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 
     let wledOn = false;
     let hologramOn = false;
+    let flipHOn = false;
     function toggleWled() {
       wledOn = !wledOn;
       document.getElementById('wledToggle').className = 'tog ' + (wledOn ? 'on' : '');
@@ -767,6 +769,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       hologramOn = !hologramOn;
       document.getElementById('hologramToggle').className = 'tog ' + (hologramOn ? 'on' : '');
       api('/wled/config?hologram=' + (hologramOn ? 1 : 0));
+    }
+    function toggleFlipH() {
+      flipHOn = !flipHOn;
+      document.getElementById('flipHToggle').className = 'tog ' + (flipHOn ? 'on' : '');
+      api('/wled/config?fliph=' + (flipHOn ? 1 : 0));
     }
     function setWledIP() {
       const ip = document.getElementById('wledIP').value.trim();
@@ -781,6 +788,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       document.getElementById('wledToggle').className = 'tog ' + (wledOn ? 'on' : '');
       hologramOn = !!d.hologram;
       document.getElementById('hologramToggle').className = 'tog ' + (hologramOn ? 'on' : '');
+      flipHOn = !!d.flipH;
+      document.getElementById('flipHToggle').className = 'tog ' + (flipHOn ? 'on' : '');
       if (d.ip) document.getElementById('wledIP').value = d.ip;
       const dot = document.getElementById('wledDot');
       if (d.enabled && d.reachable) dot.className = 'dot on';
@@ -1512,6 +1521,9 @@ void handleWledConfig() {
   }
   if (server.hasArg("hologram")) {
     wledSetHologram(server.arg("hologram").toInt() == 1);
+  }
+  if (server.hasArg("fliph")) {
+    wledSetFlipHorizontal(server.arg("fliph").toInt() == 1);
   }
   if (server.hasArg("r") && server.hasArg("g") && server.hasArg("b")) {
     wledSetColor(
