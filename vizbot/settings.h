@@ -34,6 +34,9 @@ extern struct ProxLightState proxLight;
 extern struct BotSounds botSounds;
 extern struct AudioSpectrum audioSpectrum;
 extern uint8_t audioDrama;
+#ifdef MIDI_SYNTH_ENABLED
+extern uint8_t midiSynthPort;
+#endif
 #endif
 
 // ── Timezone ──────────────────────────────────────────────────────────────────
@@ -89,6 +92,10 @@ void loadSettings() {
   audioSpectrum.setEnabled(prefs.getBool("audioFx", false));
   audioDrama = prefs.getUChar("audioDrm", AUDIO_DRAMA_DEFAULT);
   if (audioDrama > 200) audioDrama = AUDIO_DRAMA_DEFAULT;
+  #ifdef MIDI_SYNTH_ENABLED
+  midiSynthPort = prefs.getUChar("midiPort", MIDI_SYNTH_PORT_DEFAULT);
+  if (midiSynthPort > MIDI_SYNTH_PORT_A) midiSynthPort = MIDI_SYNTH_PORT_DEFAULT;
+  #endif
   // Force full brightness — override any stale NVS dim value
   lcdBrightness = 255;
   #endif
@@ -128,6 +135,9 @@ void saveSettings() {
   prefs.putUChar("sndVol",  botSounds.volume);
   prefs.putBool ("audioFx", audioSpectrum.enabled);
   prefs.putUChar("audioDrm", audioDrama);
+  #ifdef MIDI_SYNTH_ENABLED
+  prefs.putUChar("midiPort", midiSynthPort);
+  #endif
   #endif
 
   prefs.end();

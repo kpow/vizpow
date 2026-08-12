@@ -7,6 +7,16 @@
 #include <M5_SAM2695.h>
 #include "config.h"
 
+// Runtime-selected synth Grove port (0=Port C, 1=Port A). Defined in vizbot.ino,
+// loaded from NVS, changeable on the web config page.
+extern uint8_t midiSynthPort;
+static inline uint8_t midiTxPin() {
+  return midiSynthPort == MIDI_SYNTH_PORT_A ? MIDI_PORTA_TX_PIN : MIDI_PORTC_TX_PIN;
+}
+static inline uint8_t midiRxPin() {
+  return midiSynthPort == MIDI_SYNTH_PORT_A ? MIDI_PORTA_RX_PIN : MIDI_PORTC_RX_PIN;
+}
+
 // ============================================================================
 // MIDI Synthesizer Driver — SAM2695 via official M5Stack library
 // ============================================================================
@@ -60,12 +70,14 @@ struct MidiSynth {
   void init() {
     ready = false;
 
-    // Core S3 Port C: TX=17 sends data to SAM2695 RXD
-    sam.begin(&Serial2, MIDI_BAUD, MIDI_RX_PIN, MIDI_TX_PIN);
-    DBG("MIDI Synth: Serial2 RX=");
-    DBG(MIDI_RX_PIN);
+    // TX pin sends data to SAM2695 RXD (Port C = G17, Port A = G2)
+    sam.begin(&Serial2, MIDI_BAUD, midiRxPin(), midiTxPin());
+    DBG("MIDI Synth: port=");
+    DBG(midiSynthPort == MIDI_SYNTH_PORT_A ? "A" : "C");
+    DBG(" Serial2 RX=");
+    DBG(midiRxPin());
     DBG(" TX=");
-    DBGLN(MIDI_TX_PIN);
+    DBGLN(midiTxPin());
 
     delay(100);
     sam.reset();
@@ -94,11 +106,27 @@ struct MidiSynth {
     if (!ready) return;
     Serial2.end();
     delay(20);
-    Serial2.begin(MIDI_BAUD, SERIAL_8N1, MIDI_RX_PIN, MIDI_TX_PIN);
+    Serial2.begin(MIDI_BAUD, SERIAL_8N1, midiRxPin(), midiTxPin());
     delay(50);
     sam.setMasterVolume(100);
     delay(10);
     DBGLN("MIDI Synth: UART re-initialized");
+  }
+
+  // Switch the synth to a different Grove port at runtime (0=Port C, 1=Port A).
+  // Re-points the UART at the new pins and re-arms the SAM2695.
+  void setPort(uint8_t port) {
+    midiSynthPort = (port == MIDI_SYNTH_PORT_A) ? MIDI_SYNTH_PORT_A : MIDI_SYNTH_PORT_C;
+    Serial2.end();
+    delay(20);
+    Serial2.begin(MIDI_BAUD, SERIAL_8N1, midiRxPin(), midiTxPin());
+    delay(50);
+    sam.reset();
+    delay(200);
+    sam.setMasterVolume(100);
+    ready = true;
+    DBG("MIDI Synth: port switched to ");
+    DBGLN(midiSynthPort == MIDI_SYNTH_PORT_A ? "A" : "C");
   }
 
   // --- Forwarding to official lib ---
