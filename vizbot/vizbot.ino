@@ -85,6 +85,9 @@ uint8_t lcdBrightness = 255;
 uint8_t speed = 20;
 bool autoCycle = true;
 uint8_t currentMode = MODE_BOT;
+#ifdef MIDI_SYNTH_ENABLED
+uint8_t midiSynthPort = MIDI_SYNTH_PORT_DEFAULT;   // 0=Port C, 1=Port A (web-configurable)
+#endif
 
 // Shuffle bag for ambient effect cycling (used for bot background)
 uint8_t effectShuffleBag[NUM_AMBIENT_EFFECTS];
