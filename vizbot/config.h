@@ -161,7 +161,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.1.22"
+#define FIRMWARE_VERSION "3.1.23"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -253,9 +253,21 @@
 // ============================================================================
 #ifdef TARGET_CORES3
   #define MIDI_SYNTH_ENABLED
-  #define MIDI_TX_PIN  17   // Grove Port C — data to SAM2695 RXD
-  #define MIDI_RX_PIN  18   // Grove Port C — data from SAM2695 TXD (unused)
   #define MIDI_BAUD    31250
+
+  // SAM2695 synth Grove port — selectable at runtime on the web config page
+  // (persisted to NVS). ESP32 UART remaps to any GPIO; only TX is used
+  // (CoreS3 -> SAM2695 RXD). Port A doubles as the external I2C bus, so using it
+  // for the synth means no I2C Grove unit on Port A at the same time. If the
+  // synth is silent on Port A the Grove data lines may be reversed — swap the
+  // A pins below.
+  #define MIDI_PORTC_TX_PIN 17   // Grove Port C (G17) -> SAM2695 RXD
+  #define MIDI_PORTC_RX_PIN 18   // Grove Port C (G18)
+  #define MIDI_PORTA_TX_PIN 2    // Grove Port A (G2)  -> SAM2695 RXD
+  #define MIDI_PORTA_RX_PIN 1    // Grove Port A (G1)
+  #define MIDI_SYNTH_PORT_C 0
+  #define MIDI_SYNTH_PORT_A 1
+  #define MIDI_SYNTH_PORT_DEFAULT MIDI_SYNTH_PORT_C
 #endif
 
 // ============================================================================

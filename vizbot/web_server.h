@@ -227,6 +227,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         <h2 class="shdr" onclick="tgl('secSounds')">Sounds <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secSounds">
           <div class="trow"><span>MIDI Synth</span><span id="midiStatus" style="font-size:12px;font-weight:700;color:#888">---</span></div>
+          <div class="trow" style="margin-top:6px"><span>Synth Port</span>
+            <select id="synthPort" onchange="setSynthPort(this.value)" class="sel" style="max-width:130px">
+              <option value="0">Port C</option>
+              <option value="1">Port A</option>
+            </select>
+          </div>
           <div class="grid4" id="soundGrid" style="margin-top:8px"></div>
         </div>
       </div>
@@ -401,6 +407,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 
     function setBotExpr(i) { curExpr=i; render(); api('/bot/expression?v=' + i); }
     function setPersonality(i) { api('/bot/personality?v=' + i); }
+    function setSynthPort(v) { api('/bot/synthport?v=' + v); }
     function toggleRotation() {
       const on = document.getElementById('rotateCheck').checked;
       const min = parseInt(document.getElementById('rotateMin').value) || 5;
@@ -555,6 +562,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           if (state.sensors.useMidi) { ms.textContent = 'MIDI Active'; ms.style.color = '#88D498'; }
           else if (state.sensors.speaker) { ms.textContent = 'Speaker'; ms.style.color = '#FFA552'; }
           else { ms.textContent = 'Off'; ms.style.color = '#FF6B6B'; }
+          if (state.sensors.midiPort !== undefined) {
+            var sp = document.getElementById('synthPort');
+            if (sp) sp.value = state.sensors.midiPort;
+          }
         }
         if (state.timeOverlay !== undefined) {
           botTimeOn = state.timeOverlay;
@@ -1055,6 +1066,7 @@ void handleState() {
                 ",\"sensors\":{" +
                   "\"speaker\":" + (sysStatus.speakerReady ? "true" : "false") +
                   ",\"midiSynth\":" + (sysStatus.midiReady ? "true" : "false") +
+                  ",\"midiPort\":" + String(midiSynthPort) +
                   ",\"useMidi\":" + (botSounds.useMidi ? "true" : "false") +
                   ",\"mic\":" + (sysStatus.micReady ? "true" : "false") +
                   ",\"proxLight\":" + (sysStatus.proxLightReady ? "true" : "false") +
@@ -1674,6 +1686,20 @@ void handleAudioDrama() {
   server.send(200, "application/json",
     String("{\"audioDrama\":") + String(audioDrama) + "}");
 }
+
+#ifdef MIDI_SYNTH_ENABLED
+void handleSynthPort() {
+  if (server.hasArg("v")) {
+    uint8_t p = (server.arg("v").toInt() == MIDI_SYNTH_PORT_A)
+                  ? MIDI_SYNTH_PORT_A : MIDI_SYNTH_PORT_C;
+    midiSynth.setPort(p);   // re-points the UART live; no reboot needed
+    markSettingsDirty();
+    Serial.printf("Synth port set: Port %s\n", p == MIDI_SYNTH_PORT_A ? "A" : "C");
+  }
+  server.send(200, "application/json",
+    String("{\"midiPort\":") + String(midiSynthPort) + "}");
+}
+#endif
 #endif
 
 // ============================================================================
@@ -1991,6 +2017,9 @@ void setupWebServer() {
   server.on("/bot/sequences", handleBotSequences);
   server.on("/bot/audiofx", handleAudioFx);
   server.on("/bot/audiodrama", handleAudioDrama);
+  #ifdef MIDI_SYNTH_ENABLED
+  server.on("/bot/synthport", handleSynthPort);
+  #endif
   #endif
 
   // Cloud endpoints
