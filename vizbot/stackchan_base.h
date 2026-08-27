@@ -23,9 +23,13 @@ static SCSCL scServoBus;
 static std::unique_ptr<Si12T> scTouch;
 static std::unique_ptr<m5::INA226_Class> scBattMon;
 
-// Servo zero positions (default from BSP, will use NVS later)
+// Servo zero positions (will use NVS later).
+// Pitch zero measured on hardware, not inherited from the BSP: the BSP default
+// of 620 put the whole reachable band (zero+80..zero+272, from the 25-85 deg
+// clamp in scMovePitch) at raw 700-892, so the head could only ever look up.
+// 500 centres that band on 580-772, and home (48 deg) rests at raw 653.
 static int scServoXZeroPos = 460;
-static int scServoYZeroPos = 620;
+static int scServoYZeroPos = 500;
 
 // ============================================================================
 // Init Functions — called by boot_sequence.h, replace Phase 1 stubs
