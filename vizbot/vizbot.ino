@@ -488,6 +488,9 @@ void loop() {
       scFireChillMode();
     }
   }
+  // Watch the servo rail and cycle VM_EN if it cuts out mid-session
+  scServoHealth.update();
+
   // Idle head drift — suppressed during chill mode
   if (!scTouch_state.chillMode) {
     scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);

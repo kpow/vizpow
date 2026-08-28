@@ -496,9 +496,23 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
 void handleTouch() {
   if (!touchInitialized) return;
 
-  // Core S3: refresh M5Unified state (touch, buttons) before reading
+  // Core S3: refresh M5Unified state (touch, buttons) before reading.
+  // M5.update() polls the LCD touch controller over the shared internal I2C
+  // bus, so it has to take the same mutex as the stackchan peripherals —
+  // otherwise it can still corrupt a concurrent battery read from the web task.
   #ifdef TARGET_CORES3
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  // (declared locally — task_manager.h is included after this header)
+  extern bool i2cAcquire(uint32_t timeoutMs);
+  extern void i2cRelease();
+  {
+    bool held = i2cAcquire(50);
+    M5.update();
+    if (held) i2cRelease();
+  }
+  #else
   M5.update();
+  #endif
   #endif
 
   unsigned long now = millis();
