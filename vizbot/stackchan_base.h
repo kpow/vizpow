@@ -5,30 +5,42 @@
 
 #include <Arduino.h>
 #include <M5Unified.h>
-#include <memory>
+#include <M5StackChan.h>
 #include "config.h"
 #include "system_status.h"
-#include "drivers/PY32IOExpander/PY32IOExpander.hpp"
-#include "drivers/FTServo/src/SCSCL.h"
-#include "drivers/Si12T/Si12T.h"
-#include "utility/power/INA226_Class.hpp"
+#include <nvs.h>
 
 extern SystemStatus sysStatus;
 
 // ============================================================================
-// Bus guards — both of these buses have more than one task on them
+// StackChan hardware layer — delegates to M5's StackChan-BSP
 // ============================================================================
-// I2C: the PY32 expander, Si12T head touch and INA226 share the bus with the
-// LCD touch controller. The render loop drives the base LEDs from Core 1 at
-// ~30fps while the web and cloud tasks poll battery/touch from Core 0. With no
-// mutex those transactions interleave, and because PY32 digitalWrite() is a
-// read-modify-write of REG_GPIO_O_L, a corrupted one silently clears bit 0 —
-// which is VM_EN, the servo power rail. That is the "servos die after 5-10 min"
-// bug: the rail really did go low while sysStatus.scVmEnReady still said true.
-// task_manager.h already had this mutex; nothing on the stackchan path used it.
+// This file used to hand-roll the servo bus, IO expander, head touch and
+// battery monitor on top of vendored copies of M5's drivers. That divergence
+// cost two days: the head would go stiff, powered and deaf to commands, and
+// only a VM_EN power cycle brought it back. M5's own firmware never does this
+// on identical hardware.
 //
-// (Declared here rather than included — task_manager.h is pulled in after the
-// stackchan headers in vizbot.ino.)
+// The root problem was structural. Our servo bus was driven from BOTH the
+// render loop (Core 1) and the WiFi server task (Core 0), through a lock whose
+// callers ignored whether they had actually acquired it — so under load two
+// tasks transmitted on a half-duplex UART at once, the servo received a
+// corrupted frame, and it stayed deaf until power-cycled.
+//
+// BSP cannot have that failure mode: every SCS bus call is confined to
+// ScsServo, reachable only through Motion, which wraps every public method in
+// a BLOCKING std::lock_guard and drives the bus from its own 20ms task. One
+// owner. Calling Motion from any task is safe by construction, and
+// getCurrentAngle() returns a cached animation value, so telemetry never
+// touches the bus at all.
+//
+// Everything above this layer — LED effects, idle drift, touch reactions, the
+// web UI — is unchanged and still ours. Only the hardware access moved.
+
+// The I2C bus is still shared by the PY32 expander, Si12T, INA226 and the LCD
+// touch controller, and we still poll them from more than one task. BSP does
+// not address that, so this mutex stays. (Declared here rather than included:
+// task_manager.h is pulled in after the stackchan headers in vizbot.ino.)
 bool i2cAcquire(uint32_t timeoutMs);
 void i2cRelease();
 
@@ -40,276 +52,134 @@ struct ScI2cLock {
   ScI2cLock& operator=(const ScI2cLock&) = delete;
 };
 
-// Servo bus: half-duplex UART1, written by the render loop (idle drift, touch
-// reactions, health polling) and read by the web task via /state. Interleaving
-// there corrupts replies — that is why servoXPos/servoYPos read -1.
-static SemaphoreHandle_t scServoMutex = nullptr;
+// BSP's M5StackChan_Class::begin() calls M5.begin() itself, but vizbot already
+// does that early in setup() before the display comes up. Its hardware inits
+// are `protected`, so a derived class can run them without a second M5.begin().
+// BSP reads each servo's zero position from NVS (namespace "servo", keys
+// zero_pos_1 / zero_pos_2, int32) and falls back to its own defaults. Its pitch
+// default of 620 sits this unit's head ~120 raw steps too high — the usable
+// band measured on this hardware is centred on 500. Seed the key BSP reads
+// rather than fudging angles afterwards, so BSP's whole 0-90 degree pitch range
+// maps onto the range the head can actually reach.
+#define SC_SERVO_X_ZERO_POS 460   // matches BSP default
+#define SC_SERVO_Y_ZERO_POS 500   // measured on this unit (BSP default 620)
 
-inline void scInitServoMutex() {
-  if (scServoMutex == nullptr) scServoMutex = xSemaphoreCreateMutex();
+// Seed ONLY when the key is absent (first boot on a given unit). Every
+// stackchan needs its own zero — 500 is right for this head, BSP's 620 may well
+// be right for another — so once a unit has a stored value, whether from this
+// default or from BSP's setCurrentPostionAsHome(), leave it alone. Overwriting
+// on every boot would clobber per-unit calibration across the fleet.
+inline void scSeedServoZero(const char* key, int32_t value) {
+  nvs_handle_t h;
+  if (nvs_open("servo", NVS_READWRITE, &h) != ESP_OK) return;
+  int32_t cur = 0;
+  if (nvs_get_i32(h, key, &cur) != ESP_OK) {   // absent only
+    nvs_set_i32(h, key, value);
+    nvs_commit(h);
+  }
+  nvs_close(h);
 }
 
-struct ScServoLock {
-  bool held;
-  explicit ScServoLock(uint32_t timeoutMs = 100)
-    : held(scServoMutex == nullptr
-             ? true
-             : xSemaphoreTake(scServoMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE) {}
-  ~ScServoLock() { if (held && scServoMutex) xSemaphoreGive(scServoMutex); }
-  ScServoLock(const ScServoLock&) = delete;
-  ScServoLock& operator=(const ScServoLock&) = delete;
+class VizStackChan : public m5::M5StackChan_Class {
+public:
+  void beginHardware() {
+    TouchSensor.begin();
+    io_expander_init();
+    // Must precede servo_init(): that is where BSP reads these.
+    scSeedServoZero("zero_pos_1", SC_SERVO_X_ZERO_POS);
+    scSeedServoZero("zero_pos_2", SC_SERVO_Y_ZERO_POS);
+    // Servo power MUST come up before servo_init(): BSP reads each servo's zero
+    // position off the bus while constructing ScsServo, so with VM_EN still low
+    // it initialises Motion from a dead bus and the head never moves — the
+    // animation still runs and reports perfect angles, which makes it look fine
+    // from /state.
+    setServoPowerEnabled(true);
+    delay(500);   // servos need time to boot after power-on
+    servo_init();
+    ina226_init();
+  }
 };
 
-// ============================================================================
-// Global driver instances (accessible for runtime use after boot)
-// ============================================================================
-static std::unique_ptr<m5::PY32IOExpander_Class> scIoExpander;
-static SCSCL scServoBus;
-static std::unique_ptr<Si12T> scTouch;
-static std::unique_ptr<m5::INA226_Class> scBattMon;
+static VizStackChan scChan;
 
-// Servo zero positions (will use NVS later).
-// Pitch zero measured on hardware, not inherited from the BSP: the BSP default
-// of 620 put the whole reachable band (zero+80..zero+272, from the 25-85 deg
-// clamp in scMovePitch) at raw 700-892, so the head could only ever look up.
-// 500 centres that band on 580-772, and home (48 deg) rests at raw 653.
-// Set when the servos stop answering reads. Movement is unaffected (WritePos
-// needs no reply); this exists so /state can show a degraded servo link instead
-// of the head silently going dead. Measured on this unit: reads succeed ~57% of
-// the time with the head still tracking every command, which is a marginal RX
-// path on the bus, not a firmware fault.
-static bool scServoLinkDegraded = false;
+// BSP speaks angles in tenths of a degree (same as us) but takes a 0-1000
+// speed rather than a duration. Faster moves are louder, so keep the existing
+// floor on how quick a move may be.
+#define SC_SERVO_MIN_MOVE_MS  300
 
-static int scServoXZeroPos = 460;
-static int scServoYZeroPos = 500;
+inline int scSpeedFromTimeMs(uint16_t timeMs) {
+  if (timeMs < SC_SERVO_MIN_MOVE_MS) timeMs = SC_SERVO_MIN_MOVE_MS;
+  if (timeMs > 2000) timeMs = 2000;
+  long sp = map((long)timeMs, (long)SC_SERVO_MIN_MOVE_MS, 2000L, 900L, 120L);
+  return (int)constrain(sp, 120L, 900L);
+}
 
 // ============================================================================
-// Init Functions — called by boot_sequence.h, replace Phase 1 stubs
+// Init — called by boot_sequence.h (signatures unchanged)
 // ============================================================================
 
 inline bool scInitIoExpander() {
-  // Created before the web/cloud tasks start, so the guards are live by the
-  // time anything but the boot path touches these buses.
-  scInitServoMutex();
-  scIoExpander = std::make_unique<m5::PY32IOExpander_Class>();
-
-  // PY32 boots slowly — poll up to 1200ms (matches BSP)
-  uint32_t start = millis();
-  while (true) {
-    delay(200);
-    if (millis() - start > 1200) {
-      DBGLN("  IO Exp: timeout");
-      scIoExpander.reset();
-      break;
-    }
-    if (scIoExpander->begin()) {
-      break;
-    }
+  // Brings up the expander, head touch, servos and INA226 in one shot. The
+  // later scInit* calls just report what BSP already set up.
+  static bool started = false;
+  if (!started) {
+    scChan.beginHardware();
+    started = true;
   }
-
-  bool ok = (scIoExpander != nullptr);
-  if (ok) {
-    uint8_t ver = scIoExpander->readVersion();
-    DBG("  IO Exp: v");
-    DBGLN(ver);
-  }
-  sysStatus.scIoExpanderReady = ok;
-  return ok;
+  DBGLN("  StackChan BSP: hardware init");
+  sysStatus.scIoExpanderReady = true;
+  return true;
 }
 
 inline bool scInitVmEn() {
-  if (!scIoExpander) {
-    DBGLN("  VM_EN: no IO expander");
-    sysStatus.scVmEnReady = false;
-    return false;
-  }
-
-  // Pin 0 = VM_EN: output, pull-up, drive HIGH to enable servo power
-  scIoExpander->setDirection(0, true);
-  scIoExpander->setPullMode(0, true);
-  scIoExpander->digitalWrite(0, true);
-  delay(500);  // Servos need time to boot after power-on
-
-  DBGLN("  VM_EN: enabled");
+  // Already enabled inside beginHardware() — it has to precede servo_init().
+  // Kept so boot_sequence.h and its phase reporting stay unchanged.
+  DBGLN("  VM_EN: enabled (before servo init)");
   sysStatus.scVmEnReady = true;
   return true;
 }
 
-// Cold-boot ping helper. On a warm reset VM_EN stays HIGH and the servos are
-// already up, so they answer the first ping instantly. On a *cold* first boot
-// VM_EN has only just risen and the SCS0009 needs time to start — and any
-// power-on noise on the half-duplex line can corrupt the first frame. Rather
-// than guess a fixed settle delay, retry until the servo actually responds or
-// we hit the deadline. (Ping() flushes the RX line internally each call.)
-// Put a servo into the state WritePos actually requires. The M5 BSP does both
-// of these and vizbot never did: in PWM mode WritePos is silently IGNORED, and
-// with torque disabled the servo holds position but won't track commands. Either
-// state looks identical from outside — head stiff, powered, ignoring the web UI,
-// cleared only by a power cycle (which resets the servo to position mode). That
-// is the "totally stuck" failure.
-inline void scArmServo(uint8_t id) {
-  ScServoLock lock;
-  scServoBus.SwitchMode(id, 0);   // 0 = position mode
-  delay(5);
-  scServoBus.EnableTorque(id, 1);
-  delay(5);
-}
-
-inline bool scPingServo(uint8_t id, uint32_t timeoutMs = 1500) {
-  uint32_t start = millis();
-  do {
-    {
-      ScServoLock lock;
-      if (scServoBus.Ping(id) >= 0) return true;
-    }
-    delay(50);
-  } while (millis() - start < timeoutMs);
-  return false;
-}
-
 inline bool scInitServoX() {
-  if (!sysStatus.scVmEnReady) {
-    DBGLN("  Servo X: no power");
-    sysStatus.scServoXReady = false;
-    return false;
-  }
-
-  // Init UART bus once (shared by both servos)
-  static bool busReady = false;
-  if (!busReady) {
-    // UART1, 1MHz baud, TX=6 RX=7 (matches BSP exactly)
-    busReady = scServoBus.begin(UART_NUM_1, 1000000, 6, 7);
-    if (!busReady) {
-      DBGLN("  Servo bus: UART1 init failed");
-      sysStatus.scServoXReady = false;
-      return false;
-    }
-    DBGLN("  Servo bus: UART1 @ 1MHz");
-  }
-
-  // Ping yaw servo (ID 1) — retries through cold-boot servo start-up.
-  // A failed ping does NOT disable the head. WritePos is one-way and needs no
-  // reply, so a servo whose RX path back to us is marginal still moves fine.
-  // Treating "no reply" as "no servo" is what turned one flaky wire into a
-  // completely dead head that only a reboot could clear. Reads are advisory.
-  if (!scPingServo(SC_SERVO_X_ID)) {
-    DBG("  Servo X: ping failed (err=");
-    DBG(scServoBus.getLastError());
-    DBGLN(") — enabling anyway, link degraded");
-    sysStatus.scServoXReady = true;
-    scServoLinkDegraded = true;
-    scArmServo(SC_SERVO_X_ID);
-    return true;
-  }
-  scArmServo(SC_SERVO_X_ID);
-  int pos = scServoBus.ReadPos(SC_SERVO_X_ID);
-  bool ok = (pos >= 0);
-  if (ok) {
-    DBG("  Servo X: ID=");
-    DBG(SC_SERVO_X_ID);
-    DBG(" pos=");
-    DBGLN(pos);
-  } else {
-    DBGLN("  Servo X: read pos failed");
-  }
-  sysStatus.scServoXReady = ok;
-  return ok;
+  // BSP's servo_init() already constructed and homed both servos, and Motion
+  // owns the bus from here on. There is deliberately no boot ping: a missed
+  // reply used to latch the head off for the whole session even though moving
+  // it only needs one-way writes.
+  DBG("  Servo X: ID=");
+  DBGLN(SC_SERVO_X_ID);
+  sysStatus.scServoXReady = true;
+  return true;
 }
 
 inline bool scInitServoY() {
-  if (!sysStatus.scVmEnReady) {
-    DBGLN("  Servo Y: no power");
-    sysStatus.scServoYReady = false;
-    return false;
-  }
-
-  // Ping pitch servo (ID 2) — same rationale as Servo X above.
-  if (!scPingServo(SC_SERVO_Y_ID)) {
-    DBG("  Servo Y: ping failed (err=");
-    DBG(scServoBus.getLastError());
-    DBGLN(") — enabling anyway, link degraded");
-    sysStatus.scServoYReady = true;
-    scServoLinkDegraded = true;
-    scArmServo(SC_SERVO_Y_ID);
-    return true;
-  }
-  scArmServo(SC_SERVO_Y_ID);
-  int pos = scServoBus.ReadPos(SC_SERVO_Y_ID);
-  bool ok = (pos >= 0);
-  if (ok) {
-    DBG("  Servo Y: ID=");
-    DBG(SC_SERVO_Y_ID);
-    DBG(" pos=");
-    DBGLN(pos);
-  } else {
-    DBGLN("  Servo Y: read pos failed");
-  }
-  sysStatus.scServoYReady = ok;
-  return ok;
+  DBG("  Servo Y: ID=");
+  DBGLN(SC_SERVO_Y_ID);
+  sysStatus.scServoYReady = true;
+  return true;
 }
 
 inline bool scInitBaseLeds() {
-  if (!scIoExpander) {
-    DBGLN("  Base LEDs: no IO expander");
-    sysStatus.scBaseLedsReady = false;
-    return false;
+  // BSP's io_expander_init() already set pin 13 up and called setLedCount(12).
+  {
+    ScI2cLock lock;
+    scChan.showRgbColor(0, 0, 0);
   }
-
-  // Pin 13 = RGB LED data: output, pull-up, push-pull (matches BSP)
-  scIoExpander->setDirection(13, true);
-  scIoExpander->setPullMode(13, true);
-  scIoExpander->setDriveMode(13, false);
-  scIoExpander->setLedCount(SC_BASE_LED_COUNT);
-  delay(200);
-
-  // Clear all LEDs (black)
-  for (int i = 0; i < SC_BASE_LED_COUNT; i++) {
-    scIoExpander->setLedColor(i, (uint8_t)0, (uint8_t)0, (uint8_t)0);
-  }
-  scIoExpander->refreshLeds();
-  delay(50);
-  // Double-write to clear (matches BSP pattern)
-  for (int i = 0; i < SC_BASE_LED_COUNT; i++) {
-    scIoExpander->setLedColor(i, (uint8_t)0, (uint8_t)0, (uint8_t)0);
-  }
-  scIoExpander->refreshLeds();
-
-  DBGLN("  Base LEDs: 12x WS2812C");
+  DBGLN("  Base LEDs: 12x WS2812C (BSP)");
   sysStatus.scBaseLedsReady = true;
   return true;
 }
 
 inline bool scInitHeadTouch() {
-  // Match M5Stack StackChan-BSP: higher sensitivity gives clean, reliable reads.
-  // (The previous Low/Level_0 ran the pads at the noise floor → jittery/phantom.)
-  scTouch = std::make_unique<Si12T>(SI12T_Type_High, SI12T_Sensitivity_Level_4, &m5::In_I2C);
-  scTouch->begin();
-
-  // Verify by reading touch result
-  scTouch->read_touch_result();
-  scTouch->parse_touch_result();
-
-  DBGLN("  Head touch: Si12T @ 0x68");
+  DBGLN("  Head touch: Si12T via BSP TouchSensor");
   sysStatus.scHeadTouchReady = true;
   return true;
 }
 
 inline bool scInitBatteryMon() {
-  scBattMon = std::make_unique<m5::INA226_Class>(SC_BATTMON_I2C_ADDR);
-
-  m5::INA226_Class::config_t cfg;
-  cfg.shunt_res            = 0.01;
-  cfg.max_expected_current = 8.19;
-  scBattMon->config(cfg);
-
-  if (!scBattMon->begin()) {
-    DBGLN("  Battery: INA226 init failed");
-    scBattMon.reset();
-    sysStatus.scBatteryMonReady = false;
-    return false;
+  float volts;
+  {
+    ScI2cLock lock;
+    volts = scChan.getBatteryVoltage();
   }
-
-  float volts = scBattMon->getBusVoltage();
   DBG("  Battery: ");
   DBG(volts, 2);
   DBGLN("V");
@@ -331,77 +201,46 @@ inline bool scInitPhotoFs() {
 }
 
 // ============================================================================
-// Runtime API — called after boot for ongoing operation
+// Runtime API — same surface as before, now backed by BSP
 // ============================================================================
 
 inline void scSetBaseLedColor(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
-  if (scIoExpander && sysStatus.scBaseLedsReady) {
-    ScI2cLock lock;
-    scIoExpander->setLedColor(index, r, g, b);
-  }
+  if (!sysStatus.scBaseLedsReady) return;
+  ScI2cLock lock;
+  scChan.setRgbColor(index, r, g, b);
 }
 
 inline void scSetAllBaseLeds(uint8_t r, uint8_t g, uint8_t b) {
-  if (scIoExpander && sysStatus.scBaseLedsReady) {
-    ScI2cLock lock;
-    for (int i = 0; i < SC_BASE_LED_COUNT; i++) {
-      scIoExpander->setLedColor(i, r, g, b);
-    }
-    scIoExpander->refreshLeds();
-  }
+  if (!sysStatus.scBaseLedsReady) return;
+  ScI2cLock lock;
+  scChan.showRgbColor(r, g, b);   // sets all 12 and refreshes
 }
 
 inline void scRefreshBaseLeds() {
-  if (scIoExpander && sysStatus.scBaseLedsReady) {
-    ScI2cLock lock;
-    scIoExpander->refreshLeds();
-  }
+  if (!sysStatus.scBaseLedsReady) return;
+  ScI2cLock lock;
+  scChan.refreshRgb();
 }
 
 inline void scSetServoPower(bool enabled) {
-  if (scIoExpander) {
-    ScI2cLock lock;
-    scIoExpander->digitalWrite(0, enabled);
-  }
+  ScI2cLock lock;
+  scChan.setServoPowerEnabled(enabled);
 }
 
-// Move servo to raw position (0-1000 range, as BSP uses)
-inline void scServoWritePos(uint8_t id, uint16_t position, uint16_t timeMs) {
-  if (sysStatus.scServoXReady || sysStatus.scServoYReady) {
-    ScServoLock lock;
-    scServoBus.WritePos(id, position, timeMs, 0);
-  }
-}
-
-// Speed limiter — enforce a minimum move duration to reduce servo noise.
-// Fast moves (100-250ms) are the loud ones; slow moves (500ms+) are fine.
-// Floor at 300ms caps max speed without slowing already-quiet movements.
-#define SC_SERVO_MIN_MOVE_MS  300
-
-// Move yaw servo by angle (tenths of degrees, relative to zero)
-// Angle mapping: 1 step = 0.3125 deg → mapped = zero + angle * 16 / 50
+// Move yaw by angle (tenths of degrees). Motion is internally mutex-guarded,
+// so this is safe to call from the render loop, the web task or anywhere else.
 inline void scMoveYaw(int angleTenths, uint16_t timeMs = 500) {
   if (!sysStatus.scServoXReady) return;
-  if (timeMs < SC_SERVO_MIN_MOVE_MS) timeMs = SC_SERVO_MIN_MOVE_MS;
-  int mapped = scServoXZeroPos + angleTenths * 16 / 50;
-  if (mapped < 0) mapped = 0;
-  if (mapped > 1000) mapped = 1000;
-  ScServoLock lock;
-  scServoBus.WritePos(SC_SERVO_X_ID, mapped, timeMs, 0);
+  scChan.Motion.moveYaw(angleTenths, scSpeedFromTimeMs(timeMs));
 }
 
 inline void scMovePitch(int angleTenths, uint16_t timeMs = 500) {
   if (!sysStatus.scServoYReady) return;
-  if (timeMs < SC_SERVO_MIN_MOVE_MS) timeMs = SC_SERVO_MIN_MOVE_MS;
   constexpr int minTenths = SC_SERVO_Y_MIN_DEG * 10;
   constexpr int maxTenths = SC_SERVO_Y_MAX_DEG * 10;
   if (angleTenths < minTenths) angleTenths = minTenths;
   if (angleTenths > maxTenths) angleTenths = maxTenths;
-  int mapped = scServoYZeroPos + angleTenths * 16 / 50;
-  if (mapped < 0) mapped = 0;
-  if (mapped > 1000) mapped = 1000;
-  ScServoLock lock;
-  scServoBus.WritePos(SC_SERVO_Y_ID, mapped, timeMs, 0);
+  scChan.Motion.movePitch(angleTenths, scSpeedFromTimeMs(timeMs));
 }
 
 inline void scGoHome(uint16_t timeMs = 500) {
@@ -409,165 +248,69 @@ inline void scGoHome(uint16_t timeMs = 500) {
   scMovePitch(SC_SERVO_Y_HOME_DEG * 10, timeMs);
 }
 
+// Current angle in tenths of a degree. This is BSP's cached animation value,
+// NOT a bus read — polling it from the web task costs nothing and cannot
+// collide with a move in progress.
 inline int scReadServoPos(uint8_t id) {
-  ScServoLock lock;
-  return scServoBus.ReadPos(id);
+  if (id == SC_SERVO_X_ID) return scChan.Motion.getCurrentYawAngle();
+  if (id == SC_SERVO_Y_ID) return scChan.Motion.getCurrentPitchAngle();
+  return -1;
 }
 
-// ============================================================================
-// Runtime servo recovery — the servo rail can latch off under sustained load
-// ============================================================================
-// Observed 2026-08-27: after 5-10 min of use both SCS0009s go silent (Ping and
-// ReadPos fail, err=1 ERR_NO_REPLY) while drawing ~0mA, with VM_EN still driven
-// HIGH and the pack at a nominal 4.19V on a 3A supply. Steady voltage + zero
-// current means the base's servo rail has cut out, not that the supply sagged
-// or the servos stalled. A warm reset never clears it because VM_EN never drops
-// — only actually toggling VM_EN (or a full power-off) brings them back.
-//
-// scServoXReady/scServoYReady used to be written ONLY by boot init, so once the
-// rail dropped the head stayed dead until a manual reboot. The health monitor
-// below now owns those flags at runtime.
-
+// Power-cycle the servo rail and re-home. Kept as a manual escape hatch behind
+// POST /bot/servo/reinit; with BSP owning the bus it should never be needed.
 inline bool scRecoverServos() {
-  if (!scIoExpander) return false;
-
-  // Drop the rail long enough for the servos to fully reset, then bring it back
-  // and give them time to boot before pinging. Each write is I2C-guarded, and
-  // the lock is NOT held across the delays or the pings.
   {
     ScI2cLock lock;
-    scIoExpander->digitalWrite(0, false);
+    scChan.setServoPowerEnabled(false);
   }
   delay(300);
   {
     ScI2cLock lock;
-    scIoExpander->digitalWrite(0, true);
+    scChan.setServoPowerEnabled(true);
   }
   delay(500);
-  sysStatus.scVmEnReady = true;
-
-  bool x = scPingServo(SC_SERVO_X_ID, 1000);
-  bool y = scPingServo(SC_SERVO_Y_ID, 1000);
-  scArmServo(SC_SERVO_X_ID);
-  scArmServo(SC_SERVO_Y_ID);
-  sysStatus.scServoXReady = x;
-  sysStatus.scServoYReady = y;
-  return x || y;
+  scGoHome(500);
+  return true;
 }
 
-// Polls the bus and cycles VM_EN when the servos stop answering. ReadPos is the
-// probe: a live servo always replies, so -1 from BOTH servos means the bus (and
-// therefore the rail) is gone. Two consecutive failures are required so a single
-// dropped frame mid-move can't trigger a needless power cycle.
-struct ScServoHealth {
-  // Read failures mean very little on this bus: measured ~43% of reads return -1
-  // while the head still tracks every command, because WritePos is one-way and
-  // only the servos' replies are unreliable. Tuning history, so this doesn't get
-  // "fixed" back to something aggressive:
-  //   2 strikes / 60s cooldown -> 16 VM_EN cycles in 25 min, disrupting a head
-  //                               that was working fine.
-  //   no recovery at all       -> the head did get genuinely stuck (ignoring
-  //                               writes too) and needed a manual endpoint hit.
-  // So: recover, but rarely. Only 3 solid minutes of silence justifies touching
-  // the rail, then at most once per 10 min. A cycle costs ~800ms of head freeze
-  // and is the only thing that reliably clears the stuck state.
-  static constexpr uint32_t CHECK_INTERVAL_MS    = 5000;
-  static constexpr uint32_t RECOVERY_COOLDOWN_MS = 600000;  // 10 min
-  static constexpr uint16_t FAILS_BEFORE_RECOVER = 36;      // 36 * 5s = 3 min
-
-  uint32_t nextCheckMs    = 0;
-  uint32_t lastRecoveryMs = 0;
-  uint16_t failCount      = 0;
-  uint16_t recoveries     = 0;
-  bool     lastRecoveryOk = false;
-
-  void update() {
-    uint32_t now = millis();
-    if (now < nextCheckMs) return;
-    nextCheckMs = now + CHECK_INTERVAL_MS;
-
-    bool alive = (scReadServoPos(SC_SERVO_X_ID) >= 0) ||
-                 (scReadServoPos(SC_SERVO_Y_ID) >= 0);
-
-    if (alive) {
-      failCount = 0;
-      if (scServoLinkDegraded) {
-        scServoLinkDegraded = false;
-        DBGLN("Servo link healthy again");
-      }
-      return;
-    }
-
-    // Reads are failing. On its own that is NOT a reason to cut servo power —
-    // the head usually keeps moving correctly while replies go missing.
-    if (failCount < 65535) failCount++;
-
-    if (failCount == FAILS_BEFORE_RECOVER && !scServoLinkDegraded) {
-      scServoLinkDegraded = true;
-      DBGLN("Servo reads failing — link degraded (movement usually unaffected)");
-    }
-    if (failCount < FAILS_BEFORE_RECOVER) return;
-    if (lastRecoveryMs != 0 && (now - lastRecoveryMs) < RECOVERY_COOLDOWN_MS) return;
-
-    // Three minutes of total silence. Without reads we cannot tell "reads broken
-    // but head fine" from "head genuinely stuck", so accept the occasional
-    // needless cycle: it is brief, and it is what clears the stuck state.
-    DBGLN("Servo bus silent 3min — cycling VM_EN");
-    lastRecoveryMs = now;
-    recoveries++;
-    lastRecoveryOk = scRecoverServos();
-    failCount = 0;
-    DBGLN(lastRecoveryOk ? "  servo recovery OK" : "  servo recovery: still no reply");
-  }
-};
-
-static ScServoHealth scServoHealth;
+// ============================================================================
+// Head touch
+// ============================================================================
+// BSP's getIntensities() returns 0-3 per zone, indexed 0=Front, 1=Middle,
+// 2=Back — identical scale to the Si12T output_e enum this used to return.
+// Our callers index the other way round (0=Back), so flip here and leave
+// stackchan_touch.h untouched.
 
 inline void scReadTouch() {
-  if (scTouch && sysStatus.scHeadTouchReady) {
-    ScI2cLock lock;
-    if (scTouch->read_touch_result()) {
-      scTouch->parse_touch_result();
-    } else {
-      // I2C read failed — don't trust stale data, report no touch this frame.
-      scTouch->point_type[0] = OUTPUT_NONE;
-      scTouch->point_type[1] = OUTPUT_NONE;
-      scTouch->point_type[2] = OUTPUT_NONE;
-    }
-  }
+  if (!sysStatus.scHeadTouchReady) return;
+  ScI2cLock lock;
+  scChan.TouchSensor.update();
 }
 
 inline uint8_t scGetTouchZone(uint8_t zone) {
-  if (!scTouch || zone > 2) return OUTPUT_NONE;
-  return scTouch->point_type[zone];
+  if (zone > 2) return 0;
+  return scChan.TouchSensor.getIntensities()[2 - zone];
 }
 
 inline bool scIsTouched() {
-  if (!scTouch) return false;
-  return (scTouch->point_type[0] != OUTPUT_NONE ||
-          scTouch->point_type[1] != OUTPUT_NONE ||
-          scTouch->point_type[2] != OUTPUT_NONE);
+  const auto& v = scChan.TouchSensor.getIntensities();
+  return (v[0] != 0 || v[1] != 0 || v[2] != 0);
 }
 
 inline float scGetBatteryVoltage() {
-  if (!scBattMon) return 0.0f;
   ScI2cLock lock;
-  return scBattMon->getBusVoltage();
+  return scChan.getBatteryVoltage();
 }
 
 inline float scGetBatteryCurrent() {
-  if (!scBattMon) return 0.0f;
   ScI2cLock lock;
-  return scBattMon->getShuntCurrent();
+  return scChan.getBatteryCurrent();
 }
 
 // ============================================================================
 // Nod / Shake gestures (blocking — shared by web presets and head touch)
 // ============================================================================
-// These are the exact, proven move sequences the web UI head presets use. They
-// block briefly (~1.5s) while the SCS0009 interpolates each move. An optional
-// `pump` callback is invoked during the dwell delays so a caller can keep e.g.
-// the sound engine ticking (botSounds.update()) without coupling this layer to it.
 
 inline void scGestureDelay(uint16_t ms, void (*pump)()) {
   uint32_t start = millis();

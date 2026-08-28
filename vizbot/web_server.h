@@ -1088,10 +1088,11 @@ void handleState() {
                   ",\"baseLeds\":" + (sysStatus.scBaseLedsReady ? "true" : "false") +
                   ",\"headTouch\":" + (sysStatus.scHeadTouchReady ? "true" : "false") +
                   ",\"battery\":" + (sysStatus.scBatteryMonReady ? "true" : "false") +
-                  ",\"servoRecoveries\":" + String(scServoHealth.recoveries) +
-                  ",\"servoLinkDegraded\":" + (scServoLinkDegraded ? "true" : "false") +
-                  (sysStatus.scServoXReady ? ",\"servoXPos\":" + String(scReadServoPos(SC_SERVO_X_ID)) : "") +
-                  (sysStatus.scServoYReady ? ",\"servoYPos\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
+
+                  // BSP's cached angle (tenths of a degree), not a bus read — safe
+                  // to poll from this task.
+                  (sysStatus.scServoXReady ? ",\"servoXAngle\":" + String(scReadServoPos(SC_SERVO_X_ID)) : "") +
+                  (sysStatus.scServoYReady ? ",\"servoYAngle\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
                   (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
                                                   ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
                   ",\"chill\":" + (scTouch_state.chillMode ? "true" : "false") +
@@ -1836,8 +1837,6 @@ void handleScServoReinit() {
   json += sysStatus.scServoXReady ? "true" : "false";
   json += ",\"servoY\":";
   json += sysStatus.scServoYReady ? "true" : "false";
-  json += ",\"recoveries\":";
-  json += scServoHealth.recoveries;
   json += "}";
   if (ok) scGoHome(500);
   server.send(200, "application/json", json);

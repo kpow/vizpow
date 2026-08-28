@@ -488,8 +488,8 @@ void loop() {
       scFireChillMode();
     }
   }
-  // Watch the servo rail and cycle VM_EN if it cuts out mid-session
-  scServoHealth.update();
+  // No servo health poll or torque tick here any more: BSP's Motion task owns
+  // the bus and manages torque itself.
 
   // Idle head drift — suppressed during chill mode
   if (!scTouch_state.chillMode) {
