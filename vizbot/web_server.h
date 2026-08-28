@@ -1088,8 +1088,11 @@ void handleState() {
                   ",\"baseLeds\":" + (sysStatus.scBaseLedsReady ? "true" : "false") +
                   ",\"headTouch\":" + (sysStatus.scHeadTouchReady ? "true" : "false") +
                   ",\"battery\":" + (sysStatus.scBatteryMonReady ? "true" : "false") +
-                  (sysStatus.scServoXReady ? ",\"servoXPos\":" + String(scReadServoPos(SC_SERVO_X_ID)) : "") +
-                  (sysStatus.scServoYReady ? ",\"servoYPos\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
+
+                  // BSP's cached angle (tenths of a degree), not a bus read — safe
+                  // to poll from this task.
+                  (sysStatus.scServoXReady ? ",\"servoXAngle\":" + String(scReadServoPos(SC_SERVO_X_ID)) : "") +
+                  (sysStatus.scServoYReady ? ",\"servoYAngle\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
                   (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
                                                   ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
                   ",\"chill\":" + (scTouch_state.chillMode ? "true" : "false") +
@@ -1825,6 +1828,20 @@ void handleScHeadRecenter() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+// POST /bot/servo/reinit — cycle VM_EN and re-ping (manual servo rail recovery)
+void handleScServoReinit() {
+  bool ok = scRecoverServos();
+  String json = "{\"ok\":";
+  json += ok ? "true" : "false";
+  json += ",\"servoX\":";
+  json += sysStatus.scServoXReady ? "true" : "false";
+  json += ",\"servoY\":";
+  json += sysStatus.scServoYReady ? "true" : "false";
+  json += "}";
+  if (ok) scGoHome(500);
+  server.send(200, "application/json", json);
+}
+
 // POST /bot/base_leds/set?r=N&g=N&b=N  OR  ?index=N&r=N&g=N&b=N
 void handleScBaseLeds() {
   if (!sysStatus.scBaseLedsReady) {
@@ -2033,6 +2050,7 @@ void setupWebServer() {
   server.on("/bot/head/set_angles", handleScHeadSetAngles);
   server.on("/bot/head/preset", handleScHeadPreset);
   server.on("/bot/head/recenter", handleScHeadRecenter);
+  server.on("/bot/servo/reinit", handleScServoReinit);
   server.on("/bot/base_leds/set", handleScBaseLeds);
   server.on("/bot/base_leds/mode", handleScBaseLedMode);
   server.on("/bot/chill", handleScChillToggle);

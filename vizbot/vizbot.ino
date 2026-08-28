@@ -488,6 +488,9 @@ void loop() {
       scFireChillMode();
     }
   }
+  // No servo health poll or torque tick here any more: BSP's Motion task owns
+  // the bus and manages torque itself.
+
   // Idle head drift — suppressed during chill mode
   if (!scTouch_state.chillMode) {
     scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);
