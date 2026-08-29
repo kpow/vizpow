@@ -1093,6 +1093,7 @@ void handleState() {
                   // to poll from this task.
                   (sysStatus.scServoXReady ? ",\"servoXAngle\":" + String(scReadServoPos(SC_SERVO_X_ID)) : "") +
                   (sysStatus.scServoYReady ? ",\"servoYAngle\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
+                  ",\"servoReboots\":" + String(scServoReboots) +
                   (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
                                                   ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
                   ",\"chill\":" + (scTouch_state.chillMode ? "true" : "false") +
