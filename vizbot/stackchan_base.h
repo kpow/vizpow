@@ -275,6 +275,52 @@ inline bool scRecoverServos() {
 }
 
 // ============================================================================
+// Servo watchdog — check every 5 min, reboot the rail only if they're down
+// ============================================================================
+// The head still intermittently goes stiff and stops answering. The cause is
+// not understood: it survived replacing our hand-rolled servo layer with M5's
+// BSP, so it is NOT the two-task bus race that fixed the boot-time failures.
+// Until it is understood, watch for the failure and recover from it.
+//
+// Detection: BSP derives the reported angle from a real ReadPos on the servo
+// bus. A failed read returns -1, which maps to each axis' clamp floor — yaw
+// -1280, pitch 0. Neither is reachable by any command we issue (yaw is driven
+// to at most +/-1000, pitch is clamped to 250..850), so sitting on the floor
+// means the bus is not answering.
+//
+// This is a workaround, not a fix. scServoReboots is surfaced in /state so we
+// can see how often it actually fires — if it stays 0 while the head still
+// stalls, this detector is looking at the wrong thing.
+#ifndef SC_SERVO_CHECK_MS
+#define SC_SERVO_CHECK_MS 300000UL   // 5 minutes (0 disables)
+#endif
+
+static uint32_t scNextServoCheckMs = SC_SERVO_CHECK_MS;
+static uint16_t scServoReboots     = 0;
+
+inline bool scServosLookDead() {
+  int yaw   = scChan.Motion.getCurrentYawAngle();
+  int pitch = scChan.Motion.getCurrentPitchAngle();
+  return (yaw <= -1270) || (pitch <= 5);
+}
+
+// Call once per loop.
+inline void scServoWatchdogTick() {
+  if (SC_SERVO_CHECK_MS == 0) return;
+  uint32_t now = millis();
+  if ((int32_t)(now - scNextServoCheckMs) < 0) return;
+  scNextServoCheckMs = now + SC_SERVO_CHECK_MS;
+
+  if (!scServosLookDead()) return;
+  delay(50);
+  if (!scServosLookDead()) return;   // ignore a single bad read
+
+  DBGLN("Servo watchdog: bus not answering — rebooting servos");
+  scServoReboots++;
+  scRecoverServos();
+}
+
+// ============================================================================
 // Head touch
 // ============================================================================
 // BSP's getIntensities() returns 0-3 per zone, indexed 0=Front, 1=Middle,
