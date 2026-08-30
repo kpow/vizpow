@@ -260,6 +260,13 @@ inline int scReadServoPos(uint8_t id) {
 // Power-cycle the servo rail and re-home. Kept as a manual escape hatch behind
 // POST /bot/servo/reinit; with BSP owning the bus it should never be needed.
 inline bool scRecoverServos() {
+  // Capture the pose BEFORE cutting power (reads still answer during a stall,
+  // per a day of observation) so the head can glide back to where it was
+  // instead of sagging and then snapping to home — the old goHome(500) here
+  // made every scheduled reinit a visible jump.
+  int yaw   = scChan.Motion.getCurrentYawAngle();
+  int pitch = scChan.Motion.getCurrentPitchAngle();
+
   {
     ScI2cLock lock;
     scChan.setServoPowerEnabled(false);
@@ -270,7 +277,12 @@ inline bool scRecoverServos() {
     scChan.setServoPowerEnabled(true);
   }
   delay(500);
-  scGoHome(500);
+
+  // Floor values mean the pre-cut read failed — fall back to a slow re-home.
+  bool haveYaw   = (yaw   > -1270);
+  bool havePitch = (pitch > 5);
+  scMoveYaw(haveYaw ? yaw : 0, 1800);
+  scMovePitch(havePitch ? pitch : SC_SERVO_Y_HOME_DEG * 10, 1800);
   return true;
 }
 
