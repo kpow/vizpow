@@ -267,6 +267,14 @@ inline bool scRecoverServos() {
   int yaw   = scChan.Motion.getCurrentYawAngle();
   int pitch = scChan.Motion.getCurrentPitchAngle();
 
+  // Dip to the pitch floor BEFORE cutting power. When the rail drops, pitch
+  // torque vanishes and the head free-falls to its sag point — that clunk is
+  // the harshest part of the cycle and nothing after power-up can soften it.
+  // Parked at the floor there is nowhere left to fall, so the whole reinit
+  // reads as a slow bow down and back up rather than a collapse.
+  scMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
+  delay(1300);
+
   {
     ScI2cLock lock;
     scChan.setServoPowerEnabled(false);
