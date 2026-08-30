@@ -275,47 +275,38 @@ inline bool scRecoverServos() {
 }
 
 // ============================================================================
-// Servo watchdog — check every 5 min, reboot the rail only if they're down
+// Scheduled servo reinit — blind rail cycle every 5 minutes
 // ============================================================================
-// The head still intermittently goes stiff and stops answering. The cause is
-// not understood: it survived replacing our hand-rolled servo layer with M5's
-// BSP, so it is NOT the two-task bus race that fixed the boot-time failures.
-// Until it is understood, watch for the failure and recover from it.
+// After a day of observation: the head stalls after hours of running, the bus
+// still ANSWERS ReadPos during a stall (the angle-floor watchdog below in git
+// history never fired), and a manual /bot/servo/reinit recovers it 100% of the
+// time at a cost of ~1s. So the failure is not the bus going deaf — the motion
+// layer stops producing movement — and detection by reads is a dead end.
 //
-// Detection: BSP derives the reported angle from a real ReadPos on the servo
-// bus. A failed read returns -1, which maps to each axis' clamp floor — yaw
-// -1280, pitch 0. Neither is reachable by any command we issue (yaw is driven
-// to at most +/-1000, pitch is clamped to 250..850), so sitting on the floor
-// means the bus is not answering.
+// Until the trigger is found, just cycle the rail on a schedule. Worst-case
+// dead time drops from "until someone notices" (30+ min) to 5 minutes, and the
+// ~1s hiccup + re-home is invisible next to idle drift's constant motion.
 //
-// This is a workaround, not a fix. scServoReboots is surfaced in /state so we
-// can see how often it actually fires — if it stays 0 while the head still
-// stalls, this detector is looking at the wrong thing.
-#ifndef SC_SERVO_CHECK_MS
-#define SC_SERVO_CHECK_MS 300000UL   // 5 minutes (0 disables)
+// Best lead for the real cause if anyone picks this up: stalls did not occur
+// during chill mode, which is exactly when idle drift's constant retargeting
+// of BSP's spring animation is suspended — and that retargeting is the one
+// thing vizbot does that M5's never-stalling demo doesn't. Soak with idle
+// drift disabled to confirm.
+#ifndef SC_SERVO_CYCLE_MS
+#define SC_SERVO_CYCLE_MS 300000UL   // 5 minutes (0 disables)
 #endif
 
-static uint32_t scNextServoCheckMs = SC_SERVO_CHECK_MS;
-static uint16_t scServoReboots     = 0;
-
-inline bool scServosLookDead() {
-  int yaw   = scChan.Motion.getCurrentYawAngle();
-  int pitch = scChan.Motion.getCurrentPitchAngle();
-  return (yaw <= -1270) || (pitch <= 5);
-}
+static uint32_t scNextServoCycleMs = SC_SERVO_CYCLE_MS;
+static uint16_t scServoReboots     = 0;   // exposed in /state
 
 // Call once per loop.
 inline void scServoWatchdogTick() {
-  if (SC_SERVO_CHECK_MS == 0) return;
+  if (SC_SERVO_CYCLE_MS == 0) return;
   uint32_t now = millis();
-  if ((int32_t)(now - scNextServoCheckMs) < 0) return;
-  scNextServoCheckMs = now + SC_SERVO_CHECK_MS;
+  if ((int32_t)(now - scNextServoCycleMs) < 0) return;
+  scNextServoCycleMs = now + SC_SERVO_CYCLE_MS;
 
-  if (!scServosLookDead()) return;
-  delay(50);
-  if (!scServosLookDead()) return;   // ignore a single bad read
-
-  DBGLN("Servo watchdog: bus not answering — rebooting servos");
+  DBGLN("Scheduled servo reinit (5min)");
   scServoReboots++;
   scRecoverServos();
 }
