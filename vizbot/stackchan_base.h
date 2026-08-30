@@ -278,7 +278,29 @@ inline bool scRecoverServos() {
   }
   delay(500);
 
-  // Floor values mean the pre-cut read failed — fall back to a slow re-home.
+  // Do NOT command a move until the bus actually answers reads again. BSP
+  // teleports its spring animation to getCurrentAngle() (a real ReadPos) at
+  // the start of every move; while the servo is still booting that read fails
+  // and clamps to the angle floor (-1280 yaw / 0 pitch), so a "gentle glide"
+  // springs across the entire range at full torque — hard enough to walk the
+  // whole robot across a desk. Poll until reads are sane, and if they never
+  // are, command nothing: a still head beats a slamming one, and the next
+  // idle-drift move will re-sync via the same teleport once reads recover.
+  bool live = false;
+  uint32_t started = millis();
+  while (millis() - started < 2500) {
+    delay(100);
+    int y = scChan.Motion.getCurrentYawAngle();
+    int p = scChan.Motion.getCurrentPitchAngle();
+    if (y > -1270 && p > 5) { live = true; break; }
+  }
+  if (!live) {
+    DBGLN("  reinit: bus not answering after power-up — skipping repositioning");
+    return false;
+  }
+
+  // Glide back to the pre-cut pose. Floor values mean that read failed too —
+  // fall back to a slow re-home.
   bool haveYaw   = (yaw   > -1270);
   bool havePitch = (pitch > 5);
   scMoveYaw(haveYaw ? yaw : 0, 1800);
