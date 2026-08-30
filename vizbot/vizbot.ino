@@ -488,8 +488,13 @@ void loop() {
       scFireChillMode();
     }
   }
-  // No servo health poll or torque tick here any more: BSP's Motion task owns
-  // the bus and manages torque itself.
+  // BSP's Motion task owns the bus and manages torque, so there is no health
+  // poll or torque tick here. The periodic rail cycle below is a workaround for
+  // the head still intermittently going stiff — see stackchan_base.h.
+  // Skip the scheduled rail cycle during chill: chill doubles as the
+  // idle-drift-off soak experiment, and a blind reinit every 5 min would
+  // silently mask any stall, ruining the result.
+  if (!scTouch_state.chillMode) scServoWatchdogTick();
 
   // Idle head drift — suppressed during chill mode
   if (!scTouch_state.chillMode) {

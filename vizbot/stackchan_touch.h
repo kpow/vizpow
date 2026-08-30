@@ -287,7 +287,9 @@ inline void scFireRecenter(uint8_t personalityIndex) {
 // Long-Press Chill — hold head 2s → 10 min quiet mode
 // ============================================================================
 
-inline void scFireChillMode() {
+// durationMs=0 means the default 10 minutes. /bot/chill?minutes=N overrides —
+// long chills (e.g. 480 min) double as the idle-drift-off soak experiment.
+inline void scFireChillMode(uint32_t durationMs = 0) {
   // Toggle: if already chilling, wake up
   if (scTouch_state.chillMode) {
     scTouch_state.chillMode = false;
@@ -299,7 +301,8 @@ inline void scFireChillMode() {
     scLeds.speed = 128;
   } else {
     scTouch_state.chillMode = true;
-    scTouch_state.chillEndMs = millis() + ScTouchState::CHILL_DURATION_MS;
+    scTouch_state.chillEndMs = millis() +
+        (durationMs ? durationMs : ScTouchState::CHILL_DURATION_MS);
 
     scGoHome(800);
     botMode.face.transitionTo(EXPR_CHILL, 500);

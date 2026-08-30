@@ -1093,6 +1093,7 @@ void handleState() {
                   // to poll from this task.
                   (sysStatus.scServoXReady ? ",\"servoXAngle\":" + String(scReadServoPos(SC_SERVO_X_ID)) : "") +
                   (sysStatus.scServoYReady ? ",\"servoYAngle\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
+                  ",\"servoReboots\":" + String(scServoReboots) +
                   (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
                                                   ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
                   ",\"chill\":" + (scTouch_state.chillMode ? "true" : "false") +
@@ -1937,11 +1938,21 @@ void handleScBaseLedMode() {
   server.send(200, "application/json", json);
 }
 
-// POST /bot/chill — toggle chill mode
+// POST /bot/chill — toggle chill mode. Optional ?minutes=N (max 24h) overrides
+// the default 10; ?minutes=480 gives the 8-hour quiet block used for the
+// idle-drift soak experiment.
 void handleScChillToggle() {
-  scFireChillMode();
-  server.send(200, "application/json",
-    scTouch_state.chillMode ? "{\"chill\":true}" : "{\"chill\":false}");
+  uint32_t minutes = server.hasArg("minutes")
+      ? constrain(server.arg("minutes").toInt(), 1, 1440) : 0;
+  scFireChillMode(minutes * 60000UL);
+  String json = "{\"chill\":";
+  json += scTouch_state.chillMode ? "true" : "false";
+  if (scTouch_state.chillMode) {
+    json += ",\"minutesLeft\":";
+    json += (scTouch_state.chillEndMs - millis()) / 60000UL;
+  }
+  json += "}";
+  server.send(200, "application/json", json);
 }
 
 // POST /bot/poweroff — graceful shutdown

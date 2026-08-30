@@ -260,6 +260,21 @@ inline int scReadServoPos(uint8_t id) {
 // Power-cycle the servo rail and re-home. Kept as a manual escape hatch behind
 // POST /bot/servo/reinit; with BSP owning the bus it should never be needed.
 inline bool scRecoverServos() {
+  // Capture the pose BEFORE cutting power (reads still answer during a stall,
+  // per a day of observation) so the head can glide back to where it was
+  // instead of sagging and then snapping to home — the old goHome(500) here
+  // made every scheduled reinit a visible jump.
+  int yaw   = scChan.Motion.getCurrentYawAngle();
+  int pitch = scChan.Motion.getCurrentPitchAngle();
+
+  // Dip to the pitch floor BEFORE cutting power. When the rail drops, pitch
+  // torque vanishes and the head free-falls to its sag point — that clunk is
+  // the harshest part of the cycle and nothing after power-up can soften it.
+  // Parked at the floor there is nowhere left to fall, so the whole reinit
+  // reads as a slow bow down and back up rather than a collapse.
+  scMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
+  delay(1300);
+
   {
     ScI2cLock lock;
     scChan.setServoPowerEnabled(false);
@@ -270,8 +285,72 @@ inline bool scRecoverServos() {
     scChan.setServoPowerEnabled(true);
   }
   delay(500);
-  scGoHome(500);
+
+  // Do NOT command a move until the bus actually answers reads again. BSP
+  // teleports its spring animation to getCurrentAngle() (a real ReadPos) at
+  // the start of every move; while the servo is still booting that read fails
+  // and clamps to the angle floor (-1280 yaw / 0 pitch), so a "gentle glide"
+  // springs across the entire range at full torque — hard enough to walk the
+  // whole robot across a desk. Poll until reads are sane, and if they never
+  // are, command nothing: a still head beats a slamming one, and the next
+  // idle-drift move will re-sync via the same teleport once reads recover.
+  bool live = false;
+  uint32_t started = millis();
+  while (millis() - started < 2500) {
+    delay(100);
+    int y = scChan.Motion.getCurrentYawAngle();
+    int p = scChan.Motion.getCurrentPitchAngle();
+    if (y > -1270 && p > 5) { live = true; break; }
+  }
+  if (!live) {
+    DBGLN("  reinit: bus not answering after power-up — skipping repositioning");
+    return false;
+  }
+
+  // Glide back to the pre-cut pose. Floor values mean that read failed too —
+  // fall back to a slow re-home.
+  bool haveYaw   = (yaw   > -1270);
+  bool havePitch = (pitch > 5);
+  scMoveYaw(haveYaw ? yaw : 0, 1800);
+  scMovePitch(havePitch ? pitch : SC_SERVO_Y_HOME_DEG * 10, 1800);
   return true;
+}
+
+// ============================================================================
+// Scheduled servo reinit — blind rail cycle every 5 minutes
+// ============================================================================
+// After a day of observation: the head stalls after hours of running, the bus
+// still ANSWERS ReadPos during a stall (the angle-floor watchdog below in git
+// history never fired), and a manual /bot/servo/reinit recovers it 100% of the
+// time at a cost of ~1s. So the failure is not the bus going deaf — the motion
+// layer stops producing movement — and detection by reads is a dead end.
+//
+// Until the trigger is found, just cycle the rail on a schedule. Worst-case
+// dead time drops from "until someone notices" (30+ min) to 5 minutes, and the
+// ~1s hiccup + re-home is invisible next to idle drift's constant motion.
+//
+// Best lead for the real cause if anyone picks this up: stalls did not occur
+// during chill mode, which is exactly when idle drift's constant retargeting
+// of BSP's spring animation is suspended — and that retargeting is the one
+// thing vizbot does that M5's never-stalling demo doesn't. Soak with idle
+// drift disabled to confirm.
+#ifndef SC_SERVO_CYCLE_MS
+#define SC_SERVO_CYCLE_MS 300000UL   // 5 minutes (0 disables)
+#endif
+
+static uint32_t scNextServoCycleMs = SC_SERVO_CYCLE_MS;
+static uint16_t scServoReboots     = 0;   // exposed in /state
+
+// Call once per loop.
+inline void scServoWatchdogTick() {
+  if (SC_SERVO_CYCLE_MS == 0) return;
+  uint32_t now = millis();
+  if ((int32_t)(now - scNextServoCycleMs) < 0) return;
+  scNextServoCycleMs = now + SC_SERVO_CYCLE_MS;
+
+  DBGLN("Scheduled servo reinit (5min)");
+  scServoReboots++;
+  scRecoverServos();
 }
 
 // ============================================================================
