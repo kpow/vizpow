@@ -3,6 +3,11 @@
 
 #ifdef TARGET_CORES3
 
+#ifdef BOARD_HAS_FACES_BASE
+// Pulled in directly, not left to include order: this header needs the strips'
+// release/reclaim pair to hand GPIO13 over to the mic.
+#include "faces_base.h"
+#endif
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <arduinoFFT.h>
@@ -102,16 +107,47 @@ struct AudioSpectrum {
     cfg.dma_buf_count = 4;
     cfg.dma_buf_len = FFT_SIZE;
     M5.Mic.config(cfg);
+    // Configured, NOT begun. This used to call M5.Mic.begin() here regardless
+    // of `enabled`, which on a Faces base means the I2S peripheral claims
+    // GPIO13 — the LED data line — from boot, and the strips show garbage
+    // forever. setEnabled() owns the peripheral's lifetime now.
+#ifndef BOARD_HAS_FACES_BASE
     M5.Mic.begin();
+    micRunning = true;
+#endif
   }
 
+  // Take and release the I2S peripheral rather than just gating the maths.
+  //
+  // On a Faces base this is not an optimisation, it is the whole arrangement:
+  // the mic's bit clock IS the LED data line, so exactly one of them can exist
+  // at a time. Releasing the strips before starting the mic, and blanking them
+  // on the way out, is what stops a latched frame sitting lit all through a
+  // listening session.
   void setEnabled(bool on) {
     enabled = on;
-    if (!on) {
+    if (on) {
+      if (!micRunning) {
+#ifdef BOARD_HAS_FACES_BASE
+        scBaseLedsRelease();
+#endif
+        M5.Mic.begin();
+        micRunning = true;
+      }
+    } else {
       alive = false;
       bass = mid = treble = rms = beatEnv = 0.0f;
+      if (micRunning) {
+        M5.Mic.end();
+        micRunning = false;
+#ifdef BOARD_HAS_FACES_BASE
+        scBaseLedsReclaim();
+#endif
+      }
     }
   }
+
+  bool micRunning = false;
 
   // Call each frame — rate-limited internally to ~30Hz
   void update() {

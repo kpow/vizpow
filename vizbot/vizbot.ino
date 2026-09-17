@@ -57,8 +57,15 @@
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
-#ifdef BOARD_HAS_STACKCHAN_BASE
+#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
 #include "stackchan_leds.h"
+#endif
+#ifdef BOARD_HAS_FACES_BASE
+#include "faces_chooser.h"
+#endif
+#ifdef BOARD_HAS_STACKCHAN_BASE
+// Head touch and idle servo drift need the servo/expander hardware; the Faces
+// base has neither, so they are not built for it.
 #include "stackchan_touch.h"
 #include "stackchan_idle.h"
 #endif
@@ -314,7 +321,13 @@ void setup() {
 
   DBGLN("\n=== vizBot starting ===");
   initDeviceID();   // Compute unique apSSID / mdnsHostname from eFuse MAC
-  otaMarkBootValid(); // Tell bootloader this firmware is OK (prevents OTA rollback)
+  otaMarkBootValid();
+  #ifdef BOARD_HAS_FACES_BASE
+  // Hand the NEXT boot back to the chooser. Without this, the otadata entry the
+  // chooser wrote to start us keeps pointing here and the device would boot
+  // straight into vizBot from now on, never showing the chooser again.
+  armChooserNextBoot();
+  #endif // Tell bootloader this firmware is OK (prevents OTA rollback)
 
   // Memory baseline — logged early before any allocations fragment the heap
   DBG("Internal heap: ");
@@ -342,7 +355,18 @@ void setup() {
   // AXP2101 PMU, ILI9342C display, BMI270 IMU, and capacitive touch.
   #ifdef TARGET_CORES3
   auto cfg = M5.config();
+  #ifdef BOARD_HAS_FACES_BASE
+  // The speaker's I2S bit clock is GPIO13 — the Faces base's LED data line. Let
+  // M5Unified bring the speaker up here and the I2S peripheral free-runs on that
+  // pin for the rest of the session, so the strips never show anything this
+  // firmware writes. Both stay off until audio mode asks for them.
+  cfg.internal_spk = false;
+  cfg.internal_mic = false;
+  #endif
   M5.begin(cfg);
+  #ifdef BOARD_HAS_FACES_BASE
+  M5.Speaker.end();
+  #endif
   #endif
 
   // Initialize task infrastructure (I2C mutex + command queue)
@@ -389,8 +413,15 @@ void setup() {
   // when WiFi signal is marginal. First sync happens ~2s after WiFi task starts.
 
   // Initialize StackChan base LED effects + head touch + idle servo
-  #ifdef BOARD_HAS_STACKCHAN_BASE
+  #ifdef BOARD_HAS_FACES_BASE
+  // boot_sequence.h owns the stack-chan LED bring-up; on this base there is no
+  // expander to wait for, so the strips come up here in one call.
+  scInitBaseLeds();
+  #endif
+  #if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
   scLeds.init();
+  #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
   scTouch_state.init();
   scIdleServo.init();
   #endif
@@ -586,8 +617,13 @@ void loop() {
   }
 
   // Update StackChan base LED ring effects
-  #ifdef BOARD_HAS_STACKCHAN_BASE
+  #if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
   scLeds.update();
+  #endif
+
+  #ifdef BOARD_HAS_FACES_BASE
+  // START+SELECT held: the same grip that leaves the game console.
+  facesChordPoll();
   #endif
 
   delay(BOT_FRAME_DELAY_MS);

@@ -186,6 +186,27 @@
 #endif
 
 // ============================================================================
+// Faces Bottom3 base (M5Stack game base: gamepad panel + 2x5 SK6812)
+// ============================================================================
+// A CoreS3 in a Faces Bottom3. It shares the addressable strip with the
+// stack-chan base and nothing else — no IO expander, servos, head touch or
+// power monitor — so it gets its own flag and its own LED backend
+// (faces_base.h) rather than reusing stackchan_base.h, which assumes all of
+// that hardware is present and reports it ready without probing.
+//
+// This device also carries the kFun game console in another partition and a
+// chooser in factory, so BOARD_TYPE is distinct for OTA filename checks and
+// cloud identity.
+#ifdef BOARD_HAS_FACES_BASE
+  #undef BOARD_TYPE
+  #define BOARD_TYPE "faces"
+  #define SC_BASE_LED_COUNT  10   // 2 rows of 5, one chain
+  // !! Also CoreS3's I2S bit clock. Audio and the strips cannot both run; see
+  // the header comment in faces_base.h.
+  #define FACES_LED_PIN      13
+#endif
+
+// ============================================================================
 // StackChan Base Peripherals (K151-R)
 // ============================================================================
 // Constants for the StackChan robot base. All hardware access is gated behind

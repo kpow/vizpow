@@ -1,11 +1,18 @@
 #ifndef STACKCHAN_LEDS_H
 #define STACKCHAN_LEDS_H
 
-#ifdef BOARD_HAS_STACKCHAN_BASE
+// The effect engine is base-agnostic: it only ever calls scSetBaseLedColor() /
+// scRefreshBaseLeds() and reads SC_BASE_LED_COUNT, so it serves the stack-chan
+// ring and the Faces strips alike. Only the backend differs.
+#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
 
 #include <Arduino.h>
 #include "config.h"
+#ifdef BOARD_HAS_STACKCHAN_BASE
 #include "stackchan_base.h"
+#else
+#include "faces_base.h"
+#endif
 
 // ============================================================================
 // Base LED Glow Library — animated effects for the 12-LED WS2812C ring
@@ -489,5 +496,5 @@ inline void scUpdateMoodFromExpression(uint8_t exprIndex) {
   scLeds.setMoodColor(c.r, c.g, c.b);
 }
 
-#endif // BOARD_HAS_STACKCHAN_BASE
+#endif // BOARD_HAS_STACKCHAN_BASE || BOARD_HAS_FACES_BASE
 #endif // STACKCHAN_LEDS_H

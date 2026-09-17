@@ -814,9 +814,17 @@ struct BotSounds {
       auto cfg = M5.Speaker.config();
       cfg.sample_rate = 48000;
       M5.Speaker.config(cfg);
+#ifdef BOARD_HAS_FACES_BASE
+      // The speaker's I2S bit clock is the Faces base's LED data line, so the
+      // speaker stays off here and the strips win. An external MIDI synth on
+      // Port A/C is unaffected and remains the way to get sound on this base.
+      enabled = false;
+      DBGLN("BotSounds: speaker disabled on Faces base (LEDs own GPIO13)");
+#else
       M5.Speaker.begin();
       M5.Speaker.setVolume(volume);
       DBGLN("BotSounds: M5.Speaker fallback mode");
+#endif
     }
   }
 

@@ -28,13 +28,19 @@ struct SystemStatus {
   bool proxLightReady;   // Core S3 proximity/light sensor initialized
   bool psramAvailable;   // PSRAM detected at boot
   bool ntpSynced;            // NTP time obtained
+  // Addressable base strip. Both bases have one — a 12-LED WS2812C ring behind
+  // the stack-chan IO expander, or ten SK6812 on GPIO13 on a Faces Bottom3 —
+  // and the shared LED effect engine gates on this flag, so it belongs outside
+  // the stack-chan-only block below.
+#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
+  bool scBaseLedsReady;
+#endif
   // StackChan base subsystems (only meaningful when BOARD_HAS_STACKCHAN_BASE)
 #ifdef BOARD_HAS_STACKCHAN_BASE
   bool scIoExpanderReady;    // PY32L020 IO expander (I2C 0x6F)
   bool scVmEnReady;          // VM_EN servo power rail enabled
   bool scServoXReady;        // SCS0009 yaw servo
   bool scServoYReady;        // SCS0009 pitch servo
-  bool scBaseLedsReady;      // WS2812C 12-LED ring
   bool scHeadTouchReady;     // Si12T capacitive touch (I2C 0x68)
   bool scBatteryMonReady;    // INA226 battery monitor (I2C 0x41)
   bool scCameraReady;        // GC0308 camera
