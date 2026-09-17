@@ -27,6 +27,22 @@ static void handleOTAUpload() {
     DBG("OTA Upload: ");
     DBGLN(upload.filename.c_str());
 
+#ifdef BOARD_HAS_FACES_BASE
+    // Refused on this device, and not out of caution — it cannot work.
+    //
+    // Update.begin(U_FLASH) writes to "the next OTA partition", because an app
+    // can never overwrite the partition it is executing from. Here that next
+    // partition is the kFun game console in ota_0: a wifi update of vizBot
+    // would silently replace the games with a vizBot image, and the chooser
+    // would then offer two vizBots.
+    //
+    // There is nowhere else to put it — factory holds the chooser — so this
+    // device updates over USB, which writes each slot explicitly.
+    DBGLN("OTA: refused — this device shares flash with the game console");
+    otaUploadError = true;
+    return;
+#endif
+
     // Board type check — filename should contain BOARD_TYPE
     if (upload.filename.indexOf(BOARD_TYPE) < 0) {
       char err[64];

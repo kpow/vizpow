@@ -89,7 +89,15 @@ void loadSettings() {
   botSounds.enabled   = prefs.getBool("sndOn", true);
   botSounds.volume    = prefs.getUChar("sndVol", 120);
   if (botSounds.volume > 0) botSounds.setVolume(botSounds.volume);
+#ifdef BOARD_HAS_FACES_BASE
+  // The Faces base cannot do both: the mic's I2S bit clock is the LED data
+  // line. LEDs are this base's whole character, so audio starts off however the
+  // setting was left — including a setting carried over from a base where the
+  // two did not conflict. Turning it on is a deliberate act, per session.
+  audioSpectrum.setEnabled(false);
+#else
   audioSpectrum.setEnabled(prefs.getBool("audioFx", false));
+#endif
   audioDrama = prefs.getUChar("audioDrm", AUDIO_DRAMA_DEFAULT);
   if (audioDrama > 200) audioDrama = AUDIO_DRAMA_DEFAULT;
   #ifdef MIDI_SYNTH_ENABLED

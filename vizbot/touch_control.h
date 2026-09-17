@@ -1,6 +1,11 @@
 #ifndef TOUCH_CONTROL_H
 #define TOUCH_CONTROL_H
 
+#ifdef BOARD_HAS_FACES_BASE
+// Included directly rather than relying on order: vizbot.ino includes this
+// header before faces_chooser.h, and the menu needs the way back to the chooser.
+#include "faces_chooser.h"
+#endif
 #include <Wire.h>
 #include <FastLED.h>
 #include "config.h"
@@ -364,7 +369,11 @@ void drawMenu() {
     }
     rowY += BTN_HEIGHT + BTN_GAP;
 
-    // Row 3: (empty for now)
+    // Row 3: back to the top-level chooser (this device also holds the kFun
+    // game console; the chooser picks between them).
+    #ifdef BOARD_HAS_FACES_BASE
+    drawButton(col1X, rowY, BTN_WIDTH, BTN_HEIGHT, "CHOOSER", 0x001F);
+    #endif
     rowY += BTN_HEIGHT + BTN_GAP;
 
     // Row 4: Back | Close
@@ -483,6 +492,14 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
         }
         #endif
         break;
+      #ifdef BOARD_HAS_FACES_BASE
+      case 2:  // Chooser | (empty)
+        if (col == 0) {
+          hideMenu();
+          bootToChooser();  // does not return
+        }
+        break;
+      #endif
       case 3:  // Back | Close
         if (col == 0) { menuPage = 0; }
         else return true;

@@ -1,0 +1,40 @@
+# kFun/vizBot shared partition table — M5Stack CoreS3 (16MB), m5bigfun hardware.
+#
+# THIS FILE IS SHARED. A byte-identical copy lives in every project that flashes
+# this device (kFun here, vizbot in ~/projects/vizpow/vizbot). Every upload
+# rewrites the table at 0x8000, so if the copies drift, whichever project you
+# flashed last silently redefines the layout for all of them.
+#
+# Three apps live on this device at once:
+#
+#   factory  the chooser — the top-level menu you land on at power-on. Being a
+#            `factory` partition is deliberate: the bootloader falls back to it
+#            whenever otadata is blank or invalid, so erasing otadata is always
+#            a way home.
+#   ota_0    the kFun game console (m5bigfun). ~2.0MB today.
+#   ota_1    vizBot. ~1.74MB today.
+#
+# Switching between them is esp_ota_set_boot_partition() + esp_restart(), about
+# a second — no SD card and no reflash, unlike the SD-card launchers.
+#
+# !! nvs stays at 0x9000/0x5000, exactly where Arduino's default table puts it.
+# That is the only reason the existing high scores and saved games survive this
+# change: Preferences finds the partition by type, and moving or resizing it
+# would invalidate every stored key.
+#
+# `spiffs` is named for its subtype, not its contents — vizBot mounts LittleFS
+# there for its cloud cache, and Arduino's LittleFS looks for exactly this label.
+#
+# BUILD NOTE: PlatformIO flashes the app at ota_0's offset whenever a table has
+# an ota_0 (builder/main.py: `if partition["subtype"] == "ota_0"`). kFun is ota_0
+# so it needs nothing; the chooser and vizBot each override ESP32_APP_OFFSET in a
+# small extra_script, or they would upload straight over the games.
+#
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x5000,
+otadata,    data, ota,      0xe000,    0x2000,
+factory,    app,  factory,  0x10000,   0x100000,
+ota_0,      app,  ota_0,    0x110000,  0x400000,
+ota_1,      app,  ota_1,    0x510000,  0x400000,
+spiffs,     data, spiffs,   0x910000,  0x200000,
+coredump,   data, coredump, 0xb10000,  0x10000,

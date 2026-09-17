@@ -29,6 +29,10 @@ extern CRGBPalette16 currentPalette;
 #include "stackchan_leds.h"
 #include "stackchan_touch.h"
 #endif
+#ifdef BOARD_HAS_FACES_BASE
+#include "faces_base.h"
+#include "stackchan_leds.h"
+#endif
 
 // Web interface HTML
 const char webpage[] PROGMEM = R"rawliteral(
@@ -294,6 +298,25 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             <button onclick="setWledIP()">Set</button>
           </div>
           <button onclick="testWled()" class="btn-full" style="margin-top:8px">Test Connection</button>
+        </div>
+      </div>
+
+      <div class="card" id="facesCard" style="display:none">
+        <h2 class="shdr" onclick="tgl('secFaces')">Faces Base <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secFaces">
+          <span class="lbl">Base LEDs <span id="fcLedCount" style="opacity:.6"></span></span>
+          <select id="fcLedMode" onchange="fcSetLedMode(this.value)" class="sel" style="margin-top:6px"></select>
+          <div class="srow" style="margin-top:8px"><span>Brightness</span><span id="fcLedBrVal">80</span></div>
+          <input type="range" id="fcLedBr" min="10" max="255" value="80">
+          <div class="srow"><span>Speed</span><span id="fcLedSpVal">128</span></div>
+          <input type="range" id="fcLedSp" min="10" max="255" value="128">
+          <div class="row" style="margin-top:10px">
+            <button onclick="fcSolid(255,0,0)" class="flex1">Red</button>
+            <button onclick="fcSolid(0,255,0)" class="flex1">Green</button>
+            <button onclick="fcSolid(0,60,255)" class="flex1">Blue</button>
+            <button onclick="fcSolid(0,0,0)" class="flex1">Off</button>
+          </div>
+          <div class="hint" style="margin-top:10px">The strips share GPIO13 with the I2S bit clock, so Audio FX takes them over while it runs. Turn audio off to get the LEDs back.</div>
         </div>
       </div>
 
@@ -649,6 +672,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           renderEmojiQueue();
         }
         if (state.stackchan) scUpdateFromState(state);
+        if (state.faces) fcUpdateFromState(state);
         render();
       } catch(e) {}
     }
@@ -879,6 +903,35 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       } catch(e) {}
     }
 
+    // ---- Faces base controls (LEDs only: this base has no head) ----
+    const fcLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood','audio'];
+    let fcLedMode = 2;
+
+    function fcSetLedMode(v) {
+      fcLedMode = parseInt(v);
+      api('/bot/base_leds/mode?mode=' + v);
+    }
+
+    function fcSolid(r, g, b) {
+      api('/bot/base_leds/set?r=' + r + '&g=' + g + '&b=' + b);
+    }
+
+    function fcRenderLedModes() {
+      const sel = document.getElementById('fcLedMode');
+      sel.innerHTML = fcLedModes.map((name, i) =>
+        `<option value="${i}" ${i===fcLedMode?'selected':''}>${name.charAt(0).toUpperCase()+name.slice(1)}</option>`
+      ).join('');
+    }
+
+    function fcInitSliders() {
+      const br = document.getElementById('fcLedBr');
+      br.oninput = function() { document.getElementById('fcLedBrVal').textContent = this.value; };
+      br.onchange = function() { api('/bot/base_leds/mode?brightness=' + this.value); };
+      const sp = document.getElementById('fcLedSp');
+      sp.oninput = function() { document.getElementById('fcLedSpVal').textContent = this.value; };
+      sp.onchange = function() { api('/bot/base_leds/mode?speed=' + this.value); };
+    }
+
     // ---- StackChan controls ----
     const scLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood','audio'];
     let scLedMode = 2;
@@ -947,6 +1000,27 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       }
     }
 
+    function fcUpdateFromState(s) {
+      if (!s.faces) return;
+      document.getElementById('facesCard').style.display = '';
+      const f = s.faces;
+      if (f.ledCount) {
+        document.getElementById('fcLedCount').textContent = '(' + f.ledCount + ')';
+      }
+      if (typeof f.ledMode === 'number') {
+        fcLedMode = f.ledMode;
+        fcRenderLedModes();
+      }
+      if (typeof f.ledBrightness === 'number') {
+        document.getElementById('fcLedBr').value = f.ledBrightness;
+        document.getElementById('fcLedBrVal').textContent = f.ledBrightness;
+      }
+      if (typeof f.ledSpeed === 'number') {
+        document.getElementById('fcLedSp').value = f.ledSpeed;
+        document.getElementById('fcLedSpVal').textContent = f.ledSpeed;
+      }
+    }
+
     function scUpdateFromState(s) {
       if (!s.stackchan) return;
       document.getElementById('scCard').style.display = '';
@@ -975,6 +1049,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 
     scRenderLedModes();
     scInitSliders();
+    fcInitSliders();
 
     getState();
     render();
@@ -1078,6 +1153,15 @@ void handleState() {
                 ",\"audioFx\":" + (audioSpectrum.enabled ? "true" : "false") +
                 ",\"audioDrama\":" + String(audioDrama) +
                 ",\"hasMic\":true" +
+#endif
+#ifdef BOARD_HAS_FACES_BASE
+                ",\"faces\":{"
+                  "\"baseLeds\":" + String(sysStatus.scBaseLedsReady ? "true" : "false") +
+                  ",\"ledMode\":" + String(scLeds.mode) +
+                  ",\"ledBrightness\":" + String(scLeds.brightness) +
+                  ",\"ledSpeed\":" + String(scLeds.speed) +
+                  ",\"ledCount\":" + String(SC_BASE_LED_COUNT) +
+                "}" +
 #endif
 #ifdef BOARD_HAS_STACKCHAN_BASE
                 ",\"stackchan\":{" +
@@ -1754,6 +1838,100 @@ void handleSchedule() {
 // ============================================================================
 // StackChan Endpoints
 // ============================================================================
+// ---------------------------------------------------------------------------
+// Base LED endpoints — served by BOTH bases
+// ---------------------------------------------------------------------------
+// The effect engine (stackchan_leds.h) is base-agnostic: a 12-LED ring behind
+// the stack-chan IO expander and ten SK6812 on a Faces Bottom3 differ only in
+// their backend. These two handlers were inside the stack-chan block, which is
+// full of servo code that cannot compile without that hardware — so they live
+// out here instead, and each base gets the same LED control surface.
+#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
+
+// POST /bot/base_leds/set?r=N&g=N&b=N  OR  ?index=N&r=N&g=N&b=N
+void handleScBaseLeds() {
+  if (!sysStatus.scBaseLedsReady) {
+    server.send(503, "application/json", "{\"error\":\"base LEDs not ready\"}");
+    return;
+  }
+  uint8_t r = server.hasArg("r") ? server.arg("r").toInt() : 0;
+  uint8_t g = server.hasArg("g") ? server.arg("g").toInt() : 0;
+  uint8_t b = server.hasArg("b") ? server.arg("b").toInt() : 0;
+
+  if (server.hasArg("index")) {
+    int idx = server.arg("index").toInt();
+    if (idx < 0 || idx >= SC_BASE_LED_COUNT) {
+      server.send(400, "application/json", (String("{\"error\":\"index 0-") + String(SC_BASE_LED_COUNT - 1) + "\"}").c_str());
+      return;
+    }
+    scSetBaseLedColor(idx, r, g, b);
+    scRefreshBaseLeds();
+  } else {
+#ifdef BOARD_HAS_FACES_BASE
+    scShowBaseLedColor(r, g, b);
+#else
+    scSetAllBaseLeds(r, g, b);
+#endif
+  }
+
+  String json = "{\"ok\":true,\"r\":";
+  json += r;
+  json += ",\"g\":";
+  json += g;
+  json += ",\"b\":";
+  json += b;
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// POST /bot/base_leds/mode?mode=N (0-8) or ?name=rainbow etc.
+// Optional: ?brightness=N (0-255), ?speed=N (0-255)
+void handleScBaseLedMode() {
+  if (!sysStatus.scBaseLedsReady) {
+    server.send(503, "application/json", "{\"error\":\"base LEDs not ready\"}");
+    return;
+  }
+
+  if (server.hasArg("mode")) {
+    int m = server.arg("mode").toInt();
+    if (m >= 0 && m < SC_LED_MODE_COUNT) scLeds.mode = m;
+  } else if (server.hasArg("name")) {
+    String name = server.arg("name");
+    for (int i = 0; i < SC_LED_MODE_COUNT; i++) {
+      if (name.equalsIgnoreCase(SC_LED_MODE_NAMES[i])) {
+        scLeds.mode = i;
+        break;
+      }
+    }
+  }
+  if (server.hasArg("brightness")) {
+    scLeds.brightness = constrain(server.arg("brightness").toInt(), 0, 255);
+  }
+  if (server.hasArg("speed")) {
+    scLeds.speed = constrain(server.arg("speed").toInt(), 0, 255);
+  }
+
+  String json = "{\"ok\":true,\"mode\":";
+  json += scLeds.mode;
+  json += ",\"name\":\"";
+  json += SC_LED_MODE_NAMES[scLeds.mode];
+  json += "\",\"brightness\":";
+  json += scLeds.brightness;
+  json += ",\"speed\":";
+  json += scLeds.speed;
+  json += ",\"modes\":[";
+  for (int i = 0; i < SC_LED_MODE_COUNT; i++) {
+    if (i > 0) json += ",";
+    json += "\"";
+    json += SC_LED_MODE_NAMES[i];
+    json += "\"";
+  }
+  json += "]}";
+  server.send(200, "application/json", json);
+}
+
+#endif // base LED endpoints
+
 #ifdef BOARD_HAS_STACKCHAN_BASE
 
 void scSendDeferred(uint8_t phase) {
@@ -1843,38 +2021,6 @@ void handleScServoReinit() {
   server.send(200, "application/json", json);
 }
 
-// POST /bot/base_leds/set?r=N&g=N&b=N  OR  ?index=N&r=N&g=N&b=N
-void handleScBaseLeds() {
-  if (!sysStatus.scBaseLedsReady) {
-    server.send(503, "application/json", "{\"error\":\"base LEDs not ready\"}");
-    return;
-  }
-  uint8_t r = server.hasArg("r") ? server.arg("r").toInt() : 0;
-  uint8_t g = server.hasArg("g") ? server.arg("g").toInt() : 0;
-  uint8_t b = server.hasArg("b") ? server.arg("b").toInt() : 0;
-
-  if (server.hasArg("index")) {
-    int idx = server.arg("index").toInt();
-    if (idx < 0 || idx >= SC_BASE_LED_COUNT) {
-      server.send(400, "application/json", "{\"error\":\"index 0-11\"}");
-      return;
-    }
-    scSetBaseLedColor(idx, r, g, b);
-    scRefreshBaseLeds();
-  } else {
-    scSetAllBaseLeds(r, g, b);
-  }
-
-  String json = "{\"ok\":true,\"r\":";
-  json += r;
-  json += ",\"g\":";
-  json += g;
-  json += ",\"b\":";
-  json += b;
-  json += "}";
-  server.send(200, "application/json", json);
-}
-
 // GET /bot/battery/status
 void handleScBatteryStatus() {
   if (!sysStatus.scBatteryMonReady) {
@@ -1889,52 +2035,6 @@ void handleScBatteryStatus() {
   json += ",\"current\":";
   json += String(amps, 3);
   json += "}";
-  server.send(200, "application/json", json);
-}
-
-// POST /bot/base_leds/mode?mode=N (0-8) or ?name=rainbow etc.
-// Optional: ?brightness=N (0-255), ?speed=N (0-255)
-void handleScBaseLedMode() {
-  if (!sysStatus.scBaseLedsReady) {
-    server.send(503, "application/json", "{\"error\":\"base LEDs not ready\"}");
-    return;
-  }
-
-  if (server.hasArg("mode")) {
-    int m = server.arg("mode").toInt();
-    if (m >= 0 && m < SC_LED_MODE_COUNT) scLeds.mode = m;
-  } else if (server.hasArg("name")) {
-    String name = server.arg("name");
-    for (int i = 0; i < SC_LED_MODE_COUNT; i++) {
-      if (name.equalsIgnoreCase(SC_LED_MODE_NAMES[i])) {
-        scLeds.mode = i;
-        break;
-      }
-    }
-  }
-  if (server.hasArg("brightness")) {
-    scLeds.brightness = constrain(server.arg("brightness").toInt(), 0, 255);
-  }
-  if (server.hasArg("speed")) {
-    scLeds.speed = constrain(server.arg("speed").toInt(), 0, 255);
-  }
-
-  String json = "{\"ok\":true,\"mode\":";
-  json += scLeds.mode;
-  json += ",\"name\":\"";
-  json += SC_LED_MODE_NAMES[scLeds.mode];
-  json += "\",\"brightness\":";
-  json += scLeds.brightness;
-  json += ",\"speed\":";
-  json += scLeds.speed;
-  json += ",\"modes\":[";
-  for (int i = 0; i < SC_LED_MODE_COUNT; i++) {
-    if (i > 0) json += ",";
-    json += "\"";
-    json += SC_LED_MODE_NAMES[i];
-    json += "\"";
-  }
-  json += "]}";
   server.send(200, "application/json", json);
 }
 
@@ -2057,6 +2157,11 @@ void setupWebServer() {
   #endif
 
   // StackChan stub endpoints (501 until driver bring-up)
+  #if defined(BOARD_HAS_FACES_BASE)
+  // This base has strips but no head: LEDs only, no servo or touch endpoints.
+  server.on("/bot/base_leds/set", handleScBaseLeds);
+  server.on("/bot/base_leds/mode", handleScBaseLedMode);
+  #endif
   #ifdef BOARD_HAS_STACKCHAN_BASE
   server.on("/bot/head/set_angles", handleScHeadSetAngles);
   server.on("/bot/head/preset", handleScHeadPreset);
