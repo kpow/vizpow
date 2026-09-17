@@ -5,6 +5,11 @@ A motion-reactive display controller platform for wearable/portable/alternate di
 - **vizBot** (ESP32-S3) — Animated bot companion with dual-core FreeRTOS architecture, captive portal WiFi provisioning, WLED integration, vizCloud connectivity, ESP-NOW mesh, info mode, 25 facial expressions, fully audio-reactive ambient effects (all 16) with adjustable reactivity, kaleidoscope mode, and StackChan robot base support
 - **vizPow** (ESP32-S3) — Full-featured LED controller with IMU, LCD display, touch control, and 4 display modes
 
+Plus two small standalone firmwares for the M5 Atom Matrix (ESP32-PICO-D4, 5x5 WS2812, BMI270, one face button). They are fringe next to the two platforms above, but they belong here: both run on this repo's own engines, reduced to a 5x5 buffer.
+
+- **atom-fluid** — the fluid-pendant FLIP/PIC solver ported to 5x5: tilt and the liquid sloshes. Also runs `effects_ambient.h` (16 effects) and `effects_motion.h` (7 IMU-driven) on the same buffer, cycled from the one button.
+- **atom-sand** — falling-sand gravity toy; lit grains tumble toward whichever way the board is tilted.
+
 Supported boards: Waveshare ESP32-S3-Touch-LCD-1.69, Waveshare ESP32-S3-LCD-1.3, Waveshare ESP32-S3-Matrix, and M5Stack Core S3.
 
 All platforms drive an 8x8 WS2812B LED matrix (64 LEDs) with a neo-brutalist web control panel for control from any phone or browser. LCD targets render to their full screen resolution (240x280 ST7789, 240x240 ST7789VW on LCD 1.3, 320x240 IPS on M5Stack). Each vizBot device gets a unique network identity (SSID and mDNS hostname) derived from its MAC address, with optional user-settable custom names.
