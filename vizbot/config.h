@@ -45,8 +45,9 @@
 #elif defined(TARGET_LCD)
   #define DISPLAY_LCD_ONLY
   #define HIRES_ENABLED  // Hi-res ambient effects (PSRAM provides heap headroom)
-  // Full power profile for USB-powered LCD board
-  #define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Full TX — USB powered, needs range
+  // 15dBm, not 19.5: the 1.69 board fails to associate/DHCP at 19.5dBm
+  // (TX distortion) but connects 10/10 at 2-15dBm in a sweep test.
+  #define WIFI_TX_POWER WIFI_POWER_15dBm
   #define DEFAULT_BRIGHTNESS 15
   #define INTRO_DURATION_MS 2000
   #define INTRO_FADE_RATE 20
@@ -161,7 +162,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.2.11"
+#define FIRMWARE_VERSION "3.2.14"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields

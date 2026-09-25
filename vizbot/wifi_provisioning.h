@@ -199,16 +199,17 @@ void doWifiConnectBlocking() {
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);       // Scan ALL channels
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);   // Pick strongest signal
   WiFi.setSleep(false);                             // Disable modem sleep
-  WiFi.setTxPower(WIFI_TX_POWER);             // Full TX power for router range
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER);  // Per-target TX power (config.h)
   WiFi.setAutoReconnect(false);                     // We handle retries ourselves
 
   WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());
   Serial.print("TX power: ");
-  Serial.println(WiFi.getTxPower());
+  { int8_t txq = 0; esp_wifi_get_max_tx_power(&txq); Serial.println(txq); }
 
   WiFi.begin(wifiProv.ssid, wifiProv.pass);
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER);  // Re-apply: begin() can reset it
   Serial.println("WiFi.begin() called, blocking wait (WLED settings)...");
 
   // Blocking poll with status logging
@@ -268,7 +269,7 @@ void doWifiConnectBlocking() {
     delay(100);
     WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
     WiFi.setSleep(false);
-    WiFi.setTxPower(WIFI_TX_POWER);
+    esp_wifi_set_max_tx_power(WIFI_TX_POWER);
     clearWifiCredentials();
     wifiProv.state = PROV_FAILED;
     sysStatus.staConnected = false;
@@ -332,10 +333,11 @@ bool bootAttemptSTA() {
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);       // Scan ALL channels, not just first match
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);   // Pick strongest signal
   WiFi.setSleep(false);                             // Disable modem sleep
-  WiFi.setTxPower(WIFI_TX_POWER);             // Full TX power for router range
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER);  // Per-target TX power (config.h)
   WiFi.setAutoReconnect(false);                     // We handle retries ourselves
 
   WiFi.begin(ssid, pass);
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER);  // Re-apply: begin() can reset it
   Serial.println("WiFi.begin() called (WLED settings applied)");
 
   int tries = 0;
@@ -385,7 +387,7 @@ bool bootAttemptSTA() {
   delay(100);
   WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_TX_POWER);
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER);
   sysStatus.apIP = WiFi.softAPIP();
 
   return false;
@@ -407,7 +409,7 @@ void resetWifiProvisioning() {
     delay(100);
     WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
     WiFi.setSleep(false);
-    WiFi.setTxPower(WIFI_TX_POWER);
+    esp_wifi_set_max_tx_power(WIFI_TX_POWER);
 
     // Restart captive portal DNS
     startDNS();

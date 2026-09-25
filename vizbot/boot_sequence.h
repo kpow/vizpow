@@ -340,7 +340,7 @@ bool bootStageWiFi() {
   bool ok = WiFi.softAP(apSSID, WIFI_PASSWORD, 1, false, 4);
   if (ok) {
     WiFi.setSleep(false);
-    WiFi.setTxPower(WIFI_TX_POWER);
+    esp_wifi_set_max_tx_power(WIFI_TX_POWER);
 
     uint8_t retries = 0;
     while (WiFi.softAPIP() == IPAddress(0, 0, 0, 0) && retries < 20) {
@@ -358,7 +358,7 @@ bool bootStageWiFi() {
     DBG("WiFi AP MAC: ");
     DBGLN(WiFi.softAPmacAddress());
     DBG("TX Power: ");
-    DBG(WiFi.getTxPower());
+    { int8_t txq = 0; esp_wifi_get_max_tx_power(&txq); DBG(txq); }
     DBG("dBm*4, retries: ");
     DBGLN(retries);
   }

@@ -22,6 +22,7 @@
 #include <FastLED.h>
 #include <Wire.h>
 #include <WiFi.h>
+#include <esp_wifi.h>   // esp_wifi_set_max_tx_power (WiFi.setTxPower no-ops before start event)
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ESPmDNS.h>
@@ -267,7 +268,7 @@ void startWifiAP() {
   DBGLN(apStarted ? "YES" : "NO");
 
   WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_TX_POWER);
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER);
 
   // Wait for AP to actually start
   uint8_t retries = 0;
