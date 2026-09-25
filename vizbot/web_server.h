@@ -39,6 +39,7 @@ const char webpage[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>VizBot</title>
   <style>
@@ -134,7 +135,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             <span class="lbl">Rotate:</span>
             <input type="checkbox" id="rotateCheck" onchange="toggleRotation()">
             <span class="lbl">every</span>
-            <input type="number" id="rotateMin" value="5" min="1" max="60" class="inp-sm">
+            <input type="number" id="rotateMin" value="5" min="1" max="60" class="inp-sm" onchange="if (document.getElementById('rotateCheck').checked) toggleRotation()">
             <span class="lbl">min</span>
           </div>
         </div>
@@ -203,8 +204,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         <div class="sbody" id="secDev">
           <div class="srow"><span>Brightness</span><span id="brightnessVal">15</span></div>
           <input type="range" id="brightness" min="1" max="255" value="15">
-          <div class="srow"><span>Volume</span><span id="volumeVal">120</span></div>
-          <input type="range" id="volume" min="0" max="255" value="120">
+          <div id="volumeRow" style="display:none">
+            <div class="srow"><span>Volume</span><span id="volumeVal">120</span></div>
+            <input type="range" id="volume" min="0" max="255" value="120">
+          </div>
           <div class="trow"><span>Time Overlay</span><div class="tog" id="botTimeToggle" onclick="toggleBotTime()"></div></div>
           <div class="trow"><span>Time Zone</span>
             <select id="tzSelect" onchange="setTimezone(this.value)" class="sel">
@@ -227,7 +230,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="soundsCard" style="display:none">
         <h2 class="shdr" onclick="tgl('secSounds')">Sounds <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secSounds">
           <div class="trow"><span>MIDI Synth</span><span id="midiStatus" style="font-size:12px;font-weight:700;color:#888">---</span></div>
@@ -581,6 +584,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         document.getElementById('brightness').value = state.brightness;
         document.getElementById('brightnessVal').textContent = state.brightness;
         if (state.sensors) {
+          // Only CoreS3 builds report sensors; they're also the only ones with a speaker
+          document.getElementById('soundsCard').style.display = '';
+          document.getElementById('volumeRow').style.display = '';
           var ms = document.getElementById('midiStatus');
           if (state.sensors.useMidi) { ms.textContent = 'MIDI Active'; ms.style.color = '#88D498'; }
           else if (state.sensors.speaker) { ms.textContent = 'Speaker'; ms.style.color = '#FFA552'; }
@@ -992,7 +998,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     }
 
     function scPowerOff() {
-      if (confirm('Power off vizBot? You will need to press the reset button to turn it back on.')) {
+      if (confirm('Power off vizBot? Press its power button to turn it back on.')) {
         api('/bot/poweroff');
         document.getElementById('statusBar').textContent = 'Powering off...';
         document.getElementById('statusBar').style.background = '#c0392b';
@@ -1052,6 +1058,21 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     fcInitSliders();
 
     getState();
+
+    // Header "Connected" dot: re-check every 10 s and go red when the bot stops answering
+    async function checkConn() {
+      const dot = document.getElementById('connDot');
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 4000);
+      try {
+        const r = await fetch('/bot/personality', {signal: ctl.signal, cache: 'no-store'});
+        dot.className = 'dot ' + (r.ok ? 'on' : 'err');
+      } catch (e) {
+        dot.className = 'dot err';
+      }
+      clearTimeout(t);
+    }
+    setInterval(checkConn, 10000);
     render();
     wifiInitCheck();
     wledUpdateStatus();
@@ -1071,7 +1092,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
 void handleRoot() {
   size_t len = strlen_P(webpage);
   server.setContentLength(len);
-  server.send(200, "text/html", "");
+  server.send(200, "text/html; charset=utf-8", "");
   const size_t CHUNK = 1024;
   for (size_t i = 0; i < len; i += CHUNK) {
     char buf[CHUNK + 1];
@@ -1368,6 +1389,14 @@ extern RuntimePersonality runtimePersonalities[];
 extern uint8_t runtimePersonalityCount;
 
 void handleBotPersonality() {
+  // With "v": set a single personality (stops rotation). The panel sends this
+  // as a GET, so check the arg before treating a GET as a list request.
+  if (server.hasArg("v")) {
+    uint8_t idx = constrain(server.arg("v").toInt(), 0, runtimePersonalityCount - 1);
+    cmdSetPersonality(idx);
+    server.send(200, "text/plain", "OK");
+    return;
+  }
   if (server.method() == HTTP_GET) {
     // Return current personality + list of all loaded
     String json = "{\"current\":";
@@ -1393,12 +1422,7 @@ void handleBotPersonality() {
     json += "]}";
     server.send(200, "application/json", json);
   } else {
-    // POST: set single personality (stops rotation)
-    if (server.hasArg("v")) {
-      uint8_t idx = constrain(server.arg("v").toInt(), 0, runtimePersonalityCount - 1);
-      cmdSetPersonality(idx);
-    }
-    server.send(200, "text/plain", "OK");
+    server.send(400, "text/plain", "Missing v");
   }
 }
 

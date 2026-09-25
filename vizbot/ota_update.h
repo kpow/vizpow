@@ -115,6 +115,7 @@ static const char otaPageHTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>vizBot Update</title>
   <style>
@@ -240,7 +241,7 @@ h2{font-size:13px;color:#000;text-transform:uppercase;letter-spacing:0.08em;marg
 )rawliteral";
 
 static void handleOTAPage() {
-  server.send_P(200, "text/html", otaPageHTML);
+  server.send_P(200, "text/html; charset=utf-8", otaPageHTML);
 }
 
 // ============================================================================
