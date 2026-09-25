@@ -137,7 +137,7 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Visual Boot Sequence**: LCD shows each subsystem initializing with pass/fail indicators
 - **Persistent Settings**: Brightness, effects, palettes, background style saved to NVS flash
 - **Dual-Core Architecture**: WiFi on Core 0, rendering on Core 1 — no frame drops or connection timeouts
-- **Touch Menu**: Long-press for settings (effects, palettes, brightness, speed, hi-res toggle)
+- **Touch UI**: Face-first — swipe up for the quick dock, swipe sideways to change scenes, full settings on-device
 - **Shake Reactions**: IMU-driven dizzy expression and random utterances
 - **MIDI Synthesizer**: SAM2695 MIDI synth module on M5 Core S3 (Grove Port C) — 24 built-in multi-voice sequences with GM instruments and percussion, cloud-managed custom sequences via vizCloud, M5.Speaker fallback when module unplugged
 - **vizCloud Integration**: Cloud server connectivity for remote control, content sync, MIDI sequence management, scheduled commands, and fleet management via DigitalOcean App Platform with TLS-pinned HTTPS
@@ -379,13 +379,24 @@ Shake the device 3 times within 1.5 seconds to cycle through modes:
 - When entering emoji mode with no queue, 8 random sprites are auto-loaded
 - Bot mode greets you on entry and responds to shakes and taps
 
-### Touch Menu (LCD targets only)
+### Touch UI (1.69 and CoreS3 family)
 
-Long-press the touch screen to open the settings menu:
+The face owns the screen; everything else is one gesture away (`vizbot/touch_ui.h`):
 
-- **Page 1**: Effect prev/next, palette cycling, mode switch, auto-cycle toggle
-- **Page 2**: Brightness up/down, speed up/down, hi-res mode toggle
-- Menu auto-hides after 8 seconds of inactivity
+- **Tap** the face to poke it. **Swipe left/right** to step the background scene.
+- **Swipe up** (or long-press) opens the quick dock: Mood, Scene, Weather, Clock, Light, More.
+  On CoreS3 the dock is two side rails and adds Sound plus a build-specific tile:
+  Head (Stackchan), Games (Faces) or Connect.
+- **Scene** runs the real effect behind its controls (palette, hi-res, auto-cycle, kaleidoscope).
+  Picking a scene by hand turns auto-cycle off.
+- **Mood** picks the personality and any of the 25 expressions.
+- **Settings** (More): Look, Mood, Info, Light & sound, Connect, System. Connect shows the
+  `.local` address and IP, or the hotspot setup steps when offline. Restart, Power off
+  (Stackchan) and Games (Faces) need a 1.5 s hold.
+- Sheets close on swipe down, a tap on the face, or 10 s idle (30 s for settings pages).
+
+Dev endpoints for driving the UI over WiFi: `GET /debug/screen` returns the last frame
+(raw RGB565) and `GET /debug/touch?g=tap|long|up|down|left|right&x=&y=` injects a gesture.
 
 ### Web Interface
 

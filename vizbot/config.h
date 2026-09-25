@@ -60,6 +60,7 @@
   #define DISPLAY_LCD_ONLY
   #define HIRES_ENABLED  // Hi-res ambient for bot background overlay
   #define TOUCH_ENABLED
+  #define TOUCH_UI_V2              // Face-first touch UI, landscape layout (touch_ui.h)
   // Full power profile for USB-powered Core S3
   #define WIFI_TX_POWER WIFI_POWER_19_5dBm  // Full TX — USB powered, needs range
   #define DEFAULT_BRIGHTNESS 15
@@ -110,7 +111,7 @@
   // Touch controller (CST816T) - shares I2C bus with IMU
   #define TOUCH_I2C_ADDR 0x15
   #define TOUCH_ENABLED
-  #define TOUCH_UI_V2              // Face-first touch UI (touch_ui.h); CoreS3 still on the legacy menu
+  #define TOUCH_UI_V2              // Face-first touch UI (touch_ui.h)
 
 #elif defined(BOARD_ESP32S3_LCD_13)
   // Waveshare ESP32-S3-LCD-1.3 board pins (no touch, battery powered)
@@ -163,7 +164,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.3.1"
+#define FIRMWARE_VERSION "3.4.0"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
