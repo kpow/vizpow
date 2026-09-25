@@ -387,12 +387,18 @@ void erasePrevThickLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t 
 // Main Eye Render Function — flicker-free
 // ============================================================================
 
+// Where renderBotFace() centers the face. The touch UI moves it (and passes a
+// scaled copy of the face) while a sheet is open; everything else leaves it at
+// the board default.
+int16_t botFaceDrawCX = BOT_FACE_CX;
+int16_t botFaceDrawCY = BOT_FACE_CY;
+
 // Render the complete face based on current BotFaceState
 void renderBotFace(BotFaceState &face, uint16_t bgColor) {
   if (gfx == nullptr) return;
 
-  int16_t cx = BOT_FACE_CX;
-  int16_t cy = BOT_FACE_CY;
+  int16_t cx = botFaceDrawCX;
+  int16_t cy = botFaceDrawCY;
 
   // Calculate final pupil positions (expression + dynamic + look)
   int16_t finalPupilX = face.pupilOffsetX + face.dynamicPupilX;

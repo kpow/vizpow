@@ -71,6 +71,7 @@ extern void toggleHiResMode();
 
 // Touch state
 static bool touchInitialized = false;
+static bool touchReadBusy = false;   // Last readTouch() skipped: I2C bus was busy
 static uint8_t touchI2CAddr = TOUCH_I2C_ADDR;
 static unsigned long lastTouchTime = 0;
 static unsigned long lastActionTime = 0;
@@ -191,6 +192,7 @@ extern void i2cRelease();
 
 // Read touch coordinates
 bool readTouch(uint16_t &x, uint16_t &y) {
+  touchReadBusy = false;
   if (!touchInitialized) return false;
 
   #ifdef TARGET_CORES3
@@ -203,7 +205,7 @@ bool readTouch(uint16_t &x, uint16_t &y) {
   }
   return false;
   #else
-  if (!i2cAcquire(30)) return false;  // Skip if bus busy
+  if (!i2cAcquire(30)) { touchReadBusy = true; return false; }  // Skip if bus busy
 
   uint8_t fingerNum = touchReadRegister(TOUCH_REG_FINGER_NUM);
   if (fingerNum == 0) {
@@ -509,6 +511,9 @@ bool processMenuTouch(uint16_t x, uint16_t y) {
   return false;
 }
 
+#ifdef TOUCH_UI_V2
+#include "touch_ui.h"   // Face-first UI: defines handleTouch()
+#else
 // Main touch handler - call in loop()
 void handleTouch() {
   if (!touchInitialized) return;
@@ -607,6 +612,7 @@ void handleTouch() {
     }
   }
 }
+#endif // TOUCH_UI_V2
 
 #else
 

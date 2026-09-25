@@ -92,6 +92,12 @@ struct DisplayProxy {
   void fillEllipse(int32_t x, int32_t y, int32_t rx, int32_t ry, uint32_t color) { DP(fillEllipse, x, y, rx, ry, (uint16_t)color); }
   void fillTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t color) { DP(fillTriangle, x0, y0, x1, y1, x2, y2, (uint16_t)color); }
   void setFont(const lgfx::IFont* font) { DP(setFont, font); }
+  void drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color)            { DP(drawCircle, x, y, r, (uint16_t)color); }
+  void drawWideLine(float x0, float y0, float x1, float y1, float r, uint32_t color) { DP(drawWideLine, x0, y0, x1, y1, r, (uint16_t)color); }
+  void fillArc(int32_t x, int32_t y, int32_t r0, int32_t r1, float a0, float a1, uint32_t color) { DP(fillArc, x, y, r0, r1, a0, a1, (uint16_t)color); }
+  void setTextDatum(uint8_t d)                { DP(setTextDatum, (lgfx::textdatum_t)d); }
+  void drawString(const char* s, int32_t x, int32_t y) { DP(drawString, s, x, y); }
+  int16_t fontHeight() { return _dp_canvas_active ? (int16_t)_dp_canvas->fontHeight() : (int16_t)M5.Display.fontHeight(); }
   int16_t textWidth(const char* s) { return _dp_canvas_active ? (int16_t)_dp_canvas->textWidth(s) : (int16_t)M5.Display.textWidth(s); }
   void begin() {}  // no-op: M5.begin() handles display init
   int16_t width()  { return (int16_t)M5.Display.width(); }
@@ -283,6 +289,12 @@ struct DisplayProxy {
   void fillEllipse(int32_t x, int32_t y, int32_t rx, int32_t ry, uint32_t color) { DP(fillEllipse, x, y, rx, ry, (uint16_t)color); }
   void fillTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t color) { DP(fillTriangle, x0, y0, x1, y1, x2, y2, (uint16_t)color); }
   void setFont(const lgfx::IFont* font) { DP(setFont, font); }
+  void drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color)            { DP(drawCircle, x, y, r, (uint16_t)color); }
+  void drawWideLine(float x0, float y0, float x1, float y1, float r, uint32_t color) { DP(drawWideLine, x0, y0, x1, y1, r, (uint16_t)color); }
+  void fillArc(int32_t x, int32_t y, int32_t r0, int32_t r1, float a0, float a1, uint32_t color) { DP(fillArc, x, y, r0, r1, a0, a1, (uint16_t)color); }
+  void setTextDatum(uint8_t d)                { DP(setTextDatum, (lgfx::textdatum_t)d); }
+  void drawString(const char* s, int32_t x, int32_t y) { DP(drawString, s, x, y); }
+  int16_t fontHeight() { return _dp_canvas_active ? (int16_t)_dp_canvas->fontHeight() : (int16_t)_lcd_display.fontHeight(); }
   int16_t textWidth(const char* s) { return _dp_canvas_active ? (int16_t)_dp_canvas->textWidth(s) : (int16_t)_lcd_display.textWidth(s); }
   void begin() {}  // no-op: initLCD() handles display init
   int16_t width()  { return (int16_t)_lcd_display.width(); }
@@ -438,6 +450,13 @@ void renderToLCD() {
       gfx->fillRect(screenX, screenY, PIXEL_SIZE, PIXEL_SIZE, color565);
     }
   }
+}
+
+// Last rendered frame (RGB565, LCD_WIDTH x LCD_HEIGHT) for the dev screenshot
+// endpoint. Null when the canvas is missing or not 16-bit.
+const uint16_t* lcdCanvasBuffer() {
+  if (!_dp_canvas || _dp_canvas->getColorDepth() != 16) return nullptr;
+  return (const uint16_t*)_dp_canvas->getBuffer();
 }
 
 // Set LCD backlight brightness (0-255)

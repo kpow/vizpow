@@ -611,9 +611,55 @@ void renderBotAmbientBackground() {
 
 static bool botFirstFrame = true;
 
+// Draw the face scaled about a new center. The touch UI shrinks the face into
+// the top of the screen while a sheet is open; the mood sheet also uses this
+// for its expression chips. Scale 1 at the default center is the normal path.
+void renderBotFaceAt(BotFaceState &src, int16_t cx, int16_t cy, float s, uint16_t bgColor) {
+  if (s > 0.999f && cx == BOT_FACE_CX && cy == BOT_FACE_CY) {
+    renderBotFace(src, bgColor);
+    return;
+  }
+  prevFrame.invalidate();  // erase rects from another scale/center would be wrong
+  BotFaceState f = src;
+  auto sc = [s](int16_t v) { return (int16_t)lroundf(v * s); };
+  f.eyeWhiteW = sc(f.eyeWhiteW);
+  f.eyeWhiteH = sc(f.eyeWhiteH);
+  f.eyeSpacing = sc(f.eyeSpacing);
+  f.pupilRadius = max((int16_t)2, sc(f.pupilRadius));
+  f.pupilOffsetX = sc(f.pupilOffsetX);
+  f.pupilOffsetY = sc(f.pupilOffsetY);
+  f.dynamicPupilX = sc(f.dynamicPupilX);
+  f.dynamicPupilY = sc(f.dynamicPupilY);
+  f.browOffsetY = sc(f.browOffsetY);
+  f.browLength = sc(f.browLength);
+  f.browThickness = max((int16_t)1, sc(f.browThickness));
+  f.mouthWidth = sc(f.mouthWidth);
+  f.mouthOffsetY = sc(f.mouthOffsetY);
+  f.mouthCurve = sc(f.mouthCurve);
+  botFaceDrawCX = cx;
+  botFaceDrawCY = cy;
+  renderBotFace(f, bgColor);
+  botFaceDrawCX = BOT_FACE_CX;
+  botFaceDrawCY = BOT_FACE_CY;
+}
+
+#ifdef TOUCH_UI_V2
+// Implemented in touch_ui.h (included later from touch_control.h)
+void uiFaceTransform(int16_t &cx, int16_t &cy, float &scale);
+bool uiHidesBotOverlays();
+void uiRenderOverlay();
+#endif
+
+// Dev screenshot endpoint (web_server.h) pauses rendering while it reads the
+// canvas so it gets a whole frame, not a half-drawn one.
+volatile bool botRenderHold = false;
+volatile bool botFrameInProgress = false;
+
 void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
+  if (botRenderHold) return;
+  botFrameInProgress = true;
 
   // ---- Canvas management (both targets use DisplayProxy with LGFX_Sprite) ----
   gfx->beginCanvas();
@@ -669,7 +715,16 @@ void renderBotMode() {
   prevFrame.invalidate();
 
   // ---- Render the face ----
+  #ifdef TOUCH_UI_V2
+  {
+    int16_t fcx, fcy;
+    float fs;
+    uiFaceTransform(fcx, fcy, fs);
+    renderBotFaceAt(botMode.face, fcx, fcy, fs, bgColor);
+  }
+  #else
   renderBotFace(botMode.face, bgColor);
+  #endif
 
   // ---- Sleeping: draw Zzz animation ----
   if (botMode.state == BOT_SLEEPING) {
@@ -695,11 +750,20 @@ void renderBotMode() {
   }
 
   // ---- Render overlays (on top of face) ----
-  botMode.speechBubble.render();
-  botMode.notification.render();
-  botMode.timeOverlay.render();
+  #ifdef TOUCH_UI_V2
+  if (!uiHidesBotOverlays())
+  #endif
+  {
+    botMode.speechBubble.render();
+    botMode.notification.render();
+    botMode.timeOverlay.render();
+  }
+  #ifdef TOUCH_UI_V2
+  uiRenderOverlay();
+  #endif
   // ---- Flush canvas to screen in one atomic transfer — zero flicker ----
   gfx->flushCanvas();
+  botFrameInProgress = false;
 }
 
 // ============================================================================

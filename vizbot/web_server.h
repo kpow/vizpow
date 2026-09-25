@@ -2093,9 +2093,53 @@ void handleCaptiveRedirect() {
   server.send(302, "text/plain", "");
 }
 
+#ifdef TOUCH_UI_V2
+// ---- Dev endpoints: drive and inspect the touch UI over WiFi --------------
+// GET /debug/screen → last rendered frame, raw RGB565 (LCD_WIDTH x LCD_HEIGHT,
+//                     byte-swapped as stored in the LovyanGFX sprite)
+// GET /debug/touch?g=tap|long|up|down|left|right&x=&y= → inject a gesture
+volatile uint8_t uiInjectGesture = 0;
+volatile int16_t uiInjectX = 0, uiInjectY = 0;
+
+void handleDebugScreen() {
+  extern const uint16_t* lcdCanvasBuffer();
+  const uint16_t* buf = lcdCanvasBuffer();
+  if (!buf) { server.send(503, "text/plain", "no canvas"); return; }
+  extern volatile bool botRenderHold, botFrameInProgress;
+  botRenderHold = true;
+  for (int i = 0; i < 50 && botFrameInProgress; i++) delay(2);
+  size_t len = (size_t)LCD_WIDTH * LCD_HEIGHT * 2;
+  server.setContentLength(len);
+  server.send(200, "application/octet-stream", "");
+  WiFiClient c = server.client();
+  const uint8_t* p = (const uint8_t*)buf;
+  for (size_t off = 0; off < len && c.connected(); ) {
+    size_t n = c.write(p + off, min((size_t)2048, len - off));
+    if (n == 0) { delay(2); continue; }
+    off += n;
+  }
+  botRenderHold = false;
+}
+
+void handleDebugTouch() {
+  String g = server.arg("g");
+  uint8_t code = g == "tap" ? 1 : g == "long" ? 2 : g == "up" ? 3 : g == "down" ? 4 :
+                 g == "left" ? 5 : g == "right" ? 6 : 0;
+  if (!code) { server.send(400, "text/plain", "g=tap|long|up|down|left|right"); return; }
+  uiInjectX = server.arg("x").toInt();
+  uiInjectY = server.arg("y").toInt();
+  uiInjectGesture = code;
+  server.send(200, "text/plain", "OK");
+}
+#endif
+
 void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/state", handleState);
+  #ifdef TOUCH_UI_V2
+  server.on("/debug/screen", handleDebugScreen);
+  server.on("/debug/touch", handleDebugTouch);
+  #endif
   server.on("/brightness", handleBrightness);
 
   // Bot mode endpoints
