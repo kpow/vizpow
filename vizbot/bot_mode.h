@@ -647,6 +647,7 @@ void renderBotFaceAt(BotFaceState &src, int16_t cx, int16_t cy, float s, uint16_
 // Implemented in touch_ui.h (included later from touch_control.h)
 void uiFaceTransform(int16_t &cx, int16_t &cy, float &scale);
 bool uiHidesBotOverlays();
+bool uiFullScreen();
 void uiRenderOverlay();
 #endif
 
@@ -663,6 +664,17 @@ void renderBotMode() {
 
   // ---- Canvas management (both targets use DisplayProxy with LGFX_Sprite) ----
   gfx->beginCanvas();
+
+  #ifdef TOUCH_UI_V2
+  // Full-screen settings pages: no background effect or face underneath
+  if (uiFullScreen()) {
+    gfx->fillScreen(BOT_COLOR_BG);
+    uiRenderOverlay();
+    gfx->flushCanvas();
+    botFrameInProgress = false;
+    return;
+  }
+  #endif
 
   // ---- Clear canvas with background ----
   uint16_t bgColor = BOT_COLOR_BG;

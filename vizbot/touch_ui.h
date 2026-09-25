@@ -32,6 +32,7 @@
 #define UI_C_LIGHT    0xFCC7  // #FF9A3C
 #define UI_C_CONNECT  0x3EF0  // #3DDC84
 #define UI_C_SYSTEM   0xC67B  // #C3CEDB
+#define UI_C_OFF      0xFACB  // #FF5A5F
 
 // ---- Gesture tuning -------------------------------------------------------
 #define UI_TAP_SLOP_PX     14   // Movement still counted as a tap / long-press
@@ -41,6 +42,8 @@
 #define UI_LIFT_DEBOUNCE_MS 60  // CST816T drops single samples mid-touch
 #define UI_SHEET_IDLE_MS   10000
 #define UI_SCENE_IDLE_MS   15000
+#define UI_PAGE_IDLE_MS    30000
+#define UI_HOLD_MS         1500
 #define UI_HANDLE_SHOW_MS  4000
 #define UI_FACE_ANIM_MS    180
 #define UI_HINT_BOOT_MS    12000
@@ -52,7 +55,9 @@
 #define UI_MINI_SCALE 0.62f
 #define UI_SHEET_TOP  124
 
-enum UiScreen : uint8_t { UI_HOME, UI_DOCK, UI_MOOD, UI_SCENE, UI_LIGHT, UI_LEGACY };
+enum UiScreen : uint8_t { UI_HOME, UI_DOCK, UI_MOOD, UI_SCENE, UI_LIGHT, UI_SETTINGS, UI_CAT };
+// Settings categories (same hues as the dock)
+enum UiCat : uint8_t { CAT_LOOK, CAT_MOOD, CAT_INFO, CAT_LIGHT, CAT_CONNECT, CAT_SYSTEM, CAT_COUNT };
 enum UiSwipe : uint8_t { UI_SWIPE_UP = 1, UI_SWIPE_DOWN, UI_SWIPE_LEFT, UI_SWIPE_RIGHT };
 
 // Hit-target ids (0 = nothing)
@@ -64,6 +69,8 @@ enum UiId : uint8_t {
   UI_ID_MINUS = 30, UI_ID_PLUS, UI_ID_TRACK, UI_ID_PRESET0,  // presets 33..35
   UI_ID_PERS0 = 40,                // personality segments 40..42
   UI_ID_CHIP0 = 50,                // expression chips 50..57
+  UI_ID_CAT0 = 60,                 // settings category tiles 60..65
+  UI_ID_ROW0 = 70,                 // category page rows 70..
 };
 
 struct UiRect {
@@ -75,7 +82,6 @@ struct UiRect {
 
 // ---- Layout (native px, from the comps) -----------------------------------
 static const UiRect UI_R_PILL     = {38, 6, 164, 24};
-static const UiRect UI_R_BACK     = {78, 6, 84, 24};
 static const int16_t UI_TILE_X[3] = {12, 86, 160};
 static const int16_t UI_TILE_Y[2] = {142, 200};
 static const UiRect UI_R_PREV     = {12, 132, 44, 44};
@@ -125,6 +131,15 @@ struct UiState {
 
   uint8_t moodPage = 0;
   bool dragging = false;
+
+  // Settings pages
+  uint8_t cat = CAT_LOOK;
+  UiScreen backTo = UI_DOCK;     // where a sheet's back pill returns
+  int16_t scroll = 0, scrollStart = 0;
+  bool scrolling = false;
+  int8_t holdRow = -1;           // row being held (hold-to-confirm)
+  unsigned long holdStart = 0;
+  UiRect backRect = {78, 6, 84, 24};
 
   // "Psst! Swipe up" hint
   uint8_t hintsShown = 0;
@@ -183,7 +198,7 @@ static inline int16_t uiTextW(const char* s, const lgfx::IFont* font) {
 // ---- Icons: 24-unit stroke icons scaled to any size -----------------------
 enum UiIcon : uint8_t {
   IC_MOOD, IC_SCENE, IC_WEATHER, IC_CLOCK, IC_LIGHT, IC_MORE, IC_WIFI, IC_HOTSPOT,
-  IC_BACK, IC_FWD, IC_AUTO, IC_MINUS, IC_PLUS, IC_MOON, IC_HIRES
+  IC_BACK, IC_FWD, IC_AUTO, IC_MINUS, IC_PLUS, IC_MOON, IC_HIRES, IC_SYSTEM
 };
 
 static float _icS, _icW;
@@ -289,6 +304,13 @@ static void uiIcon(UiIcon id, int16_t x, int16_t y, int16_t size, uint16_t color
       icDot(11, 13, 8.5f, color);
       icDot(16, 8.5f, 7.0f, bg);
       break;
+    case IC_SYSTEM:
+      icRRect(6, 6, 12, 12, 2);
+      icLine(9.5f, 2.5f, 9.5f, 5.5f); icLine(14.5f, 2.5f, 14.5f, 5.5f);
+      icLine(9.5f, 18.5f, 9.5f, 21.5f); icLine(14.5f, 18.5f, 14.5f, 21.5f);
+      icLine(2.5f, 9.5f, 5.5f, 9.5f); icLine(2.5f, 14.5f, 5.5f, 14.5f);
+      icLine(18.5f, 9.5f, 21.5f, 9.5f); icLine(18.5f, 14.5f, 21.5f, 14.5f);
+      break;
     case IC_HIRES:
       icRRect(4, 4, 7, 7, 1); icRRect(13, 4, 7, 7, 1);
       icRRect(4, 13, 7, 7, 1); icRRect(13, 13, 7, 7, 1);
@@ -320,7 +342,8 @@ static void uiSetScene(uint8_t i) {
 }
 
 // ---- Screen changes -------------------------------------------------------
-static bool uiIsSheet(UiScreen s) { return s == UI_DOCK || s == UI_MOOD || s == UI_SCENE || s == UI_LIGHT; }
+static bool uiIsSheet(UiScreen s) { return s != UI_HOME; }
+static bool uiIsFullPage(UiScreen s) { return s == UI_SETTINGS || s == UI_CAT; }
 
 static float uiFaceAnimValue() {
   unsigned long dt = millis() - ui.faceAnimStart;
@@ -339,6 +362,9 @@ static void uiGo(UiScreen s) {
   ui.screenSince = millis();
   ui.pressedId = UI_ID_NONE;
   ui.dragging = false;
+  ui.scrolling = false;
+  ui.holdRow = -1;
+  if (s == UI_CAT || s == UI_SETTINGS) ui.scroll = 0;
   if (s == UI_MOOD) ui.moodPage = min((uint8_t)(botMode.face.targetExpr / UI_CHIPS_PER_PAGE), (uint8_t)(UI_MOOD_PAGES - 1));
 }
 
@@ -356,6 +382,8 @@ void uiFaceTransform(int16_t &cx, int16_t &cy, float &scale) {
   cy = (int16_t)lroundf(BOT_FACE_CY + (UI_MINI_CY - BOT_FACE_CY) * t);
   scale = 1.0f + (UI_MINI_SCALE - 1.0f) * t;
 }
+
+bool uiFullScreen() { return uiIsFullPage(ui.screen); }
 
 bool uiHidesBotOverlays() {
   return ui.screen != UI_HOME || uiFaceAnimValue() > 0.01f;
@@ -380,9 +408,12 @@ static void uiDrawToast() {
 
 static void uiDrawBackPill(const char* label, uint16_t hue, uint16_t bg) {
   bool pressed = ui.pressedId == UI_ID_BACK;
-  uiPill(UI_R_BACK, pressed ? hue : bg, pressed ? hue : UI_C_STROKE);
-  uiIcon(IC_BACK, UI_R_BACK.x + 10, UI_R_BACK.y + 5, 14, pressed ? UI_C_BG : hue, bg, 2.6f);
-  uiText(label, UI_R_BACK.x + 28, UI_R_BACK.y + 12, &fonts::DejaVu12, pressed ? UI_C_BG : UI_C_TEXT, UI_ML, true);
+  int16_t w = max((int16_t)84, (int16_t)(uiTextW(label, &fonts::DejaVu12) + 44));
+  ui.backRect = {(int16_t)(120 - w / 2), 6, w, 24};
+  const UiRect& r = ui.backRect;
+  uiPill(r, pressed ? hue : bg, pressed ? hue : UI_C_STROKE);
+  uiIcon(IC_BACK, r.x + 10, r.y + 5, 14, pressed ? UI_C_BG : hue, bg, 2.6f);
+  uiText(label, r.x + 28, r.y + 12, &fonts::DejaVu12, pressed ? UI_C_BG : UI_C_TEXT, UI_ML, true);
 }
 
 static void uiDrawSheet() {
@@ -673,6 +704,286 @@ static void uiRenderMood() {
   }
 }
 
+// ---- Settings: root page + category pages --------------------------------
+static const uint16_t UI_CAT_HUE[CAT_COUNT] = {UI_C_LOOK, UI_C_MOOD, UI_C_INFO, UI_C_LIGHT, UI_C_CONNECT, UI_C_SYSTEM};
+static const char* const UI_CAT_NAME[CAT_COUNT] = {"Look", "Mood", "Info", "Light", "Connect", "System"};
+static const UiIcon UI_CAT_ICON[CAT_COUNT] = {IC_SCENE, IC_MOOD, IC_WEATHER, IC_LIGHT, IC_WIFI, IC_SYSTEM};
+
+static const char* const UI_TZ_VAL[] = {
+  "EST5EDT,M3.2.0,M11.1.0", "CST6CDT,M3.2.0,M11.1.0", "MST7MDT,M3.2.0,M11.1.0", "MST7",
+  "PST8PDT,M3.2.0,M11.1.0", "AKST9AKDT,M3.2.0,M11.1.0", "HST10", "UTC0",
+  "GMT0BST,M3.5.0/1,M10.5.0", "CET-1CEST,M3.5.0,M10.5.0/3"};
+static const char* const UI_TZ_NAME[] = {
+  "Eastern", "Central", "Mountain", "Arizona", "Pacific", "Alaska", "Hawaii", "UTC", "UK", "C. Europe"};
+#define UI_NUM_TZ 10
+static const char* const UI_KSCOPE_NAME[KSCOPE_MODE_COUNT] = {"Off", "Vert", "Horiz", "Quad", "6-Slice", "8-Slice"};
+static const uint16_t UI_FACE_COLORS[5] = {0xFFFF, 0x07FF, 0x07E0, 0xF81F, 0xFFE0};
+static const uint32_t UI_ROT_MS[] = {0, 60000UL, 300000UL, 900000UL, 3600000UL};
+static const char* const UI_ROT_NAME[] = {"Off", "1 min", "5 min", "15 min", "1 hour"};
+#define UI_NUM_ROT 5
+
+static int8_t uiTzIndex() {
+  for (uint8_t i = 0; i < UI_NUM_TZ; i++) if (strcmp(timezoneTZ, UI_TZ_VAL[i]) == 0) return i;
+  return -1;
+}
+static int8_t uiRotIndex() {
+  for (uint8_t i = 0; i < UI_NUM_ROT; i++) if (botMode.personalityRotIntervalMs == UI_ROT_MS[i]) return i;
+  return -1;
+}
+
+enum UiRowKind : uint8_t { ROW_NAV, ROW_TOGGLE, ROW_STEP, ROW_INFO, ROW_SWATCH, ROW_DOTS, ROW_HOLD };
+enum UiRowKey : uint8_t {
+  RK_SCENE, RK_PALETTE, RK_HIRES, RK_KSCOPE, RK_FACE, RK_AUTO,
+  RK_PERSONALITY, RK_ROTATE, RK_EXPRESSIONS,
+  RK_WEATHER, RK_CLOCK, RK_TZ, RK_SCHEDULE,
+  RK_SCREEN,
+  RK_NETWORK, RK_ADDRESS, RK_IP, RK_SIGNAL, RK_NEARBY, RK_HOTSPOT,
+  RK_FIRMWARE, RK_DEVICE, RK_UPTIME, RK_MEMORY, RK_RESTART,
+};
+struct UiRow {
+  const char* label;
+  UiRowKind kind;
+  UiRowKey key;
+  bool on;
+  char value[28];
+};
+#define UI_MAX_ROWS 8
+#define UI_ROW_Y0 40
+#define UI_ROW_H 44
+static UiRow uiRows[UI_MAX_ROWS];
+static uint8_t uiRowCount = 0;
+
+static void uiAddRow(const char* label, UiRowKind kind, UiRowKey key, const char* value = "", bool on = false) {
+  if (uiRowCount >= UI_MAX_ROWS) return;
+  UiRow& r = uiRows[uiRowCount++];
+  r.label = label; r.kind = kind; r.key = key; r.on = on;
+  strncpy(r.value, value, sizeof(r.value) - 1);
+  r.value[sizeof(r.value) - 1] = 0;
+}
+
+extern uint8_t uiMeshPeerCount();  // esp_now_mesh.h
+
+// Rebuilt every frame from live state, so pages always show current values
+static void uiBuildRows(uint8_t cat) {
+  uiRowCount = 0;
+  char buf[28];
+  switch (cat) {
+    case CAT_LOOK:
+      uiAddRow("Scene", ROW_NAV, RK_SCENE, uiSceneName(uiSceneIndex()));
+      uiAddRow("Palette", ROW_SWATCH, RK_PALETTE, paletteNames[paletteIndex % NUM_PALETTES]);
+      uiAddRow("Hi-res", ROW_TOGGLE, RK_HIRES, "", hiResMode);
+      uiAddRow("Kaleido", ROW_STEP, RK_KSCOPE, UI_KSCOPE_NAME[kaleidoscopeMode % KSCOPE_MODE_COUNT]);
+      uiAddRow("Face", ROW_DOTS, RK_FACE);
+      uiAddRow("Auto-cycle", ROW_TOGGLE, RK_AUTO, "", autoCycle);
+      break;
+    case CAT_MOOD: {
+      uiAddRow("Personality", ROW_STEP, RK_PERSONALITY, botMode.personality->name);
+      int8_t ri = uiRotIndex();
+      if (ri >= 0) uiAddRow("Rotate", ROW_STEP, RK_ROTATE, UI_ROT_NAME[ri]);
+      else { snprintf(buf, sizeof(buf), "%lu min", (unsigned long)(botMode.personalityRotIntervalMs / 60000)); uiAddRow("Rotate", ROW_STEP, RK_ROTATE, buf); }
+      uiAddRow("Expression", ROW_NAV, RK_EXPRESSIONS, uiExprNames[botMode.face.targetExpr % BOT_NUM_EXPRESSIONS]);
+      break;
+    }
+    case CAT_INFO: {
+      uiAddRow("Weather", ROW_NAV, RK_WEATHER, "Show");
+      uiAddRow("Clock", ROW_TOGGLE, RK_CLOCK, "", isBotTimeOverlayEnabled());
+      int8_t ti = uiTzIndex();
+      uiAddRow("Time zone", ROW_STEP, RK_TZ, ti >= 0 ? UI_TZ_NAME[ti] : "Custom");
+      if (wledData.enabled) uiAddRow("Scheduled", ROW_TOGGLE, RK_SCHEDULE, "", schedContent.enabled);
+      break;
+    }
+    case CAT_LIGHT:
+      snprintf(buf, sizeof(buf), "%u%%", (unsigned)((lcdBrightness * 100 + 127) / 255));
+      uiAddRow("Screen", ROW_NAV, RK_SCREEN, buf);
+      break;
+    case CAT_CONNECT:
+      if (sysStatus.staConnected) {
+        uiAddRow("Network", ROW_INFO, RK_NETWORK, WiFi.SSID().c_str());
+        snprintf(buf, sizeof(buf), "%s.local", mdnsHostname);
+        uiAddRow("Address", ROW_INFO, RK_ADDRESS, buf);
+        uiAddRow("IP", ROW_INFO, RK_IP, sysStatus.staIP.toString().c_str());
+        snprintf(buf, sizeof(buf), "%d dBm", (int)WiFi.RSSI());
+        uiAddRow("Signal", ROW_INFO, RK_SIGNAL, buf);
+        snprintf(buf, sizeof(buf), "%u", uiMeshPeerCount());
+        uiAddRow("Nearby bots", ROW_INFO, RK_NEARBY, buf);
+      }
+      break;
+    case CAT_SYSTEM: {
+      uiAddRow("Firmware", ROW_INFO, RK_FIRMWARE, FIRMWARE_VERSION);
+      uiAddRow("Name", ROW_INFO, RK_DEVICE, apSSID);
+      unsigned long m = millis() / 60000;
+      if (m >= 1440) snprintf(buf, sizeof(buf), "%lud %luh", m / 1440, (m % 1440) / 60);
+      else snprintf(buf, sizeof(buf), "%luh %lum", m / 60, m % 60);
+      uiAddRow("Uptime", ROW_INFO, RK_UPTIME, buf);
+      snprintf(buf, sizeof(buf), "%u KB free", (unsigned)(ESP.getFreeHeap() / 1024));
+      uiAddRow("Memory", ROW_INFO, RK_MEMORY, buf);
+      uiAddRow("Restart", ROW_HOLD, RK_RESTART, "Hold");
+      break;
+    }
+  }
+}
+
+static int16_t uiMaxScroll() {
+  int16_t content = uiRowCount * UI_ROW_H;
+  int16_t visible = LCD_HEIGHT - UI_ROW_Y0 - 4;
+  return content > visible ? content - visible : 0;
+}
+
+static void uiDrawToggle(int16_t x, int16_t y, bool on) {
+  gfx->fillRoundRect(x, y, 40, 24, 12, on ? UI_C_CONNECT : UI_C_TRACK);
+  gfx->fillCircle(on ? x + 28 : x + 12, y + 12, 10, UI_C_TEXT);
+}
+
+static void uiDrawRow(uint8_t i, int16_t y, uint16_t hue) {
+  const UiRow& r = uiRows[i];
+  bool pressed = ui.pressedId == UI_ID_ROW0 + i && r.kind != ROW_INFO;
+  if (pressed) gfx->fillRoundRect(6, y + 2, 228, UI_ROW_H - 4, 8, UI_C_TILE);
+  if (i + 1 < uiRowCount) gfx->drawFastHLine(14, y + UI_ROW_H - 1, 212, UI_C_TILE);
+  int16_t cy = y + UI_ROW_H / 2;
+
+  if (r.kind == ROW_HOLD) {
+    // Fill grows while held; fires at UI_HOLD_MS
+    float t = (ui.holdRow == i) ? min(1.0f, (millis() - ui.holdStart) / (float)UI_HOLD_MS) : 0;
+    if (t > 0) gfx->fillRoundRect(6, y + 2, (int16_t)(228 * t), UI_ROW_H - 4, 8, uiBlend(UI_C_TILE, UI_C_OFF, 0.5f));
+    uiText(r.label, 14, cy, &fonts::DejaVu18, UI_C_OFF, UI_ML);
+    uiText(ui.holdRow == i ? "Keep holding" : "Hold to confirm", 226, cy, &fonts::DejaVu12, UI_C_DIM, UI_MR);
+    return;
+  }
+
+  // Label drops to the small font when it would run into the control
+  int16_t ctrlX;
+  switch (r.kind) {
+    case ROW_STEP:   ctrlX = 124; break;
+    case ROW_TOGGLE: ctrlX = 186; break;
+    case ROW_DOTS:   ctrlX = 118; break;
+    case ROW_SWATCH: ctrlX = 154 - uiTextW(r.value, &fonts::DejaVu12); break;
+    case ROW_NAV:    ctrlX = 208 - uiTextW(r.value, &fonts::DejaVu12); break;
+    default:         ctrlX = 226 - uiTextW(r.value, &fonts::DejaVu12); break;
+  }
+  bool small = 14 + uiTextW(r.label, &fonts::DejaVu18) + 8 > ctrlX;
+  uiText(r.label, 14, cy, small ? &fonts::DejaVu12 : &fonts::DejaVu18, UI_C_TEXT, UI_ML);
+  switch (r.kind) {
+    case ROW_NAV:
+      uiIcon(IC_FWD, 212, cy - 7, 14, UI_C_DIM, UI_C_BG, 2.4f);
+      uiText(r.value, 208, cy, &fonts::DejaVu12, UI_C_DIM, UI_MR);
+      break;
+    case ROW_INFO:
+      uiText(r.value, 226, cy, &fonts::DejaVu12, UI_C_SYSTEM, UI_MR);
+      break;
+    case ROW_TOGGLE:
+      uiDrawToggle(186, cy - 12, r.on);
+      break;
+    case ROW_STEP:
+      gfx->fillRoundRect(124, cy - 14, 104, 28, 8, UI_C_TILE);
+      uiIcon(IC_BACK, 128, cy - 8, 16, hue, UI_C_TILE, 2.6f);
+      uiIcon(IC_FWD, 208, cy - 8, 16, hue, UI_C_TILE, 2.6f);
+      uiText(r.value, 176, cy, &fonts::DejaVu12, UI_C_TEXT, UI_MC);
+      break;
+    case ROW_SWATCH:
+      for (uint8_t k = 0; k < 5; k++) {
+        CRGB c = ColorFromPalette(currentPalette, k * 51);
+        gfx->fillRect(160 + k * 10, cy - 5, 10, 10, crgbToRgb565(c));
+      }
+      uiText(r.value, 154, cy, &fonts::DejaVu12, UI_C_DIM, UI_MR);
+      uiIcon(IC_FWD, 212, cy - 7, 14, UI_C_DIM, UI_C_BG, 2.4f);
+      break;
+    case ROW_DOTS:
+      for (uint8_t k = 0; k < 5; k++) {
+        int16_t dx = 130 + k * 20;
+        if (botFaceColor == UI_FACE_COLORS[k]) gfx->fillCircle(dx, cy, 10, UI_C_MOOD);
+        if (botFaceColor == UI_FACE_COLORS[k]) gfx->fillCircle(dx, cy, 8, UI_C_BG);
+        gfx->fillCircle(dx, cy, 7, UI_FACE_COLORS[k]);
+      }
+      break;
+    default: break;
+  }
+}
+
+static void uiRenderConnectSetup() {
+  uiText("Let's get online!", 120, 52, &fonts::DejaVu18, UI_C_TEXT, UI_MC, true);
+  const char* labels[3] = {"Join this WiFi", "Password", "Then open"};
+  char ip[20];
+  snprintf(ip, sizeof(ip), "%s", WiFi.softAPIP().toString().c_str());
+  const char* values[3] = {apSSID, WIFI_PASSWORD, ip};
+  for (uint8_t i = 0; i < 3; i++) {
+    int16_t y = 72 + i * 42;
+    gfx->fillCircle(30, y + 19, 12, UI_C_CONNECT);
+    char n[2] = {(char)('1' + i), 0};
+    uiText(n, 30, y + 19, &fonts::DejaVu12, UI_C_BG, UI_MC, true);
+    uiText(labels[i], 52, y + 8, &fonts::DejaVu12, UI_C_DIM, UI_ML);
+    uiText(values[i], 52, y + 27, &fonts::DejaVu18, UI_C_TEXT, UI_ML, true);
+  }
+  gfx->drawFastHLine(16, 202, 208, UI_C_TILE);
+  uiIcon(IC_HOTSPOT, 16, 218, 20, UI_C_CONNECT, UI_C_BG);
+  uiText("Hotspot", 44, 228, &fonts::DejaVu18, UI_C_TEXT, UI_ML);
+  uiDrawToggle(186, 216, wifiEnabled);
+}
+
+static void uiRenderSettings() {
+  for (uint8_t i = 0; i < CAT_COUNT; i++) {
+    UiRect r = {(int16_t)(i % 2 ? 124 : 12), (int16_t)(40 + (i / 2) * 66), 104, 60};
+    bool pr = ui.pressedId == UI_ID_CAT0 + i;
+    uint16_t hue = UI_CAT_HUE[i];
+    uint16_t bg = pr ? hue : UI_C_TILE;
+    gfx->fillRoundRect(r.x, r.y, r.w, r.h, 12, bg);
+    uiIcon(UI_CAT_ICON[i], r.x + 10, r.y + 8, 24, pr ? UI_C_BG : hue, bg);
+    char st[20];
+    uint16_t sc = UI_C_DIM;
+    switch (i) {
+      case CAT_LOOK: snprintf(st, sizeof(st), "%s", uiSceneName(uiSceneIndex())); break;
+      case CAT_MOOD: snprintf(st, sizeof(st), "%s", botMode.personality->name); break;
+      case CAT_INFO: {
+        struct tm t;
+        if (getLocalTime(&t, 0)) strftime(st, sizeof(st), "%H:%M", &t);
+        else snprintf(st, sizeof(st), "%s", uiTzIndex() >= 0 ? UI_TZ_NAME[uiTzIndex()] : "");
+        break;
+      }
+      case CAT_LIGHT: snprintf(st, sizeof(st), "%u%%", uiBrightPct()); break;
+      case CAT_CONNECT:
+        snprintf(st, sizeof(st), "%s", sysStatus.staConnected ? "Online" : "Setup");
+        sc = sysStatus.staConnected ? UI_C_CONNECT : UI_C_LIGHT;
+        break;
+      default: snprintf(st, sizeof(st), "%s", FIRMWARE_VERSION); break;
+    }
+    // Long values would collide with the icon: keep the status short
+    if (uiTextW(st, &fonts::DejaVu12) > 60) st[8] = 0;
+    uiText(st, r.x + r.w - 8, r.y + 20, &fonts::DejaVu12, pr ? UI_C_BG : sc, UI_MR);
+    uiText(UI_CAT_NAME[i], r.x + 10, r.y + 46, &fonts::DejaVu18, pr ? UI_C_BG : UI_C_TEXT, UI_ML);
+  }
+  // Mini eyes keep the character on screen
+  gfx->fillEllipse(113, 251, 10, 9, botFaceColor);
+  gfx->fillEllipse(127, 251, 10, 9, botFaceColor);
+  gfx->fillCircle(114, 252, 3, BOT_COLOR_PUPIL);
+  gfx->fillCircle(128, 252, 3, BOT_COLOR_PUPIL);
+  if (uiToastActive()) uiDrawToast();
+  else uiDrawBackPill("Settings", UI_C_SYSTEM, UI_C_BG);
+}
+
+static void uiRenderCat() {
+  uint16_t hue = UI_CAT_HUE[ui.cat];
+  if (ui.cat == CAT_CONNECT && !sysStatus.staConnected) {
+    uiRenderConnectSetup();
+  } else {
+    uiBuildRows(ui.cat);
+    ui.scroll = constrain(ui.scroll, (int16_t)0, uiMaxScroll());
+    for (uint8_t i = 0; i < uiRowCount; i++) {
+      int16_t y = UI_ROW_Y0 + i * UI_ROW_H - ui.scroll;
+      if (y > LCD_HEIGHT || y + UI_ROW_H < UI_ROW_Y0 - UI_ROW_H) continue;
+      uiDrawRow(i, y, hue);
+    }
+    int16_t ms = uiMaxScroll();
+    if (ms > 0) {
+      int16_t track = LCD_HEIGHT - UI_ROW_Y0 - 16;
+      int16_t bar = max((int16_t)20, (int16_t)(track * track / (track + ms)));
+      int16_t by = UI_ROW_Y0 + 4 + (int32_t)(track - bar) * ui.scroll / ms;
+      gfx->fillRoundRect(232, by, 2, bar, 1, UI_C_TRACK);
+    }
+    gfx->fillRect(0, 0, LCD_WIDTH, 36, UI_C_BG);  // rows scroll under the pill
+  }
+  if (uiToastActive()) uiDrawToast();
+  else uiDrawBackPill(UI_CAT_NAME[ui.cat], hue, UI_C_BG);
+}
+
 static void uiRenderHome() {
   // Swipe handle for a few seconds after a touch
   if (millis() - ui.lastTouch < UI_HANDLE_SHOW_MS && ui.lastTouch != 0) {
@@ -688,7 +999,8 @@ void uiRenderOverlay() {
     case UI_SCENE: uiRenderScene(); break;
     case UI_LIGHT: uiRenderLight(); break;
     case UI_MOOD:  uiRenderMood(); break;
-    default: break;
+    case UI_SETTINGS: uiRenderSettings(); break;
+    case UI_CAT:   uiRenderCat(); break;
   }
 }
 
@@ -703,7 +1015,7 @@ static uint8_t uiHitTest(int16_t x, int16_t y) {
       }
       break;
     case UI_SCENE:
-      if (UI_R_BACK.hit(x, y, 8)) return UI_ID_BACK;
+      if (ui.backRect.hit(x, y, 8)) return UI_ID_BACK;
       if (UI_R_PREV.hit(x, y)) return UI_ID_SCENE_PREV;
       if (UI_R_NEXT.hit(x, y)) return UI_ID_SCENE_NEXT;
       if (UI_R_PALETTE.hit(x, y)) return UI_ID_PALETTE;
@@ -711,7 +1023,7 @@ static uint8_t uiHitTest(int16_t x, int16_t y) {
       if (UI_R_AUTO.hit(x, y)) return UI_ID_AUTO;
       break;
     case UI_LIGHT:
-      if (UI_R_BACK.hit(x, y, 8)) return UI_ID_BACK;
+      if (ui.backRect.hit(x, y, 8)) return UI_ID_BACK;
       if (UI_R_MINUS.hit(x, y)) return UI_ID_MINUS;
       if (UI_R_PLUS.hit(x, y)) return UI_ID_PLUS;
       if (UI_R_TRACKROW.hit(x, y, 0)) return UI_ID_TRACK;
@@ -721,11 +1033,30 @@ static uint8_t uiHitTest(int16_t x, int16_t y) {
       }
       break;
     case UI_MOOD:
-      if (UI_R_BACK.hit(x, y, 8)) return UI_ID_BACK;
+      if (ui.backRect.hit(x, y, 8)) return UI_ID_BACK;
       if (UI_R_PERS.hit(x, y)) return UI_ID_PERS0 + min(2, (x - UI_R_PERS.x) / (UI_R_PERS.w / 3));
       for (uint8_t k = 0; k < UI_CHIPS_PER_PAGE; k++) {
         UiRect r = {UI_CHIP_X[k % 4], UI_CHIP_Y[k / 4], 51, 36};
         if (ui.moodPage * UI_CHIPS_PER_PAGE + k < BOT_NUM_EXPRESSIONS && r.hit(x, y, 2)) return UI_ID_CHIP0 + k;
+      }
+      break;
+    case UI_SETTINGS:
+      if (ui.backRect.hit(x, y, 8)) return UI_ID_BACK;
+      for (uint8_t i = 0; i < CAT_COUNT; i++) {
+        UiRect r = {(int16_t)(i % 2 ? 124 : 12), (int16_t)(40 + (i / 2) * 66), 104, 60};
+        if (r.hit(x, y)) return UI_ID_CAT0 + i;
+      }
+      break;
+    case UI_CAT:
+      if (ui.backRect.hit(x, y, 8)) return UI_ID_BACK;
+      if (ui.cat == CAT_CONNECT && !sysStatus.staConnected) {
+        if (y >= 206 && y < 250) return UI_ID_ROW0;  // hotspot toggle
+        break;
+      }
+      if (y >= UI_ROW_Y0 - 4) {
+        uiBuildRows(ui.cat);
+        int16_t i = (y - UI_ROW_Y0 + ui.scroll) / UI_ROW_H;
+        if (i >= 0 && i < uiRowCount) return UI_ID_ROW0 + i;
       }
       break;
     default: break;
@@ -741,17 +1072,92 @@ static void uiStepScene(int8_t dir) {
   uiToast(uiSceneName(i), UI_C_LOOK);
 }
 
-static void uiOpenLegacySettings() {
-  menuPage = 1;
-  drawMenu();          // sets menuVisible; legacy menu draws straight to the panel
-  ui.screen = UI_LEGACY;
-  ui.screenSince = millis();
+static void uiBack() {
+  switch (ui.screen) {
+    case UI_CAT: uiGo(UI_SETTINGS); break;
+    case UI_SETTINGS: uiGo(UI_DOCK); break;
+    default: uiGo(ui.backTo); break;
+  }
+}
+
+static void uiOpenSheet(UiScreen s, UiScreen backTo) {
+  ui.backTo = backTo;
+  uiGo(s);
+}
+
+static void uiRowAction(uint8_t i, int16_t x) {
+  if (ui.cat == CAT_CONNECT && !sysStatus.staConnected) {
+    toggleWifiAP();  // offline: the hotspot is the only way in, so it is safe to toggle
+    return;
+  }
+  uiBuildRows(ui.cat);
+  if (i >= uiRowCount) return;
+  const UiRow& r = uiRows[i];
+  int dir = (r.kind == ROW_STEP && x < 176) ? -1 : 1;
+  switch (r.key) {
+    case RK_SCENE: uiOpenSheet(UI_SCENE, UI_CAT); break;
+    case RK_PALETTE:
+      paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
+      currentPalette = palettes[paletteIndex];
+      autoCycle = false;
+      markSettingsDirty();
+      break;
+    case RK_HIRES: toggleHiResMode(); break;
+    case RK_KSCOPE:
+      kaleidoscopeMode = (kaleidoscopeMode + KSCOPE_MODE_COUNT + dir) % KSCOPE_MODE_COUNT;
+      markSettingsDirty();
+      break;
+    case RK_FACE: {
+      int k = constrain((x - 120) / 20, 0, 4);
+      setBotFaceColor(UI_FACE_COLORS[k]);
+      markSettingsDirty();
+      break;
+    }
+    case RK_AUTO:
+      autoCycle = !autoCycle;
+      lastChange = millis();
+      markSettingsDirty();
+      break;
+    case RK_PERSONALITY:
+      setBotPersonality((botMode.personalityIndex + runtimePersonalityCount + dir) % runtimePersonalityCount);
+      break;
+    case RK_ROTATE: {
+      int8_t ri = uiRotIndex();
+      ri = ri < 0 ? 0 : (ri + UI_NUM_ROT + dir) % UI_NUM_ROT;
+      botMode.personalityRotIntervalMs = UI_ROT_MS[ri];
+      botMode.lastPersonalityRotMs = millis();
+      break;
+    }
+    case RK_EXPRESSIONS: uiOpenSheet(UI_MOOD, UI_CAT); break;
+    case RK_WEATHER:
+      uiGo(UI_HOME);
+      infoMode.beginEnterTransition();
+      break;
+    case RK_CLOCK: toggleBotTimeOverlay(); break;
+    case RK_TZ: {
+      int8_t ti = uiTzIndex();
+      ti = ti < 0 ? 0 : (ti + UI_NUM_TZ + dir) % UI_NUM_TZ;
+      strncpy(timezoneTZ, UI_TZ_VAL[ti], TZ_BUF_LEN - 1);
+      timezoneTZ[TZ_BUF_LEN - 1] = 0;
+      applyTimezone();
+      configTzTime(timezoneTZ, "pool.ntp.org", "time.nist.gov");
+      markSettingsDirty();
+      break;
+    }
+    case RK_SCHEDULE:
+      schedContent.enabled = !schedContent.enabled;
+      if (schedContent.enabled) schedContent.lastCycleStartMs = millis() - schedContent.cycleIntervalMs + 60000;
+      saveScheduleSettings();
+      break;
+    case RK_SCREEN: uiOpenSheet(UI_LIGHT, UI_CAT); break;
+    default: break;  // info rows; restart fires from the hold timer
+  }
 }
 
 static void uiActivate(uint8_t id) {
   switch (id) {
-    case UI_ID_TILE0 + 0: uiGo(UI_MOOD); break;
-    case UI_ID_TILE0 + 1: uiGo(UI_SCENE); break;
+    case UI_ID_TILE0 + 0: uiOpenSheet(UI_MOOD, UI_DOCK); break;
+    case UI_ID_TILE0 + 1: uiOpenSheet(UI_SCENE, UI_DOCK); break;
     case UI_ID_TILE0 + 2:
       uiGo(UI_HOME);
       infoMode.beginEnterTransition();
@@ -760,8 +1166,8 @@ static void uiActivate(uint8_t id) {
       toggleBotTimeOverlay();
       uiToast(isBotTimeOverlayEnabled() ? "Clock on" : "Clock off", UI_C_INFO);
       break;
-    case UI_ID_TILE0 + 4: uiGo(UI_LIGHT); break;
-    case UI_ID_TILE0 + 5: uiOpenLegacySettings(); break;
+    case UI_ID_TILE0 + 4: uiOpenSheet(UI_LIGHT, UI_DOCK); break;
+    case UI_ID_TILE0 + 5: uiGo(UI_SETTINGS); break;
     case UI_ID_PILL: {
       char buf[40];
       if (sysStatus.staConnected) snprintf(buf, sizeof(buf), "%s", sysStatus.staIP.toString().c_str());
@@ -769,7 +1175,7 @@ static void uiActivate(uint8_t id) {
       uiToast(buf, UI_C_CONNECT, 3000);
       break;
     }
-    case UI_ID_BACK: uiGo(UI_DOCK); break;
+    case UI_ID_BACK: uiBack(); break;
 
     case UI_ID_SCENE_PREV: uiStepScene(-1); break;
     case UI_ID_SCENE_NEXT: uiStepScene(1); break;
@@ -802,6 +1208,13 @@ static void uiActivate(uint8_t id) {
       break;
     }
     default:
+      if (id >= UI_ID_CAT0 && id < UI_ID_CAT0 + CAT_COUNT) {
+        uint8_t c = id - UI_ID_CAT0;
+        if (c == CAT_LIGHT) { uiOpenSheet(UI_LIGHT, UI_SETTINGS); break; }
+        ui.cat = c;
+        uiGo(UI_CAT);
+        break;
+      }
       if (id >= UI_ID_CHIP0 && id < UI_ID_CHIP0 + UI_CHIPS_PER_PAGE) {
         uint8_t e = ui.moodPage * UI_CHIPS_PER_PAGE + (id - UI_ID_CHIP0);
         if (e < BOT_NUM_EXPRESSIONS) botMode.setExpression(e, 250);
@@ -818,8 +1231,16 @@ static void uiTrackTo(int16_t x) {
 // ---- Gesture handlers -----------------------------------------------------
 static void uiOnDown(int16_t x, int16_t y) {
   botMode.registerInteraction();
-  if (ui.screen == UI_LEGACY || infoMode.active) return;
+  if (infoMode.active) return;
   ui.pressedId = uiHitTest(x, y);
+  ui.scrollStart = ui.scroll;
+  if (ui.screen == UI_CAT && ui.pressedId >= UI_ID_ROW0 && ui.cat != CAT_CONNECT) {
+    uint8_t i = ui.pressedId - UI_ID_ROW0;
+    if (i < uiRowCount && uiRows[i].kind == ROW_HOLD) {
+      ui.holdRow = i;
+      ui.holdStart = millis();
+    }
+  }
   if (ui.pressedId == UI_ID_TRACK) {
     ui.dragging = true;
     uiTrackTo(x);
@@ -828,28 +1249,23 @@ static void uiOnDown(int16_t x, int16_t y) {
 
 static void uiOnMove(int16_t x, int16_t y) {
   if (ui.dragging) { uiTrackTo(x); return; }
+  // Vertical drag scrolls long category pages
+  int16_t dy = y - uiTrack.y0, dx = x - uiTrack.x0;
+  if (ui.screen == UI_CAT && uiMaxScroll() > 0 &&
+      (ui.scrolling || (abs(dy) > UI_TAP_SLOP_PX && abs(dy) > abs(dx)))) {
+    ui.scrolling = true;
+    ui.pressedId = UI_ID_NONE;
+    ui.holdRow = -1;
+    ui.scroll = constrain((int16_t)(ui.scrollStart - dy), (int16_t)0, uiMaxScroll());
+    return;
+  }
+  if (ui.holdRow >= 0 && (abs(dx) > UI_TAP_SLOP_PX || abs(dy) > UI_TAP_SLOP_PX)) ui.holdRow = -1;
   // Finger slid off the target: cancel the press
   if (ui.pressedId != UI_ID_NONE && uiHitTest(x, y) != ui.pressedId) ui.pressedId = UI_ID_NONE;
 }
 
 static void uiOnTap(int16_t x, int16_t y) {
   if (infoMode.active) { infoMode.nextPage(); return; }
-
-  if (ui.screen == UI_LEGACY) {
-    bool close = processMenuTouch(x, y);
-    if (close || !menuVisible) {
-      hideMenu();
-      uiGo(UI_HOME);
-    } else if (menuPage == 0) {
-      // BACK on the legacy settings page returns to the dock, not the old main page
-      menuVisible = false;
-      ui.screen = UI_DOCK;
-      ui.screenSince = millis();
-    } else {
-      drawMenu();
-    }
-    return;
-  }
 
   if (ui.screen == UI_HOME) {
     botMode.onTap();
@@ -858,8 +1274,9 @@ static void uiOnTap(int16_t x, int16_t y) {
 
   uint8_t id = uiHitTest(x, y);
   if (id != UI_ID_NONE && id == ui.pressedId) {
-    uiActivate(id);
-  } else if (id == UI_ID_NONE && y < UI_SHEET_TOP && ui.screen != UI_SCENE) {
+    if (ui.screen == UI_CAT && id >= UI_ID_ROW0) uiRowAction(id - UI_ID_ROW0, x);
+    else uiActivate(id);
+  } else if (id == UI_ID_NONE && y < UI_SHEET_TOP && !uiIsFullPage(ui.screen) && ui.screen != UI_SCENE) {
     // Tap on the mini face closes the sheet
     uiGo(UI_HOME);
   }
@@ -902,14 +1319,14 @@ static void uiOnSwipe(uint8_t dir) {
       break;
     case UI_LIGHT:
       if (dir == UI_SWIPE_DOWN) uiGo(UI_HOME);
-      else if (dir == UI_SWIPE_RIGHT) uiGo(UI_DOCK);
+      else if (dir == UI_SWIPE_RIGHT) uiBack();
       break;
-    case UI_LEGACY:
-      if (dir == UI_SWIPE_DOWN || dir == UI_SWIPE_RIGHT) {
-        hideMenu();
-        uiGo(dir == UI_SWIPE_RIGHT ? UI_DOCK : UI_HOME);
-      }
+    case UI_SETTINGS:
+    case UI_CAT:
+      if (dir == UI_SWIPE_RIGHT) uiBack();
+      else if (dir == UI_SWIPE_DOWN && ui.screen == UI_SETTINGS) uiGo(UI_HOME);
       break;
+    default: break;
   }
 }
 
@@ -918,10 +1335,10 @@ static void uiTick() {
   unsigned long now = millis();
   unsigned long idle = now - max(ui.lastTouch, ui.screenSince);
 
-  if (ui.screen == UI_LEGACY) {
-    if (idle > UI_SHEET_IDLE_MS) { hideMenu(); uiGo(UI_HOME); }
-  } else if (ui.screen != UI_HOME && !ui.dragging && !uiTrack.down) {
-    if (idle > (ui.screen == UI_SCENE ? UI_SCENE_IDLE_MS : UI_SHEET_IDLE_MS)) uiGo(UI_HOME);
+  if (ui.screen != UI_HOME && !ui.dragging && !uiTrack.down) {
+    unsigned long limit = uiIsFullPage(ui.screen) ? UI_PAGE_IDLE_MS
+                        : ui.screen == UI_SCENE ? UI_SCENE_IDLE_MS : UI_SHEET_IDLE_MS;
+    if (idle > limit) uiGo(UI_HOME);
   }
 
   // Discoverability: the bot says the hint itself on the first few boots and
@@ -988,6 +1405,19 @@ void handleTouch() {
     }
     uiTrack.lastSeen = now;
 
+    // Hold-to-confirm rows (Restart)
+    if (ui.holdRow >= 0 && now - ui.holdStart >= UI_HOLD_MS) {
+      uiBuildRows(ui.cat);
+      bool restart = ui.holdRow < uiRowCount && uiRows[ui.holdRow].key == RK_RESTART;
+      ui.holdRow = -1;
+      if (restart) {
+        uiToast("Restarting...", UI_C_OFF, 5000);
+        runBotMode();  // show the toast before we go
+        delay(300);
+        ESP.restart();
+      }
+    }
+
     int16_t dx = uiTrack.x - uiTrack.x0, dy = uiTrack.y - uiTrack.y0;
     if (!uiTrack.longFired && !ui.dragging && now - uiTrack.t0 >= UI_LONG_PRESS_MS &&
         abs(dx) < UI_TAP_SLOP_PX && abs(dy) < UI_TAP_SLOP_PX) {
@@ -1000,8 +1430,11 @@ void handleTouch() {
     uiTrack.down = false;
     int16_t dx = uiTrack.x - uiTrack.x0, dy = uiTrack.y - uiTrack.y0;
     unsigned long dur = uiTrack.lastSeen - uiTrack.t0;
+    ui.holdRow = -1;
     if (ui.dragging) {
       ui.dragging = false;
+    } else if (ui.scrolling) {
+      ui.scrolling = false;
     } else if (!uiTrack.longFired) {
       int16_t adx = abs(dx), ady = abs(dy);
       if (max(adx, ady) >= UI_SWIPE_MIN_PX && dur <= UI_SWIPE_MAX_MS) {

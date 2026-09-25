@@ -430,4 +430,7 @@ bool meshIsInitialized() {
   return meshData.initialized;
 }
 
+// Peer count for the touch UI's Connect page
+uint8_t uiMeshPeerCount() { return meshData.peerCount; }
+
 #endif // ESP_NOW_MESH_H
