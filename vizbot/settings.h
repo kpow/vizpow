@@ -104,6 +104,9 @@ void loadSettings() {
   midiSynthPort = prefs.getUChar("midiPort", MIDI_SYNTH_PORT_DEFAULT);
   if (midiSynthPort > MIDI_SYNTH_PORT_A) midiSynthPort = MIDI_SYNTH_PORT_DEFAULT;
   #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  scChillMinutes = scSnapChillMinutes(prefs.getUChar("chillMin", 10));
+  #endif
   // Force full brightness — override any stale NVS dim value
   lcdBrightness = 255;
   #endif
@@ -145,6 +148,9 @@ void saveSettings() {
   prefs.putUChar("audioDrm", audioDrama);
   #ifdef MIDI_SYNTH_ENABLED
   prefs.putUChar("midiPort", midiSynthPort);
+  #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  prefs.putUChar("chillMin", scChillMinutes);
   #endif
   #endif
 

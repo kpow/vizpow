@@ -22,7 +22,7 @@
 // multi-click/hold machinery would otherwise misread as a "hold" and drop. Events:
 //   - Tap FRONT → nod   (yes)
 //   - Tap BACK  → shake (no)   [middle pad ignored — every tap is front or back]
-//   - Hold 2s   → chill mode (10 min)
+//   - Hold 2s   → chill mode (10/30/60/120 min, see scChillMinutes)
 //
 // The tapped zone is recovered by tracking each pad's peak intensity during the
 // press and reading it on the release edge.
@@ -48,10 +48,10 @@ struct ScTouchState {
   bool holdFired = false;
   static constexpr uint16_t SC_CHILL_HOLD_MS = 2000;
 
-  // Chill mode (10 min quiet) — owned here; read by the main loop's idle gate.
+  // Chill mode (quiet block, length = scChillMinutes) — owned here; read by the
+  // main loop's idle gate.
   bool chillMode = false;
   unsigned long chillEndMs = 0;
-  static constexpr uint32_t CHILL_DURATION_MS = 600000;  // 10 minutes
 
   void init() {
     // Hold threshold parked well above any plausible tap so a lingering finger
@@ -125,6 +125,40 @@ struct ScTouchState {
 };
 
 static ScTouchState scTouch_state;
+
+// Chill length picked in the touch UI / web panel; persisted in NVS ("chillMin").
+static const uint8_t SC_CHILL_OPTIONS[] = { 10, 30, 60, 120 };
+#define SC_NUM_CHILL_OPTIONS 4
+uint8_t scChillMinutes = 10;
+
+// Snap any value to the nearest allowed option (guards stale/garbage NVS).
+inline uint8_t scSnapChillMinutes(int m) {
+  uint8_t best = SC_CHILL_OPTIONS[0];
+  for (uint8_t i = 0; i < SC_NUM_CHILL_OPTIONS; i++)
+    if (abs(m - SC_CHILL_OPTIONS[i]) < abs(m - best)) best = SC_CHILL_OPTIONS[i];
+  return best;
+}
+
+inline int8_t scChillOptionIndex() {
+  for (uint8_t i = 0; i < SC_NUM_CHILL_OPTIONS; i++)
+    if (SC_CHILL_OPTIONS[i] == scChillMinutes) return i;
+  return 0;
+}
+
+// Whole minutes left in the current chill, rounded up (0 when not chilling).
+inline uint32_t scChillMinutesLeft() {
+  if (!scTouch_state.chillMode) return 0;
+  long ms = (long)(scTouch_state.chillEndMs - millis());
+  return ms > 0 ? (ms + 59999UL) / 60000UL : 0;
+}
+
+// Change the chill length. If already chilling, restart the timer at the new
+// length so the change takes effect immediately.
+inline void scSetChillMinutes(int m) {
+  scChillMinutes = scSnapChillMinutes(m);
+  if (scTouch_state.chillMode)
+    scTouch_state.chillEndMs = millis() + scChillMinutes * 60000UL;
+}
 
 // ============================================================================
 // Pet Reaction — personality-specific response to head touch
@@ -284,11 +318,12 @@ inline void scFireRecenter(uint8_t personalityIndex) {
 }
 
 // ============================================================================
-// Long-Press Chill — hold head 2s → 10 min quiet mode
+// Long-Press Chill — hold head 2s → quiet mode for scChillMinutes
 // ============================================================================
 
-// durationMs=0 means the default 10 minutes. /bot/chill?minutes=N overrides —
-// long chills (e.g. 480 min) double as the idle-drift-off soak experiment.
+// durationMs=0 means the chosen length (scChillMinutes). /bot/chill?minutes=N
+// overrides — long chills (e.g. 480 min) double as the idle-drift-off soak
+// experiment.
 inline void scFireChillMode(uint32_t durationMs = 0) {
   // Toggle: if already chilling, wake up
   if (scTouch_state.chillMode) {
@@ -302,7 +337,7 @@ inline void scFireChillMode(uint32_t durationMs = 0) {
   } else {
     scTouch_state.chillMode = true;
     scTouch_state.chillEndMs = millis() +
-        (durationMs ? durationMs : ScTouchState::CHILL_DURATION_MS);
+        (durationMs ? durationMs : scChillMinutes * 60000UL);
 
     scGoHome(800);
     botMode.face.transitionTo(EXPR_CHILL, 500);

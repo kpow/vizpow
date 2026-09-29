@@ -351,7 +351,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             <input type="range" id="scLedSp" min="10" max="255" value="128">
           </div>
           <div style="border-top:1px solid #eee;margin-top:8px;padding-top:10px">
-            <div class="trow"><span>Chill Mode (10 min)</span><div class="tog" id="scChillToggle" onclick="scToggleChill()"></div></div>
+            <div class="trow"><span>Chill Mode</span><div class="tog" id="scChillToggle" onclick="scToggleChill()"></div></div>
+            <div class="srow" style="margin-top:6px"><span>Chill for</span><span id="scChillLeft"></span></div>
+            <select id="scChillMin" onchange="scSetChillMin(this.value)" class="sel" style="margin-top:6px">
+              <option value="10">10 min</option><option value="30">30 min</option>
+              <option value="60">1 hour</option><option value="120">2 hours</option>
+            </select>
             <div class="hint">Hold head 2s or tap here. Stops movement.</div>
           </div>
           <div id="scBattery" style="border-top:1px solid #eee;margin-top:8px;padding-top:10px;display:none">
@@ -988,12 +993,23 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     }
 
     let scChillOn = false;
+    function scRenderChill(on, left) {
+      scChillOn = on;
+      document.getElementById('scChillToggle').className = 'tog ' + (on ? 'on' : '');
+      document.getElementById('scChillLeft').textContent = on && left !== undefined ? left + ' min left' : '';
+    }
     async function scToggleChill() {
       const r = await fetch('/bot/chill');
       if (r) {
         const d = await r.json();
-        scChillOn = d.chill;
-        document.getElementById('scChillToggle').className = 'tog ' + (scChillOn ? 'on' : '');
+        scRenderChill(d.chill, d.minutesLeft);
+      }
+    }
+    async function scSetChillMin(v) {
+      const r = await fetch('/bot/chill/minutes?v=' + v);
+      if (r) {
+        const d = await r.json();
+        scRenderChill(d.chill, d.minutesLeft);
       }
     }
 
@@ -1031,9 +1047,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       if (!s.stackchan) return;
       document.getElementById('scCard').style.display = '';
       const sc = s.stackchan;
-      if (sc.chill !== undefined) {
-        scChillOn = sc.chill;
-        document.getElementById('scChillToggle').className = 'tog ' + (scChillOn ? 'on' : '');
+      if (sc.chill !== undefined) scRenderChill(sc.chill, sc.chillLeft);
+      if (sc.chillMinutes !== undefined && document.activeElement.id !== 'scChillMin') {
+        document.getElementById('scChillMin').value = sc.chillMinutes;
       }
       if (sc.ledMode !== undefined) {
         scLedMode = sc.ledMode;
@@ -1202,6 +1218,8 @@ void handleState() {
                   (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
                                                   ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
                   ",\"chill\":" + (scTouch_state.chillMode ? "true" : "false") +
+                  ",\"chillMinutes\":" + String(scChillMinutes) +
+                  (scTouch_state.chillMode ? ",\"chillLeft\":" + String(scChillMinutesLeft()) : "") +
                   (sysStatus.scBaseLedsReady ? ",\"ledMode\":" + String(scLeds.mode) +
                                                 ",\"ledModeName\":\"" + String(SC_LED_MODE_NAMES[scLeds.mode]) + "\"" +
                                                 ",\"ledBrightness\":" + String(scLeds.brightness) +
@@ -2062,21 +2080,37 @@ void handleScBatteryStatus() {
   server.send(200, "application/json", json);
 }
 
-// POST /bot/chill — toggle chill mode. Optional ?minutes=N (max 24h) overrides
-// the default 10; ?minutes=480 gives the 8-hour quiet block used for the
-// idle-drift soak experiment.
+static void sendScChillState() {
+  String json = "{\"chill\":";
+  json += scTouch_state.chillMode ? "true" : "false";
+  json += ",\"chillMinutes\":";
+  json += scChillMinutes;
+  if (scTouch_state.chillMode) {
+    json += ",\"minutesLeft\":";
+    json += scChillMinutesLeft();
+  }
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// POST /bot/chill — toggle chill mode for the chosen length (scChillMinutes).
+// Optional ?minutes=N (max 24h) overrides it for this one chill; ?minutes=480
+// gives the 8-hour quiet block used for the idle-drift soak experiment.
 void handleScChillToggle() {
   uint32_t minutes = server.hasArg("minutes")
       ? constrain(server.arg("minutes").toInt(), 1, 1440) : 0;
   scFireChillMode(minutes * 60000UL);
-  String json = "{\"chill\":";
-  json += scTouch_state.chillMode ? "true" : "false";
-  if (scTouch_state.chillMode) {
-    json += ",\"minutesLeft\":";
-    json += (scTouch_state.chillEndMs - millis()) / 60000UL;
+  sendScChillState();
+}
+
+// POST /bot/chill/minutes?v=N — set the chill length (10, 30, 60 or 120;
+// other values snap to the nearest). Persists. Restarts a running chill.
+void handleScChillMinutes() {
+  if (server.hasArg("v")) {
+    scSetChillMinutes(server.arg("v").toInt());
+    markSettingsDirty();
   }
-  json += "}";
-  server.send(200, "application/json", json);
+  sendScChillState();
 }
 
 // POST /bot/poweroff — graceful shutdown
@@ -2238,6 +2272,7 @@ void setupWebServer() {
   server.on("/bot/base_leds/set", handleScBaseLeds);
   server.on("/bot/base_leds/mode", handleScBaseLedMode);
   server.on("/bot/chill", handleScChillToggle);
+  server.on("/bot/chill/minutes", handleScChillMinutes);
   server.on("/bot/photo/capture", handleScPhotoCapture);
   server.on("/bot/photos", handleScPhotoList);
   server.on("/bot/photo/get", handleScPhotoGet);

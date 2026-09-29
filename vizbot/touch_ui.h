@@ -877,6 +877,9 @@ static const uint16_t UI_FACE_COLORS[5] = {0xFFFF, 0x07FF, 0x07E0, 0xF81F, 0xFFE
 static const uint32_t UI_ROT_MS[] = {0, 60000UL, 300000UL, 900000UL, 3600000UL};
 static const char* const UI_ROT_NAME[] = {"Off", "1 min", "5 min", "15 min", "1 hour"};
 #define UI_NUM_ROT 5
+#ifdef BOARD_HAS_STACKCHAN_BASE
+static const char* const UI_CHILL_NAME[SC_NUM_CHILL_OPTIONS] = {"10 min", "30 min", "1 hour", "2 hours"};
+#endif
 
 static int8_t uiTzIndex() {
   for (uint8_t i = 0; i < UI_NUM_TZ; i++) if (strcmp(timezoneTZ, UI_TZ_VAL[i]) == 0) return i;
@@ -896,7 +899,7 @@ enum UiRowKey : uint8_t {
   RK_NETWORK, RK_ADDRESS, RK_IP, RK_SIGNAL, RK_NEARBY, RK_HOTSPOT,
   RK_FIRMWARE, RK_DEVICE, RK_UPTIME, RK_MEMORY, RK_RESTART,
   RK_BASE_LEDS, RK_LED_MODE, RK_VOLUME, RK_AUDIOFX, RK_REACT,
-  RK_CHILL, RK_NOD, RK_SHAKE, RK_LOOKUP, RK_LOOKDOWN, RK_CENTER,
+  RK_CHILL, RK_CHILL_TIME, RK_NOD, RK_SHAKE, RK_LOOKUP, RK_LOOKDOWN, RK_CENTER,
   RK_BATTERY, RK_GAMES, RK_POWEROFF,
 };
 struct UiRow {
@@ -987,6 +990,7 @@ static void uiBuildRows(uint8_t cat) {
 #ifdef BOARD_HAS_STACKCHAN_BASE
     case CAT_HEAD:
       uiAddRow("Chill mode", ROW_TOGGLE, RK_CHILL, "", scTouch_state.chillMode);
+      uiAddRow("Chill time", ROW_STEP, RK_CHILL_TIME, UI_CHILL_NAME[scChillOptionIndex()]);
       uiAddRow("Nod", ROW_NAV, RK_NOD);
       uiAddRow("Shake", ROW_NAV, RK_SHAKE);
       uiAddRow("Look up", ROW_NAV, RK_LOOKUP);
@@ -1473,6 +1477,12 @@ static void uiRowAction(uint8_t i, int16_t x) {
 #endif
 #ifdef BOARD_HAS_STACKCHAN_BASE
     case RK_CHILL: scFireChillMode(); break;
+    case RK_CHILL_TIME: {
+      int8_t ci = (scChillOptionIndex() + SC_NUM_CHILL_OPTIONS + dir) % SC_NUM_CHILL_OPTIONS;
+      scSetChillMinutes(SC_CHILL_OPTIONS[ci]);
+      markSettingsDirty();
+      break;
+    }
     case RK_NOD: scFireNod(); break;
     case RK_SHAKE: scFireShake(); break;
     case RK_LOOKUP: scMovePitch(900, 500); break;

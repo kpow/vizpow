@@ -296,6 +296,8 @@ Most write endpoints take query args and return `text/plain` `"OK"`; read endpoi
 | `/bot/volume` | GET | `v` 0-255 | OK |
 | `/bot/sequences` | GET | — | JSON MIDI sequence list |
 | `/bot/mic` | GET | — | JSON mic analysis |
+| `/bot/chill` | GET | `minutes` 1-1440 (optional, one-off) | JSON chill state (Stackchan) |
+| `/bot/chill/minutes` | GET | `v` 10/30/60/120 | JSON chill state (Stackchan) |
 | `/info/toggle` | GET | — | OK |
 | `/info/location` | GET | `lat`, `lon` | OK |
 | `/info/zip` | GET | `zip` | JSON geocode result |

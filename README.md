@@ -393,6 +393,9 @@ The face owns the screen; everything else is one gesture away (`vizbot/touch_ui.
 - **Settings** (More): Look, Mood, Info, Light & sound, Connect, System. Connect shows the
   `.local` address and IP, or the hotspot setup steps when offline. Restart, Power off
   (Stackchan) and Games (Faces) need a 1.5 s hold.
+- **Chill mode** (Stackchan): hold the top of the head 2 s, or Settings › Head › Chill mode.
+  The head homes and stops moving for the length set in **Chill time** (10 min, 30 min,
+  1 hour or 2 hours; saved across reboots). Same controls in the web panel's Stackchan card.
 - Sheets close on swipe down, a tap on the face, or 10 s idle (30 s for settings pages).
 
 Dev endpoints for driving the UI over WiFi: `GET /debug/screen` returns the last frame
@@ -640,6 +643,8 @@ When running multiple vizbots, each device needs a unique network identity. vizB
 | `/bot/baseled?mode=N` | Set base LED mode (0=off, 1=mood, 2=audio, 3=glow) |
 | `/bot/baseled?r=R&g=G&b=B` | Set all base LEDs to solid color |
 | `/bot/touch` | Read head touch state (JSON) |
+| `/bot/chill` | Toggle chill mode (head homes and stops moving) for the chosen length. `?minutes=N` (1–1440) overrides it once |
+| `/bot/chill/minutes?v=N` | Set chill length: 10, 30, 60 or 120 min (saved; restarts a running chill) |
 | `/bot/battery` | Read battery voltage and current (JSON) |
 | `/bot/audiofx?v=0\|1` | Toggle audio-reactive effects |
 | `/bot/audiodrama?v=N` | Set audio reactivity depth (0–200; 0=off, 100=tasteful, 200=dramatic) |
