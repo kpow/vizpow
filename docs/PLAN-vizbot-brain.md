@@ -39,6 +39,9 @@ Deviations from the plan above:
 | Firmware v3.5.8: end-of-speech relative to the speaker's own loudness (15%); max recording 12 s | Meant to keep background talk from holding the mic open; not yet tested in a noisy room |
 | Brain tells the bot its address at startup (`/brain/config`) | The bot's mDNS lookup of `_vizbrain._tcp` failed after a reboot; the advertisement itself was fine |
 | vizbrain runs as a launchd agent (`com.kpow.vizbrain`) | Starts at login, restarts on crash, reads the key from the Keychain |
+| Firmware v3.5.9–3.5.10: reply audio plays while it downloads; chunked (growing) clips accepted | Request → first sound 0.1 s for a ready clip (was 2.7 s for an 11 s answer); 15.8 s clip played with no gaps |
+| vizbrain streams Claude's reply sentence by sentence into one live clip | Typed request → first sound ~2.2 s (was ~3–4 s); spoken question ~3.6 s from end of speech |
+| Spend tracking (`usage.json`, shown on the typing page) | ~$0.005 per turn; prompt caching not engaging yet (prompt ~2K tokens, likely under the minimum) |
 | Front head tap starts listening (v3.5.7) | The middle-pad tap fired nod/shake: a finger on the middle also maxes a neighbour pad |
 
 Hardware findings:

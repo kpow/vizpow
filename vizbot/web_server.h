@@ -2294,6 +2294,7 @@ void handleBrainPlay() {
   strncpy(voice.playText, server.arg("text").c_str(), sizeof(voice.playText) - 1);
   voice.playText[sizeof(voice.playText) - 1] = '\0';
   voice.playExpr = server.hasArg("expr") ? (int8_t)server.arg("expr").toInt() : -1;
+  voice.playMs = server.hasArg("ms") ? (uint32_t)server.arg("ms").toInt() : 0;
   voice.playRequested = true;
   server.send(200, "application/json", "{\"ok\":true}");
 }

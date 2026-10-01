@@ -86,7 +86,7 @@ class Brain:
                 f"Kevin may call them by a nickname; pick the closest name.\n"
                 f"Weather (refreshed every 15 minutes): {self.toolbox.cached_weather() or 'not loaded yet; use get_weather'}")
 
-    def turn(self, heard: str, personality: str = "Chill") -> dict:
+    def turn(self, heard: str, personality: str = "Chill", on_text=None) -> dict:
         """Run one conversational turn. Returns {text, tools}."""
         with self.lock:
             if time.time() - self.last_turn > self.settings["session_idle_s"]:
@@ -96,7 +96,7 @@ class Brain:
                 result = self._offline_turn(heard)
             else:
                 try:
-                    result = self._claude_turn(heard, personality)
+                    result = self._claude_turn(heard, personality, on_text)
                 except Exception as e:  # noqa: BLE001 - say it out loud rather than go silent
                     print(f"[brain] Claude call failed: {e}")
                     msg = str(e).lower()
@@ -115,7 +115,7 @@ class Brain:
 
     # ---- Claude ---------------------------------------------------------
 
-    def _claude_turn(self, heard: str, personality: str) -> dict:
+    def _claude_turn(self, heard: str, personality: str, on_text=None) -> dict:
         import anthropic
 
         system = [
@@ -128,7 +128,7 @@ class Brain:
         text_parts: list[str] = []
 
         for _ in range(MAX_TOOL_ROUNDS):
-            resp = self._create(system, messages, tools)
+            resp = self._create(system, messages, tools, on_text)
             if resp.stop_reason == "refusal":
                 return {"text": "Hmm, I'd better not answer that one.", "tools": used}
             # Keep text from every round: words before a tool call are part of the reply.
@@ -168,34 +168,44 @@ class Brain:
         return {"text": _speakable(TAG_RE.sub("", raw)), "tools": tags + used,
                 "expression": expression, "gesture": gesture}
 
-    def _create(self, system, messages, tools):
-        resp = self._create_raw(system, messages, tools)
+    def _create(self, system, messages, tools, on_text=None):
+        resp = self._create_raw(system, messages, tools, on_text)
         try:
             usage.record(getattr(resp, "model", None) or self.settings["model"], resp.usage)
         except Exception as e:  # noqa: BLE001 - accounting must never break a turn
             print(f"[usage] not recorded: {e}")
         return resp
 
-    def _create_raw(self, system, messages, tools):
+    def _create_raw(self, system, messages, tools, on_text=None):
+        """One model call. With on_text, the reply is streamed and each text
+        delta is passed to on_text as it arrives (for sentence-by-sentence speech)."""
         import anthropic
 
         model = self.settings["model"]
         common = dict(model=model, max_tokens=1024, system=system, messages=messages,
-                      tools=tools, cache_control={"type": "ephemeral"})
+                      tools=tools, cache_control={"type": "ephemeral"},
+                      output_config={"effort": self.settings["effort"]})
         if model == "claude-sonnet-5-5":
             # Lowest-latency thinking setting on Sonnet 5.5, plus server-side
             # refusal fallback. Retried plainly if the API rejects either.
+            fast = dict(common, thinking={"type": "between_tools"},
+                        betas=["server-side-fallback-2026-07-01"], fallbacks="default")
             try:
-                return self.client.beta.messages.create(
-                    **common, thinking={"type": "between_tools"},
-                    output_config={"effort": self.settings["effort"]},
-                    betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-                )
+                return self._call(self.client.beta.messages, fast, on_text)
             except anthropic.BadRequestError as e:
                 print(f"[brain] fast path rejected ({e}); retrying plain")
-        return self.client.messages.create(
-            **common, output_config={"effort": self.settings["effort"]},
-        )
+        return self._call(self.client.messages, common, on_text)
+
+    @staticmethod
+    def _call(api, params: dict, on_text):
+        if on_text is None:
+            return api.create(**params)
+        with api.stream(**params) as stream:
+            for event in stream:
+                if (event.type == "content_block_delta"
+                        and getattr(event.delta, "type", "") == "text_delta"):
+                    on_text(event.delta.text)
+            return stream.get_final_message()
 
     # ---- No API key: tiny rule-based stand-in ---------------------------
 

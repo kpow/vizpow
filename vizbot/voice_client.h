@@ -78,6 +78,7 @@ struct VoiceClient {
   char     playId[24] = "";
   char     playText[MAX_SAY_LEN] = "";
   int8_t   playExpr = -1;
+  uint32_t playMs = 0;
 
   volatile VoiceState state = VOICE_IDLE;
   bool     enabled = true;
@@ -361,7 +362,9 @@ static int voicePostWav(const uint8_t* data, size_t len, char* resp, size_t resp
 #define VOICE_PREROLL_SAMPLES  7200   // 0.3 s buffered before the first piece plays
 
 // Returns samples played (0 = the clip couldn't be fetched).
-static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr) {
+// hintMs: the brain's estimate for how long to show the bubble (the clip may
+// still be growing when playback starts, so its length isn't known).
+static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, uint32_t hintMs) {
   char url[128];
   snprintf(url, sizeof(url), "http://%s/v1/audio/%s", voice.resolved, id);
   esp_http_client_config_t cfg = {};
@@ -373,9 +376,9 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr) 
   if (!c) return 0;
   uint32_t tReq = millis();
   int64_t contentLen = -1;
+  // A live clip arrives chunked (length unknown), so only the status decides.
   if (esp_http_client_open(c, 0) != ESP_OK ||
-      (contentLen = esp_http_client_fetch_headers(c)) < 0 ||
-      esp_http_client_get_status_code(c) != 200) {
+      ((contentLen = esp_http_client_fetch_headers(c)), esp_http_client_get_status_code(c) != 200)) {
     esp_http_client_close(c);
     esp_http_client_cleanup(c);
     return 0;
@@ -417,7 +420,7 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr) 
         if (n < VOICE_SEG_SAMPLES && !eof) break;   // wait for a full piece
         if (!t0) {
           if (expr >= 0 && expr < BOT_NUM_EXPRESSIONS) cmdSetExpression((uint8_t)expr);
-          if (bubble && bubble[0]) voiceShowBubble(bubble, (clipMs ? clipMs : 8000) + 1500);
+          if (bubble && bubble[0]) voiceShowBubble(bubble, (clipMs ? clipMs : (hintMs ? hintMs : 6000)) + 1500);
           voice.state = VOICE_SPEAKING;
           voice.lastFetchMs = millis() - tReq;      // request → first sound
           t0 = millis();
@@ -541,9 +544,10 @@ static void voiceRunTurn() {
   strncpy(voice.lastReply, doc["bubble"] | "", sizeof(voice.lastReply) - 1);
   const char* clip = doc["audio_id"] | "";
   int8_t expr = doc["expression"] | -1;
+  uint32_t hintMs = doc["audio_ms"] | 0;
 
   // 3. Speak (streamed: he starts talking while the clip downloads)
-  size_t n = clip[0] ? voiceStreamSpeak(clip, voice.lastReply, expr) : 0;
+  size_t n = clip[0] ? voiceStreamSpeak(clip, voice.lastReply, expr, hintMs) : 0;
   if (n == 0 && !voice.cancelRequested) {
     voiceShowBubble(voice.lastReply, 4000);   // at least show the answer
     voiceSetError("reply audio fetch failed");
@@ -564,7 +568,7 @@ static void voiceRunPlay() {
   voice.state = VOICE_THINKING;
   voiceOwnsAudio = true;
   vTaskDelay(pdMS_TO_TICKS(60));
-  if (voiceStreamSpeak(voice.playId, voice.playText, voice.playExpr) == 0) {
+  if (voiceStreamSpeak(voice.playId, voice.playText, voice.playExpr, voice.playMs) == 0) {
     voiceSetError("play: clip fetch failed");
     voiceShowBubble(voice.playText, 4000);
   }

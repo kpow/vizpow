@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
 from . import config, speech, usage
-from .bot import Bot, BotError, discover_stackchan
+from .bot import EXPRESSIONS, GESTURES, Bot, BotError, discover_stackchan
 from .brain import Brain, bubble_text
 from .lab import VizMac, Wled
 from .tools import Toolbox
@@ -79,28 +79,77 @@ class App:
 
     # ---- turns -----------------------------------------------------------
 
-    def run_turn(self, heard: str, source: str) -> dict:
+    def start_turn(self, heard: str, source: str, on_done=None) -> dict:
+        """Start a turn and return as soon as the first sentence is ready.
+
+        Claude's reply streams in; each finished sentence is synthesized and
+        appended to one live clip that the bot is already playing, so he starts
+        talking after the first sentence instead of the whole answer. Later
+        sentences and any tool calls keep flowing into the same clip. on_done
+        runs when the whole turn (including speech synthesis) is finished.
+        """
         t0 = time.time()
         personality = self.personality()
-        result = self.brain.turn(heard, personality)
-        t_llm = time.time()
-        text = result["text"] or "Hmm."
         voice = speech.PERSONALITY_VOICES.get(personality.lower(), self.settings["tts_voice"])
-        pcm = speech.synthesize(text, voice, self.settings["tts_rate"])
-        clip = self.clips.put(pcm)
-        t_tts = time.time()
-        if result.get("gesture"):
-            self.toolbox.run("head_gesture", {"name": result["gesture"]})  # async on the bot
-        reply = {
-            "heard": heard, "text": text, "bubble": bubble_text(text),
-            "expression": result.get("expression", -1), "audio_id": clip, "audio_ms": speech.pcm_ms(pcm),
-            "timing_ms": {"brain": int((t_llm - t0) * 1000), "tts": int((t_tts - t_llm) * 1000)},
+        clip = speech.LiveClip()
+        cid = self.clips.add(clip)
+        mouth = speech.Mouth(clip, voice, self.settings["tts_rate"])
+        st = {"first": None, "t_first": None, "expression": -1, "gesture": None}
+        ready = threading.Event()
+
+        def on_tag(kind: str, value: str) -> None:
+            if kind == "face" and st["expression"] < 0 and value in EXPRESSIONS:
+                st["expression"] = EXPRESSIONS.index(value)
+            elif kind == "gesture" and st["gesture"] is None and value in GESTURES:
+                st["gesture"] = value
+                self.toolbox.run("head_gesture", {"name": value})   # async on the bot
+
+        def on_sentence(text: str) -> None:
+            mouth.say(text)
+            if st["first"] is None:
+                st["first"], st["t_first"] = text, time.time()
+                ready.set()
+
+        splitter = speech.SentenceSplitter(on_sentence, on_tag)
+
+        def work() -> None:
+            result = {"tools": []}
+            try:
+                result = self.brain.turn(heard, personality, on_text=splitter.feed)
+                splitter.flush()
+                if not mouth.spoken:  # offline stand-in or error text: nothing was streamed
+                    if st["expression"] < 0:
+                        st["expression"] = result.get("expression", -1)
+                    on_sentence(result.get("text") or "Hmm.")
+            except Exception as e:  # noqa: BLE001
+                traceback.print_exc()
+                if not mouth.spoken:
+                    on_sentence("Something went wrong in my brain.")
+                result["tools"] = result.get("tools", []) + [f"error: {e}"]
+            finally:
+                mouth.close()
+                ready.set()
+                said = " ".join(mouth.spoken)
+                timing = {"first_sentence": int(((st["t_first"] or time.time()) - t0) * 1000),
+                          "turn": int((time.time() - t0) * 1000)}
+                self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source,
+                                     "personality": personality, "tools": result.get("tools", []),
+                                     "online": self.brain.online, "heard": heard, "text": said,
+                                     "timing_ms": timing})
+                print(f"[turn] {source}: {heard!r} -> {said!r} tools={result.get('tools')} {timing}")
+                if on_done:
+                    on_done()
+
+        threading.Thread(target=work, daemon=True).start()
+        ready.wait(60)
+        first = st["first"] or ""
+        return {
+            "heard": heard, "text": first, "bubble": bubble_text(first),
+            "expression": st["expression"], "audio_id": cid,
+            # Bubble-time hint for the bot (the clip's length isn't known yet).
+            "audio_ms": max(2500, len(first.split()) * 380),
+            "timing_ms": {"first_sentence": int(((st["t_first"] or time.time()) - t0) * 1000)},
         }
-        self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source,
-                             "personality": personality, "tools": result["tools"],
-                             "online": self.brain.online, **reply})
-        print(f"[turn] {source}: {heard!r} -> {text!r} tools={result['tools']} {reply['timing_ms']}")
-        return reply
 
     # ---- bonjour ---------------------------------------------------------
 
@@ -176,14 +225,40 @@ def make_handler(app: App):
             if path == "/v1/log":
                 return self._json(200, list(app.log))
             if path.startswith("/v1/audio/"):
-                pcm = app.clips.get(path.rsplit("/", 1)[-1])
-                if pcm is None:
+                clip = app.clips.get(path.rsplit("/", 1)[-1])
+                if clip is None:
                     return self._json(404, {"error": "no such clip"})
-                return self._send(200, pcm, f"audio/L16; rate={speech.PLAY_RATE}; channels=1")
+                return self._stream_clip(clip)
             if path in ("/", "/index.html"):
                 page = resources.files("vizbrain").joinpath("static/index.html").read_bytes()
                 return self._send(200, page, "text/html; charset=utf-8")
             self._json(404, {"error": "not found"})
+
+        def _stream_clip(self, clip):
+            """Send a clip, chunked, as it grows (a finished clip goes out in one piece)."""
+            ctype = f"audio/L16; rate={speech.PLAY_RATE}; channels=1"
+            data, done = clip.read_from(0, timeout=0)
+            if done:
+                return self._send(200, data, ctype)
+            self.protocol_version = "HTTP/1.1"   # chunked transfer needs 1.1
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            pos = 0
+            while True:
+                if data:
+                    self.wfile.write(f"{len(data):X}\r\n".encode() + data + b"\r\n")
+                    self.wfile.flush()
+                    pos += len(data)
+                if done:
+                    break
+                data, done = clip.read_from(pos, timeout=30)
+                if not data and not done:
+                    break   # synthesis stalled; end the response rather than hang the bot
+            self.wfile.write(b"0\r\n\r\n")
+            self.close_connection = True
 
         def do_POST(self):
             path = self.path.split("?")[0]
@@ -206,18 +281,21 @@ def make_handler(app: App):
             wav = self._body()
             if not app.busy.acquire(blocking=False):
                 return self._json(503, {"error": "busy"})
+            started = False
             try:
                 t0 = time.time()
                 samples, _ = speech.wav_to_float(wav)
                 samples = speech.normalize(samples)
                 heard = app.listener.transcribe(samples) if samples.size > 1600 else ""
                 stt_ms = int((time.time() - t0) * 1000)
-                reply = app.run_turn(heard, "voice")
+                reply = app.start_turn(heard, "voice", on_done=app.busy.release)
+                started = True
                 reply["timing_ms"]["stt"] = stt_ms
                 reply["timing_ms"]["audio_in_ms"] = int(samples.size / 16)
                 self._json(200, reply)
             finally:
-                app.busy.release()
+                if not started:
+                    app.busy.release()
 
         def _text(self):
             data = json.loads(self._body() or b"{}")
@@ -227,9 +305,10 @@ def make_handler(app: App):
             if not app.busy.acquire(blocking=False):
                 return self._json(503, {"error": "busy"})
             try:
-                reply = app.run_turn(heard, "text")
-            finally:
+                reply = app.start_turn(heard, "text", on_done=app.busy.release)
+            except Exception:
                 app.busy.release()
+                raise
             bot = app.get_bot()
             spoke = False
             if bot and data.get("speak", True):

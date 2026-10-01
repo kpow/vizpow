@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import io
 import os
+import queue
+import re
 import subprocess
 import tempfile
 import threading
@@ -102,27 +104,119 @@ def synthesize(text: str, voice: str, rate: int) -> bytes:
             pass
 
 
+class LiveClip:
+    """PCM that grows while it's being read: sentences are synthesized and
+    appended as Claude writes them, and GET /v1/audio streams it as it grows."""
+
+    def __init__(self, pcm: bytes | None = None):
+        self.buf = bytearray(pcm or b"")
+        self.done = pcm is not None
+        self.created = time.time()
+        self._cv = threading.Condition()
+
+    def append(self, pcm: bytes) -> None:
+        with self._cv:
+            self.buf += pcm
+            self._cv.notify_all()
+
+    def finish(self) -> None:
+        with self._cv:
+            self.done = True
+            self._cv.notify_all()
+
+    def read_from(self, pos: int, timeout: float = 30.0) -> tuple[bytes, bool]:
+        """Bytes after pos (waits for some, up to timeout) and whether the clip is complete."""
+        with self._cv:
+            if len(self.buf) <= pos and not self.done:
+                self._cv.wait(timeout)
+            return bytes(self.buf[pos:]), self.done   # done: nothing will follow this data
+
+
 class ClipStore:
-    """Reply clips the bot fetches with GET /v1/audio/<id>. Kept 60 s."""
+    """Reply clips the bot fetches with GET /v1/audio/<id>. Kept 60 s after creation."""
 
     TTL_S = 60
 
     def __init__(self):
-        self._clips: dict[str, tuple[float, bytes]] = {}
+        self._clips: dict[str, LiveClip] = {}
         self._lock = threading.Lock()
 
-    def put(self, pcm: bytes) -> str:
+    def add(self, clip: LiveClip) -> str:
         cid = uuid.uuid4().hex[:12]
         now = time.time()
         with self._lock:
-            self._clips = {k: v for k, v in self._clips.items() if now - v[0] < self.TTL_S}
-            self._clips[cid] = (now, pcm)
+            self._clips = {k: v for k, v in self._clips.items() if now - v.created < self.TTL_S}
+            self._clips[cid] = clip
         return cid
 
-    def get(self, cid: str) -> bytes | None:
+    def put(self, pcm: bytes) -> str:
+        return self.add(LiveClip(pcm))
+
+    def get(self, cid: str) -> LiveClip | None:
         with self._lock:
-            hit = self._clips.get(cid)
-        return hit[1] if hit else None
+            return self._clips.get(cid)
+
+
+class Mouth:
+    """Sentence-by-sentence speech into a LiveClip, on its own thread, in order."""
+
+    def __init__(self, clip: LiveClip, voice: str, rate: int):
+        self.clip, self.voice, self.rate = clip, voice, rate
+        self._q: "queue.Queue[str | None]" = queue.Queue()
+        self.spoken: list[str] = []
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def say(self, text: str) -> None:
+        if text.strip():
+            self.spoken.append(text.strip())
+            self._q.put(text.strip())
+
+    def close(self) -> None:
+        self._q.put(None)
+
+    def _run(self) -> None:
+        while (text := self._q.get()) is not None:
+            try:
+                self.clip.append(synthesize(text, self.voice, self.rate))
+            except Exception as e:  # noqa: BLE001 - skip a bad sentence, keep talking
+                print(f"[tts] failed on {text!r}: {e}")
+        self.clip.finish()
+
+
+class SentenceSplitter:
+    """Turns streamed text deltas into whole sentences, pulling out [face:x]
+    [gesture:y] tags (never spoken) as soon as they're complete."""
+
+    _TAG = re.compile(r"\[(face|gesture)\s*:\s*([a-z_]+)\]", re.I)
+    _END = re.compile(r"(.+?[.!?…])(?=\s)", re.S)
+
+    def __init__(self, on_sentence, on_tag):
+        self.on_sentence, self.on_tag = on_sentence, on_tag
+        self.buf = ""
+
+    def feed(self, delta: str) -> None:
+        self.buf += delta
+        for kind, value in self._TAG.findall(self.buf):
+            self.on_tag(kind.lower(), value.lower())
+        self.buf = self._TAG.sub("", self.buf)
+        # Hold back anything after an unfinished "[" (a tag still arriving).
+        cut = self.buf.rfind("[")
+        ready, pending = (self.buf, "") if cut < 0 or "]" in self.buf[cut:] else (self.buf[:cut], self.buf[cut:])
+        while (m := self._END.match(ready)):
+            self.on_sentence(_clean(m.group(1)))
+            ready = ready[m.end():]
+        self.buf = ready + pending
+
+    def flush(self) -> None:
+        rest = _clean(self._TAG.sub("", self.buf))
+        self.buf = ""
+        if rest:
+            self.on_sentence(rest)
+
+
+def _clean(text: str) -> str:
+    text = re.sub(r"[*_`#>\[\]]+", "", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def pcm_ms(pcm: bytes) -> int:
