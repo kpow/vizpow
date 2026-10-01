@@ -351,8 +351,17 @@ static int voicePostWav(const uint8_t* data, size_t len, char* resp, size_t resp
   return status;
 }
 
-// GET a reply clip into playBuf; returns samples (0 on failure).
-static size_t voiceFetchClip(const char* id) {
+// ---- Speaking: stream the reply clip and play it as it arrives -------------
+// The clip is downloaded into playBuf and handed to the speaker in 0.2 s
+// pieces (M5's speaker queues two per channel), so he starts talking ~0.3 s
+// after the first bytes instead of after the whole clip. Long replies used to
+// spend 2-3 s downloading in silence.
+
+#define VOICE_SEG_SAMPLES      4800   // 0.2 s per queued piece
+#define VOICE_PREROLL_SAMPLES  7200   // 0.3 s buffered before the first piece plays
+
+// Returns samples played (0 = the clip couldn't be fetched).
+static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr) {
   char url[128];
   snprintf(url, sizeof(url), "http://%s/v1/audio/%s", voice.resolved, id);
   esp_http_client_config_t cfg = {};
@@ -362,61 +371,81 @@ static size_t voiceFetchClip(const char* id) {
   cfg.buffer_size = 4096;
   esp_http_client_handle_t c = esp_http_client_init(&cfg);
   if (!c) return 0;
-  size_t got = 0;
-  const size_t cap = voice.playCapSamples * sizeof(int16_t);
+  uint32_t tReq = millis();
+  int64_t contentLen = -1;
+  if (esp_http_client_open(c, 0) != ESP_OK ||
+      (contentLen = esp_http_client_fetch_headers(c)) < 0 ||
+      esp_http_client_get_status_code(c) != 200) {
+    esp_http_client_close(c);
+    esp_http_client_cleanup(c);
+    return 0;
+  }
+
+  const size_t capBytes = voice.playCapSamples * sizeof(int16_t);
+  const size_t perFrame = VOICE_PLAY_RATE * VOICE_ENV_FRAME_MS / 1000;
   uint8_t* dst = (uint8_t*)voice.playBuf;
-  if (esp_http_client_open(c, 0) == ESP_OK) {
-    esp_http_client_fetch_headers(c);
-    if (esp_http_client_get_status_code(c) == 200) {
-      int r;
-      while (got < cap && (r = esp_http_client_read(c, (char*)voiceIoBuf,
-                                                    min(sizeof(voiceIoBuf), cap - got))) > 0) {
-        memcpy(dst + got, voiceIoBuf, r);
-        got += r;
+  size_t got = 0, queued = 0, envFrames = 0;
+  float envPeak = 2000.0f;      // running loudness reference for the mouth
+  uint32_t t0 = 0;
+  bool eof = false;
+  uint32_t clipMs = contentLen > 0 ? (uint32_t)(contentLen / 2 * 1000 / VOICE_PLAY_RATE) : 0;
+
+  voiceTakeSpeaker();
+  for (;;) {
+    if (voice.cancelRequested) break;
+    if (!eof) {
+      int r = (got < capBytes)
+          ? esp_http_client_read(c, (char*)voiceIoBuf, min(sizeof(voiceIoBuf), capBytes - got)) : 0;
+      if (r > 0) { memcpy(dst + got, voiceIoBuf, r); got += r; }
+      else eof = true;
+    }
+    const size_t avail = got / 2;
+
+    // Mouth envelope for every complete 33 ms frame (and the tail at EOF).
+    while (envFrames < voice.envCap &&
+           ((envFrames + 1) * perFrame <= avail || (eof && envFrames * perFrame < avail))) {
+      size_t a = envFrames * perFrame, n = min(perFrame, avail - a);
+      float rms = voiceChunkRms(voice.playBuf + a, n);
+      if (rms > envPeak) envPeak = rms;
+      voice.env[envFrames++] = (uint8_t)fminf(12.0f, rms * 12.0f / envPeak);
+    }
+
+    // Queue pieces whenever the speaker has a free slot (never block on it).
+    if (t0 || avail >= VOICE_PREROLL_SAMPLES || eof) {
+      while (M5.Speaker.isPlaying(0) < 2 && queued < avail) {
+        size_t n = min((size_t)VOICE_SEG_SAMPLES, avail - queued);
+        if (n < VOICE_SEG_SAMPLES && !eof) break;   // wait for a full piece
+        if (!t0) {
+          if (expr >= 0 && expr < BOT_NUM_EXPRESSIONS) cmdSetExpression((uint8_t)expr);
+          if (bubble && bubble[0]) voiceShowBubble(bubble, (clipMs ? clipMs : 8000) + 1500);
+          voice.state = VOICE_SPEAKING;
+          voice.lastFetchMs = millis() - tReq;      // request → first sound
+          t0 = millis();
+        }
+        M5.Speaker.playRaw(voice.playBuf + queued, n, VOICE_PLAY_RATE, false, 1, 0, false);
+        queued += n;
       }
     }
+    if (t0) {
+      size_t f = (millis() - t0) / VOICE_ENV_FRAME_MS;
+      voiceMouthLevel = (f < envFrames) ? (int8_t)voice.env[f] : 0;
+    }
+    if (eof && queued >= avail) break;
+    if (eof) vTaskDelay(pdMS_TO_TICKS(10));        // only waiting on speaker slots now
   }
   esp_http_client_close(c);
   esp_http_client_cleanup(c);
-  return got / 2;
-}
 
-// ---- Speaking with lip-sync -----------------------------------------------
-
-static void voiceBuildEnvelope(size_t samples, size_t& frames) {
-  const size_t per = VOICE_PLAY_RATE * VOICE_ENV_FRAME_MS / 1000;
-  frames = min(voice.envCap, (samples + per - 1) / per);
-  float peak = 1;
-  for (size_t f = 0; f < frames; f++) {
-    size_t a = f * per, b = min(samples, a + per);
-    float r = voiceChunkRms(voice.playBuf + a, b - a);
-    if (r > peak) peak = r;
-    voice.env[f] = (uint8_t)fminf(255.0f, r / 64.0f);   // provisional, rescaled below
-  }
-  // Normalize to 0..12 against the clip's own peak so quiet voices still move.
-  float scale = 12.0f / (peak / 64.0f);
-  for (size_t f = 0; f < frames; f++) voice.env[f] = (uint8_t)fminf(12.0f, voice.env[f] * scale);
-}
-
-static void voiceSpeak(size_t samples, const char* bubble, int8_t expr) {
-  size_t frames = 0;
-  voiceBuildEnvelope(samples, frames);
-  if (expr >= 0 && expr < BOT_NUM_EXPRESSIONS) cmdSetExpression((uint8_t)expr);
-  uint32_t ms = (uint32_t)samples * 1000 / VOICE_PLAY_RATE;
-  if (bubble && bubble[0]) voiceShowBubble(bubble, ms + 1500);
-
-  voice.state = VOICE_SPEAKING;
-  voiceTakeSpeaker();
-  M5.Speaker.playRaw(voice.playBuf, samples, VOICE_PLAY_RATE, false, 1, 0, true);
-  uint32_t t0 = millis();
-  while (M5.Speaker.isPlaying(0) && millis() - t0 < ms + 2000) {
-    if (voice.cancelRequested) { M5.Speaker.stop(0); break; }
+  // Let the queued audio finish, mouth still moving.
+  while (t0 && M5.Speaker.isPlaying(0) && !voice.cancelRequested) {
     size_t f = (millis() - t0) / VOICE_ENV_FRAME_MS;
-    voiceMouthLevel = (f < frames) ? (int8_t)voice.env[f] : 0;
+    voiceMouthLevel = (f < envFrames) ? (int8_t)voice.env[f] : 0;
     vTaskDelay(pdMS_TO_TICKS(15));
   }
+  if (voice.cancelRequested) M5.Speaker.stop(0);
   voiceMouthLevel = -1;
-  voice.lastPlayMs = millis() - t0;
+  voice.lastPlayMs = t0 ? millis() - t0 : 0;
+  return queued;
 }
 
 // ---- Turns ---------------------------------------------------------------------
@@ -513,17 +542,14 @@ static void voiceRunTurn() {
   const char* clip = doc["audio_id"] | "";
   int8_t expr = doc["expression"] | -1;
 
-  // 3. Speak
-  t0 = millis();
-  size_t n = clip[0] ? voiceFetchClip(clip) : 0;
-  voice.lastFetchMs = millis() - t0;
-  if (n == 0) {
+  // 3. Speak (streamed: he starts talking while the clip downloads)
+  size_t n = clip[0] ? voiceStreamSpeak(clip, voice.lastReply, expr) : 0;
+  if (n == 0 && !voice.cancelRequested) {
     voiceShowBubble(voice.lastReply, 4000);   // at least show the answer
     voiceSetError("reply audio fetch failed");
     voiceFinish(VOICE_ERROR);
     return;
   }
-  voiceSpeak(n, voice.lastReply, expr);
   voice.turns++;
   voiceFinish(VOICE_IDLE);
 }
@@ -538,14 +564,10 @@ static void voiceRunPlay() {
   voice.state = VOICE_THINKING;
   voiceOwnsAudio = true;
   vTaskDelay(pdMS_TO_TICKS(60));
-  size_t n = voiceFetchClip(voice.playId);
-  if (n == 0) {
+  if (voiceStreamSpeak(voice.playId, voice.playText, voice.playExpr) == 0) {
     voiceSetError("play: clip fetch failed");
     voiceShowBubble(voice.playText, 4000);
-    voiceFinish(VOICE_IDLE);
-    return;
   }
-  voiceSpeak(n, voice.playText, voice.playExpr);
   voiceFinish(VOICE_IDLE);
 }
 

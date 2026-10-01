@@ -2218,7 +2218,7 @@ void handleBrainStatus() {
   }
   JsonObject t = d["timingMs"].to<JsonObject>();
   t["brain"] = voice.lastBrainMs;
-  t["fetch"] = voice.lastFetchMs;
+  t["firstSound"] = voice.lastFetchMs;   // reply request → first audio out
   t["play"] = voice.lastPlayMs;
   d["psramFree"] = ESP.getFreePsram();
   String out;
