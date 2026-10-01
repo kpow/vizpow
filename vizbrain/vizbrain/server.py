@@ -23,7 +23,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
-from . import config, speech
+from . import config, speech, usage
 from .bot import Bot, BotError, discover_stackchan
 from .brain import Brain, bubble_text
 from .lab import VizMac, Wled
@@ -171,7 +171,7 @@ def make_handler(app: App):
                 return self._json(200, {
                     "ok": True, "claude": app.brain.online, "model": app.settings["model"],
                     "stt": app.settings["stt_model"], "tts": "macos-say",
-                    "bot": bot.host if bot else None,
+                    "bot": bot.host if bot else None, "spend": usage.summary(),
                 })
             if path == "/v1/log":
                 return self._json(200, list(app.log))

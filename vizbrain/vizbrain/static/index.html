@@ -38,7 +38,8 @@ const $ = (id) => document.getElementById(id);
 async function health() {
   try {
     const h = await (await fetch('/v1/health')).json();
-    $('status').textContent = `Claude: ${h.claude ? 'online · ' + h.model : 'offline (no API key)'} · bot: ${h.bot || 'not found'} · voice in: ${h.stt.split('/').pop()}`;
+    const sp = h.spend || {};
+    $('status').textContent = `Claude: ${h.claude ? 'online · ' + h.model : 'offline (no API key)'} · bot: ${h.bot || 'not found'} · spend today $${(sp.today_usd || 0).toFixed(3)} (${sp.today_calls || 0} calls) · this month $${(sp.month_usd || 0).toFixed(2)}`;
   } catch { $('status').textContent = 'brain unreachable'; }
 }
 function card(t) {
@@ -65,7 +66,7 @@ $('f').onsubmit = async (e) => {
     $('q').value = '';
   } finally { $('go').disabled = false; loadLog(); }
 };
-health(); loadLog(); setInterval(loadLog, 4000);
+health(); loadLog(); setInterval(() => { loadLog(); health(); }, 4000);
 </script>
 </body>
 </html>

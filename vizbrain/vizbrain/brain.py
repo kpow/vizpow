@@ -13,6 +13,7 @@ import re
 import threading
 import time
 
+from . import usage
 from .bot import EXPRESSIONS, GESTURES
 from .tools import Toolbox
 
@@ -168,6 +169,14 @@ class Brain:
                 "expression": expression, "gesture": gesture}
 
     def _create(self, system, messages, tools):
+        resp = self._create_raw(system, messages, tools)
+        try:
+            usage.record(getattr(resp, "model", None) or self.settings["model"], resp.usage)
+        except Exception as e:  # noqa: BLE001 - accounting must never break a turn
+            print(f"[usage] not recorded: {e}")
+        return resp
+
+    def _create_raw(self, system, messages, tools):
         import anthropic
 
         model = self.settings["model"]
