@@ -304,6 +304,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         </div>
       </div>
 
+      <div class="card" id="brainCard" style="display:none">
+        <h2 class="shdr" onclick="tgl('secBrain')">Brain (voice) <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secBrain">
+          <div id="brainStatus" class="hint">checking...</div>
+          <div class="trow"><span>Voice (front head tap)</span><div class="tog" id="brainToggle" onclick="toggleBrain()"></div></div>
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="brainHost" placeholder="brain host:port (blank = auto)" class="inp flex1" maxlength="60">
+            <button onclick="setBrainHost()">Set</button>
+          </div>
+          <button onclick="api('/brain/listen')" class="btn-full" style="margin-top:8px">Listen now</button>
+          <div id="brainLast" class="hint" style="margin-top:8px"></div>
+        </div>
+      </div>
+
       <div class="card" id="facesCard" style="display:none">
         <h2 class="shdr" onclick="tgl('secFaces')">Faces Base <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secFaces">
@@ -435,6 +449,34 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     async function api(endpoint) {
       try { return await fetch(endpoint); } catch(e) { return null; }
     }
+
+    // ---- Brain (voice) card: present only on VOICE_ENABLED builds ----
+    let brainOn = true;
+    async function brainRefresh() {
+      try {
+        const r = await fetch('/brain/status');
+        if (!r.ok) return;
+        const b = await r.json();
+        document.getElementById('brainCard').style.display = '';
+        brainOn = b.enabled;
+        document.getElementById('brainToggle').className = 'tog' + (b.enabled ? ' on' : '');
+        const where = b.brainHost || b.resolved || 'not found yet';
+        document.getElementById('brainStatus').textContent =
+          `State: ${b.state} · brain: ${where} · turns ${b.turns}, failures ${b.failures}` +
+          (b.lastError ? ` · last error: ${b.lastError}` : '');
+        const hostEl = document.getElementById('brainHost');
+        if (document.activeElement !== hostEl) hostEl.value = b.brainHost || '';
+        document.getElementById('brainLast').textContent = b.lastHeard
+          ? `Heard: "${b.lastHeard}" → "${b.lastReply}"` : '';
+      } catch (e) {}
+    }
+    function toggleBrain() { api('/brain/config?enabled=' + (brainOn ? 0 : 1)).then(brainRefresh); }
+    function setBrainHost() {
+      const h = document.getElementById('brainHost').value.trim();
+      api('/brain/config?host=' + encodeURIComponent(h)).then(brainRefresh);
+    }
+    brainRefresh();
+    setInterval(brainRefresh, 4000);
 
     function setBotExpr(i) { curExpr=i; render(); api('/bot/expression?v=' + i); }
     function setPersonality(i) { api('/bot/personality?v=' + i); }
