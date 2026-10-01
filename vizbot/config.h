@@ -164,7 +164,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.4.2"
+#define FIRMWARE_VERSION "3.5.12"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -224,6 +224,10 @@
   #define SC_SERVO_Y_MIN_DEG    25    // Pitch safety floor (prevents head hitting base)
   #define SC_SERVO_Y_MAX_DEG    85    // Pitch safety ceiling (hardware limit)
   #define SC_SERVO_Y_HOME_DEG   48    // Resting pitch (desk-friendly, looking up at user)
+
+  // Push-to-talk with vizbrain (Mac service): front head-pad tap → listen →
+  // reply spoken through the speaker. See voice_client.h, docs/PLAN-vizbot-brain.md.
+  #define VOICE_ENABLED
 #endif
 
 // GitHub repo for OTA update checks

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vizbrain</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1b1b1b; --quiet:#6b6b6b; --line:#e3e3df; --accent:#2f6fde; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141414; --card:#1e1e1e; --ink:#ececec; --quiet:#9a9a9a; --line:#2e2e2e; --accent:#6c9cf0; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system, system-ui, sans-serif; }
+  main { max-width:680px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .status { color:var(--quiet); font-size:13px; margin-bottom:16px; }
+  form { display:flex; gap:8px; }
+  input { flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); font:inherit; }
+  button { padding:10px 16px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button:disabled { opacity:.5; }
+  .turn { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; }
+  .heard { color:var(--quiet); font-size:13px; }
+  .tools { color:var(--quiet); font-size:12px; margin-top:4px; word-break:break-word; }
+</style>
+</head>
+<body>
+<main>
+  <h1>vizbrain</h1>
+  <div class="status" id="status">checking…</div>
+  <form id="f">
+    <input id="q" placeholder="Say something to vizBot…" autocomplete="off" autofocus>
+    <button id="go">Send</button>
+  </form>
+  <div id="log"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+async function health() {
+  try {
+    const h = await (await fetch('/v1/health')).json();
+    const sp = h.spend || {};
+    $('status').textContent = `Claude: ${h.claude ? 'online · ' + h.model : 'offline (no API key)'} · bot: ${h.bot || 'not found'} · spend today $${(sp.today_usd || 0).toFixed(3)} (${sp.today_calls || 0} calls) · this month $${(sp.month_usd || 0).toFixed(2)}`;
+  } catch { $('status').textContent = 'brain unreachable'; }
+}
+function card(t) {
+  const d = document.createElement('div');
+  d.className = 'turn';
+  const tools = (t.tools || []).join(' · ');
+  d.innerHTML = `<div class="heard"></div><div class="said"></div><div class="tools"></div>`;
+  d.querySelector('.heard').textContent = `${t.at || ''} ${t.source || ''}: ${t.heard || ''}`;
+  d.querySelector('.said').textContent = t.text || t.error || '';
+  d.querySelector('.tools').textContent = tools;
+  return d;
+}
+async function loadLog() {
+  const log = await (await fetch('/v1/log')).json();
+  $('log').replaceChildren(...log.filter(t => t.text).map(card));
+}
+$('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $('q').value.trim();
+  if (!text) return;
+  $('go').disabled = true;
+  try {
+    await fetch('/v1/text', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text}) });
+    $('q').value = '';
+  } finally { $('go').disabled = false; loadLog(); }
+};
+health(); loadLog(); setInterval(() => { loadLog(); health(); }, 4000);
+</script>
+</body>
+</html>

@@ -54,6 +54,9 @@
 #include "content_cache.h"
 #include "cloud_client.h"
 #endif
+#ifdef VOICE_ENABLED
+#include "voice_client.h"   // vizbrain push-to-talk (needs bot_mode/bot_sounds/audio_spectrum)
+#endif
 #include "web_server.h"
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
@@ -443,6 +446,10 @@ void setup() {
   #ifdef CLOUD_ENABLED
   startCloudTask();
   #endif
+
+  #ifdef VOICE_ENABLED
+  startVoiceTask();
+  #endif
 }
 
 void loop() {
@@ -512,26 +519,38 @@ void loop() {
   {
     uint8_t touchResult = scTouch_state.update();
     if (touchResult == 1) {
-      // Single tap — front half = nod, back half = shake (middle ignored)
+      // Single tap — back half = shake. Front half = talk to vizbrain on voice
+      // builds (tap again to cancel), nod otherwise. Middle is ignored.
       if (scTouch_state.lastTapZone == SC_ZONE_BACK) {
         scFireShake();
       } else {
+        #ifdef VOICE_ENABLED
+        voiceOnTalkTap();
+        #else
         scFireNod();
+        #endif
       }
     } else if (touchResult == 3) {
       scFireChillMode();
     }
   }
+  #ifdef VOICE_ENABLED
+  const bool voiceTurn = voice.busy();
+  #else
+  const bool voiceTurn = false;
+  #endif
   // BSP's Motion task owns the bus and manages torque, so there is no health
   // poll or torque tick here. The periodic rail cycle below is a workaround for
   // the head still intermittently going stiff — see stackchan_base.h.
   // Skip the scheduled rail cycle during chill: chill doubles as the
   // idle-drift-off soak experiment, and a blind reinit every 5 min would
   // silently mask any stall, ruining the result.
-  if (!scTouch_state.chillMode) scServoWatchdogTick();
+  // Both are held off during a voice turn: servo noise would keep the
+  // end-of-speech detector open, and a rail cycle mid-reply is jarring.
+  if (!scTouch_state.chillMode && !voiceTurn) scServoWatchdogTick();
 
-  // Idle head drift — suppressed during chill mode
-  if (!scTouch_state.chillMode) {
+  // Idle head drift — suppressed during chill mode and voice turns
+  if (!scTouch_state.chillMode && !voiceTurn) {
     scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);
   }
   #endif

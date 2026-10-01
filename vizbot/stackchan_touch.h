@@ -20,8 +20,9 @@
 // its touch gestures on). We fire on the IMMEDIATE click (release edge) so a tap
 // responds the instant you lift — capacitive pads are often held >0.5s, which the
 // multi-click/hold machinery would otherwise misread as a "hold" and drop. Events:
-//   - Tap FRONT → nod   (yes)
-//   - Tap BACK  → shake (no)   [middle pad ignored — every tap is front or back]
+//   - Tap FRONT → nod   (yes) — or, on VOICE_ENABLED builds, talk to vizbrain
+//   - Tap BACK  → shake (no)   [middle pad ignored — a finger there also maxes a
+//     neighbour pad, so it can't be its own gesture]
 //   - Hold 2s   → chill mode (10/30/60/120 min, see scChillMinutes)
 //
 // The tapped zone is recovered by tracking each pad's peak intensity during the
@@ -106,9 +107,9 @@ struct ScTouchState {
     // consumed here so it doesn't also fire a tap reaction.
     if (headBtn.wasClicked()) {
       if (holdFired) { holdFired = false; return 0; }
-      // Require a FULL-strength hit (level 3) on the front or back pad. A real
-      // finger easily reaches it; stray capacitive noise (e.g. a ceiling fan)
-      // only nudges a pad to level 1, so it's rejected. Middle pad is ignored.
+      // Require a FULL-strength hit (level 3). A real finger easily reaches it;
+      // stray capacitive noise (e.g. a ceiling fan) only nudges a pad to level
+      // 1, so it's rejected. Middle pad is ignored.
       bool frontHigh = peak[SC_ZONE_FRONT] >= OUTPUT_HIGH;
       bool backHigh  = peak[SC_ZONE_BACK]  >= OUTPUT_HIGH;
       if (!frontHigh && !backHigh) return 0;

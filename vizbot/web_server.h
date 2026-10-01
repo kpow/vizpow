@@ -304,6 +304,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         </div>
       </div>
 
+      <div class="card" id="brainCard" style="display:none">
+        <h2 class="shdr" onclick="tgl('secBrain')">Brain (voice) <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secBrain">
+          <div id="brainStatus" class="hint">checking...</div>
+          <div class="trow"><span>Voice (front head tap)</span><div class="tog" id="brainToggle" onclick="toggleBrain()"></div></div>
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="brainHost" placeholder="brain host:port (blank = auto)" class="inp flex1" maxlength="60">
+            <button onclick="setBrainHost()">Set</button>
+          </div>
+          <button onclick="api('/brain/listen')" class="btn-full" style="margin-top:8px">Listen now</button>
+          <div id="brainLast" class="hint" style="margin-top:8px"></div>
+        </div>
+      </div>
+
       <div class="card" id="facesCard" style="display:none">
         <h2 class="shdr" onclick="tgl('secFaces')">Faces Base <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secFaces">
@@ -435,6 +449,34 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     async function api(endpoint) {
       try { return await fetch(endpoint); } catch(e) { return null; }
     }
+
+    // ---- Brain (voice) card: present only on VOICE_ENABLED builds ----
+    let brainOn = true;
+    async function brainRefresh() {
+      try {
+        const r = await fetch('/brain/status');
+        if (!r.ok) return;
+        const b = await r.json();
+        document.getElementById('brainCard').style.display = '';
+        brainOn = b.enabled;
+        document.getElementById('brainToggle').className = 'tog' + (b.enabled ? ' on' : '');
+        const where = b.brainHost || b.resolved || 'not found yet';
+        document.getElementById('brainStatus').textContent =
+          `State: ${b.state} · brain: ${where} · turns ${b.turns}, failures ${b.failures}` +
+          (b.lastError ? ` · last error: ${b.lastError}` : '');
+        const hostEl = document.getElementById('brainHost');
+        if (document.activeElement !== hostEl) hostEl.value = b.brainHost || '';
+        document.getElementById('brainLast').textContent = b.lastHeard
+          ? `Heard: "${b.lastHeard}" → "${b.lastReply}"` : '';
+      } catch (e) {}
+    }
+    function toggleBrain() { api('/brain/config?enabled=' + (brainOn ? 0 : 1)).then(brainRefresh); }
+    function setBrainHost() {
+      const h = document.getElementById('brainHost').value.trim();
+      api('/brain/config?host=' + encodeURIComponent(h)).then(brainRefresh);
+    }
+    brainRefresh();
+    setInterval(brainRefresh, 4000);
 
     function setBotExpr(i) { curExpr=i; render(); api('/bot/expression?v=' + i); }
     function setPersonality(i) { api('/bot/personality?v=' + i); }
@@ -2191,6 +2233,118 @@ void handleDebugTouch() {
 }
 #endif
 
+#ifdef VOICE_ENABLED
+// ---- vizbrain voice endpoints (see voice_client.h) ----
+void handleBrainStatus() {
+  JsonDocument d;
+  d["enabled"] = voice.enabled;
+  d["state"] = VOICE_STATE_NAMES[voice.state];
+  d["brainHost"] = voice.brainHost;
+  d["resolved"] = voice.resolved;
+  d["turns"] = voice.turns;
+  d["failures"] = voice.failures;
+  d["micRestarts"] = voice.micRestarts;
+  d["lastError"] = voice.lastError;
+  d["lastHeard"] = voice.lastHeard;
+  d["lastReply"] = voice.lastReply;
+  JsonObject rec = d["lastRecording"].to<JsonObject>();
+  rec["ms"] = voice.lastRecMs;
+  rec["speechMs"] = voice.lastSpeechMs;
+  rec["noiseRms"] = (int)voice.lastNoise;
+  rec["peakRms"] = (int)voice.lastPeak;
+  rec["startThreshold"] = (int)voice.lastStartThr;
+  rec["endThreshold"] = (int)voice.lastEndThr;
+  if (server.hasArg("trace")) {
+    JsonArray tr = rec["rmsTrace"].to<JsonArray>();
+    for (uint16_t i = 0; i < voice.rmsTraceLen; i++) tr.add(voice.rmsTrace[i]);
+  }
+  JsonObject t = d["timingMs"].to<JsonObject>();
+  t["brain"] = voice.lastBrainMs;
+  t["firstSound"] = voice.lastFetchMs;   // reply request → first audio out
+  t["firstData"] = voice.lastFirstDataMs;
+  t["speakerUp"] = voice.lastSpeakerMs;
+  t["starved"] = voice.lastStarved;
+  t["play"] = voice.lastPlayMs;
+  d["psramFree"] = ESP.getFreePsram();
+  String out;
+  serializeJson(d, out);
+  server.send(200, "application/json", out);
+}
+
+// Debug: the last raw recording as a WAV (whole capture, before trimming).
+void handleBrainLastWav() {
+  if (!voice.recBuf || voice.lastRecSamples == 0 || voice.busy()) {
+    server.send(404, "text/plain", "no recording");
+    return;
+  }
+  uint32_t n = voice.lastRecSamples;
+  uint8_t hdr[44];
+  voiceWriteWavHeader(hdr, n);
+  server.setContentLength(44 + n * 2);
+  server.send(200, "audio/wav", "");
+  server.sendContent((const char*)hdr, 44);
+  const uint8_t* p = (const uint8_t*)(voice.recBuf + VOICE_WAV_HDR_SAMPLES);
+  size_t left = n * 2;
+  while (left) {
+    size_t c = left > sizeof(voiceIoBuf) ? sizeof(voiceIoBuf) : left;
+    memcpy(voiceIoBuf, p, c);
+    server.sendContent((const char*)voiceIoBuf, c);
+    p += c;
+    left -= c;
+  }
+}
+
+// /brain/config?host=<ip[:port]|empty>&enabled=0|1
+void handleBrainConfig() {
+  if (server.hasArg("host")) {
+    String h = server.arg("host");
+    h.trim();
+    strncpy(voice.brainHost, h.c_str(), sizeof(voice.brainHost) - 1);
+    voice.brainHost[sizeof(voice.brainHost) - 1] = '\0';
+    voice.resolved[0] = '\0';
+  }
+  if (server.hasArg("enabled")) voice.enabled = server.arg("enabled").toInt() != 0;
+  saveVoiceSettings();
+  handleBrainStatus();
+}
+
+// Same as a front head-pad tap: start listening (or cancel).
+void handleBrainListen() {
+  voiceOnTalkTap();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// Brain-initiated speech: /brain/play?id=<clip>&text=<bubble>&expr=<n>
+void handleBrainPlay() {
+  if (!voice.enabled) {
+    server.send(409, "application/json", "{\"ok\":false,\"error\":\"voice disabled\"}");
+    return;
+  }
+  if (voice.busy() || voice.playRequested || voice.listenRequested) {
+    server.send(409, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+    return;
+  }
+  String id = server.arg("id");
+  if (id.length() == 0 || id.length() >= sizeof(voice.playId)) {
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"id required\"}");
+    return;
+  }
+  // The caller is the brain: adopt it when no host is configured.
+  if (!voice.brainHost[0]) {
+    snprintf(voice.resolved, sizeof(voice.resolved), "%s:%d",
+             server.client().remoteIP().toString().c_str(), VOICE_BRAIN_PORT);
+  }
+  strncpy(voice.playId, id.c_str(), sizeof(voice.playId) - 1);
+  voice.playId[sizeof(voice.playId) - 1] = '\0';
+  strncpy(voice.playText, server.arg("text").c_str(), sizeof(voice.playText) - 1);
+  voice.playText[sizeof(voice.playText) - 1] = '\0';
+  voice.playExpr = server.hasArg("expr") ? (int8_t)server.arg("expr").toInt() : -1;
+  voice.playMs = server.hasArg("ms") ? (uint32_t)server.arg("ms").toInt() : 0;
+  voice.playRequested = true;
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+#endif
+
 void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/state", handleState);
@@ -2279,6 +2433,13 @@ void setupWebServer() {
   server.on("/bot/photo/delete", handleScPhotoDelete);
   server.on("/bot/battery/status", handleScBatteryStatus);
   server.on("/bot/poweroff", handleScPowerOff);
+  #endif
+  #ifdef VOICE_ENABLED
+  server.on("/brain/status", handleBrainStatus);
+  server.on("/brain/config", handleBrainConfig);
+  server.on("/brain/listen", handleBrainListen);
+  server.on("/brain/play", handleBrainPlay);
+  server.on("/brain/lastwav", handleBrainLastWav);
   #endif
 
   // Schedule endpoints

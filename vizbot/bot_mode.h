@@ -361,6 +361,29 @@ struct BotModeState {
 // Global bot mode state
 BotModeState botMode;
 
+// ---- Voice hooks (written by voice_client.h on Core 0, read here on Core 1) ----
+// Harmless defaults on targets without VOICE_ENABLED.
+volatile bool voiceHoldsFace = false;     // a voice turn owns the face: no random expressions/sayings
+// Lip-sync: while voiceSpeakT0 != 0 the mouth follows voiceEnv (one 0..12 level
+// per 33 ms frame since voiceSpeakT0). Read here so the mouth keeps moving even
+// while the voice task is blocked on the network.
+volatile uint32_t voiceSpeakT0 = 0;
+uint8_t* volatile voiceEnv = nullptr;
+volatile uint32_t voiceEnvFrames = 0;
+static volatile bool voiceBubblePending = false;
+static char voiceBubbleText[MAX_SAY_LEN];
+static uint32_t voiceBubbleMs = 0;
+static bool voiceLipSyncWasActive = false;
+
+// Queue a speech bubble from another core (shown by updateBotMode; no WLED).
+void voiceShowBubble(const char* text, uint32_t ms) {
+  for (int i = 0; i < 10 && voiceBubblePending; i++) delay(10);
+  strncpy(voiceBubbleText, text, MAX_SAY_LEN - 1);
+  voiceBubbleText[MAX_SAY_LEN - 1] = '\0';
+  voiceBubbleMs = ms > 60000 ? 60000 : ms;
+  voiceBubblePending = true;
+}
+
 // ============================================================================
 // Bot Mode Update (called each frame when in Bot Mode)
 // ============================================================================
@@ -426,7 +449,7 @@ void updateBotMode() {
   }
 
   // ---- Random idle expression changes (personality-driven) ----
-  if (botMode.state == BOT_ACTIVE && !botMode.shakeReacting && now >= botMode.nextRandomExpr) {
+  if (botMode.state == BOT_ACTIVE && !botMode.shakeReacting && !voiceHoldsFace && now >= botMode.nextRandomExpr) {
     uint8_t pick;
     if (p->favoriteExprCount == 0 || random(100) < 35) {
       // 35% chance (or no favorites): pick from full expression range
@@ -440,7 +463,7 @@ void updateBotMode() {
   }
 
   // ---- Random idle sayings (personality-driven) ----
-  if ((botMode.state == BOT_ACTIVE || botMode.state == BOT_IDLE) &&
+  if ((botMode.state == BOT_ACTIVE || botMode.state == BOT_IDLE) && !voiceHoldsFace &&
       !botMode.speechBubble.active && now >= botMode.nextIdleSaying) {
     char buf[MAX_SAY_LEN];
     getRandomSayingText(pickPersonalitySayCategory(), buf, sizeof(buf));
@@ -453,7 +476,7 @@ void updateBotMode() {
 
   // ---- Core S3: Proximity-reactive expressions ----
   #ifdef TARGET_CORES3
-  if (sysStatus.proxLightReady && !botMode.shakeReacting &&
+  if (sysStatus.proxLightReady && !botMode.shakeReacting && !voiceHoldsFace &&
       (now - botMode.lastProxReactionMs > 2000)) {
 
     bool nearNow = proxLight.nearDetected;
@@ -515,6 +538,13 @@ void updateBotMode() {
   }
   #endif
 
+  // ---- Voice: bubble hand-off from Core 0, and stay awake during a turn ----
+  if (voiceBubblePending) {
+    botMode.speechBubble.show(voiceBubbleText, voiceBubbleMs, true);
+    voiceBubblePending = false;
+  }
+  if (voiceHoldsFace) botMode.registerInteraction();
+
   // ---- Fire pending say when WLED pre-delay has elapsed ----
   // skipWled=true: wledQueueText was already called in showBotSaying(), don't double-queue
   if (botMode.pendingSayAt > 0 && now >= botMode.pendingSayAt) {
@@ -550,6 +580,24 @@ void updateBotMode() {
 
   // Update expression transition
   botMode.face.update();
+
+  // Voice lip-sync: open the mouth with the reply audio's loudness, then put
+  // the current expression's own mouth back when speech ends.
+  if (voiceSpeakT0 != 0 && voiceEnv != nullptr) {
+    uint32_t f = (millis() - voiceSpeakT0) / 33;
+    int8_t lvl = (f < voiceEnvFrames) ? (int8_t)voiceEnv[f] : 0;
+    botMode.face.mouthType = (lvl >= 2) ? MOUTH_OPEN_O : MOUTH_LINE;
+    botMode.face.mouthCurve = 4 + lvl;          // MOUTH_OPEN_O radius
+    if (botMode.face.mouthWidth < 10) botMode.face.mouthWidth = 10;
+    voiceLipSyncWasActive = true;
+  } else if (voiceLipSyncWasActive) {
+    BotExpression e;
+    memcpy_P(&e, &botExpressions[botMode.face.targetExpr], sizeof(BotExpression));
+    botMode.face.mouthType = e.mouthType;
+    botMode.face.mouthCurve = e.mouthCurve;
+    botMode.face.mouthWidth = e.mouthWidth;
+    voiceLipSyncWasActive = false;
+  }
 
   // Update overlays
   botMode.speechBubble.update();
