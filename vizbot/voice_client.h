@@ -15,7 +15,7 @@
 // ============================================================================
 // Voice Client — push-to-talk conversation with vizbrain (the Mac service)
 // ============================================================================
-// Middle-pad head tap → record until silence → POST WAV to vizbrain → fetch the
+// Front head-pad tap → record until silence → POST WAV to vizbrain → fetch the
 // spoken reply → play it with a moving mouth. See docs/PLAN-vizbot-brain.md.
 //
 // Threading: the whole turn runs in voiceTask (Core 0, static stack). The
@@ -543,7 +543,7 @@ static void voiceRunPlay() {
 
 // ---- Entry points ----------------------------------------------------------------
 
-// Middle-pad tap: start listening, or cancel if already listening.
+// Front head-pad tap: start listening, or cancel if already listening.
 void voiceOnTalkTap() {
   if (!voice.enabled) return;
   if (voice.state == VOICE_LISTENING || voice.state == VOICE_SPEAKING) {

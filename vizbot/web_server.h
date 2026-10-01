@@ -2263,7 +2263,7 @@ void handleBrainConfig() {
   handleBrainStatus();
 }
 
-// Same as a middle-pad tap: start listening (or cancel).
+// Same as a front head-pad tap: start listening (or cancel).
 void handleBrainListen() {
   voiceOnTalkTap();
   server.send(200, "application/json", "{\"ok\":true}");

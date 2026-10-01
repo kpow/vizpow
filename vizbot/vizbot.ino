@@ -519,16 +519,17 @@ void loop() {
   {
     uint8_t touchResult = scTouch_state.update();
     if (touchResult == 1) {
-      // Single tap — front half = nod, back half = shake (middle ignored)
+      // Single tap — back half = shake. Front half = talk to vizbrain on voice
+      // builds (tap again to cancel), nod otherwise. Middle is ignored.
       if (scTouch_state.lastTapZone == SC_ZONE_BACK) {
         scFireShake();
       } else {
+        #ifdef VOICE_ENABLED
+        voiceOnTalkTap();
+        #else
         scFireNod();
+        #endif
       }
-    } else if (touchResult == 2) {
-      #ifdef VOICE_ENABLED
-      voiceOnTalkTap();     // middle pad: talk to vizbrain (tap again to cancel)
-      #endif
     } else if (touchResult == 3) {
       scFireChillMode();
     }

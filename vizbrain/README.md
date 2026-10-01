@@ -10,7 +10,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[mcp]"
 .venv/bin/vizbrain serve
 ```
 
-Open http://localhost:4050 to type to vizBot. Pat the **middle** of his head to talk (firmware v3.5.x and later).
+Open http://localhost:4050 to type to vizBot. Tap the **front** of his head to talk, and tap again to cancel (firmware v3.5.7 and later).
 
 The first start downloads the whisper model (~930 MB) from Hugging Face.
 

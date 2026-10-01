@@ -20,7 +20,7 @@
 | Lab tools | WLED set + restore verified on "Pipe cox"; vizMac keyboard flash verified; 8 WLED lights discovered |
 | `vizlab` MCP server | 9 tools listed and called |
 | Claude | **Not yet exercised:** no Anthropic API key exists on the Mac. Run `vizbrain set-key` |
-| Middle-pad tap | **Not yet tested by hand.** Every hardware test used `GET /brain/listen` |
+| Talk gesture | **Front head-pad tap** (v3.5.7), confirmed by hand. The middle pad couldn't work: a finger there also maxes the front or back pad, so it fired nod/shake |
 
 Deviations from the plan above:
 
@@ -91,7 +91,7 @@ Ground rules:
 
 ### One voice turn
 
-1. Kevin pats the middle of the head. The bot plays a short chirp and shows **FOCUSED** (listening).
+1. Kevin taps the front of the head. The bot shows **FOCUSED** (listening) and a "Listening..." bubble.
 2. The bot records 16 kHz mono audio until 800 ms of silence (max 15 s).
 3. The bot shows **THINKING** and POSTs the WAV to `POST /v1/voice`.
 4. vizbrain transcribes the audio and runs Claude with the tools. Tool calls hit the bot's existing `/bot/*` endpoints during the turn (expression, head move, LEDs) and the lab APIs.
@@ -213,9 +213,9 @@ Lift the RMS logic from the unused `vizbot/audio_analysis.h`: RMS over 256-sampl
 
 ### Trigger
 
-- Add a new return code `2` (middle-pad tap) to `ScTouchState::update()` (`vizbot/stackchan_touch.h:72-124`). The middle pad is ignored today (line 24).
+- **Front-pad tap starts listening** (replaces nod on voice builds; back tap still shakes, 2 s hold still chills). Dispatched in the touch block in `vizbot/vizbot.ino`. A middle-pad gesture was tried first and dropped: a finger on the middle also maxes a neighbour pad.
 - Dispatch it in the touch block at `vizbot/vizbot.ino:511-523`. Front tap = nod and back tap = shake stay unchanged; the 2 s hold stays chill mode.
-- A middle-pad tap during LISTENING cancels the recording.
+- A front tap during LISTENING or SPEAKING cancels.
 
 ### Network
 
@@ -308,7 +308,7 @@ Goal: prove the brain and the tools with no firmware change.
 
 Goal: pat, talk, hear an answer.
 
-- Firmware: `VOICE_ENABLED`, `voice_client.h`, I2S arbitration, capture, end-of-speech detection, middle-pad trigger, `voiceTask`, playback, lip-sync, `/brain/*` endpoints, `say.text` size, web panel card.
+- Firmware: `VOICE_ENABLED`, `voice_client.h`, I2S arbitration, capture, end-of-speech detection, front-tap trigger, `voiceTask`, playback, lip-sync, `/brain/*` endpoints, `say.text` size, web panel card.
 - Brain: `/v1/voice`, `/v1/audio/<id>`, whisper and Kokoro integration, `_vizbrain._tcp` advertising.
 - Benchmark speech-to-text and text-to-speech options on the Mac and pick one of each.
 
