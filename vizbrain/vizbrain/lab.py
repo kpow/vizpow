@@ -108,8 +108,23 @@ class Wled:
 
     def set(self, device: str, on: bool | None = None, brightness: int | None = None,
             color: str | None = None, effect: str | None = None) -> str:
+        targets = self._targets(device)
+        if len(targets) > 1:
+            # "all": in parallel, so one slow light can't time out the rest.
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                futs = {d["name"]: ex.submit(self.set, d["name"], on, brightness, color, effect)
+                        for d in targets}
+            failed = []
+            for name, f in futs.items():
+                try:
+                    f.result()
+                except Exception as e:  # noqa: BLE001
+                    failed.append(f"{name} ({e})")
+            ok = len(targets) - len(failed)
+            return f"updated {ok} of {len(targets)} lights" + (f"; failed: {', '.join(failed)}" if failed else "")
         done = []
-        for d in self._targets(device):
+        for d in targets:
             state: dict = {}
             if on is not None:
                 state["on"] = bool(on)

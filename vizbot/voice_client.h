@@ -20,7 +20,7 @@
 //
 // Threading: the whole turn runs in voiceTask (Core 0, static stack). The
 // render loop on Core 1 only reads the volatile hooks declared in bot_mode.h
-// (voiceHoldsFace, voiceMouthLevel, the bubble hand-off) and the web server
+// (voiceHoldsFace, voiceSpeakT0/voiceEnv, the bubble hand-off) and the web server
 // only flips request flags here, so nothing touches gfx or the bus off-core.
 //
 // Audio: the CoreS3 mic and speaker share I2S_NUM_1. This module owns the
@@ -66,7 +66,9 @@ static const char* const VOICE_STATE_NAMES[] = {
 
 // Hooks read by the render loop (bot_mode.h) and the spectrum analyzer.
 extern volatile bool voiceHoldsFace;
-extern volatile int8_t voiceMouthLevel;
+extern volatile uint32_t voiceSpeakT0;
+extern uint8_t* volatile voiceEnv;
+extern volatile uint32_t voiceEnvFrames;
 extern volatile bool voiceOwnsAudio;     // audio_spectrum.h
 extern void voiceShowBubble(const char* text, uint32_t ms);
 
@@ -101,6 +103,9 @@ struct VoiceClient {
   float    lastNoise = 0, lastPeak = 0, lastStartThr = 0;
   uint32_t lastRecMs = 0, lastSpeechMs = 0, lastBrainMs = 0, lastFetchMs = 0, lastPlayMs = 0;
   float    lastEndThr = 0;
+  uint32_t lastFirstDataMs = 0;    // reply request → first audio byte
+  uint32_t lastStarved = 0;        // times the speaker ran dry mid-reply
+  uint32_t lastSpeakerMs = 0;      // time to bring the speaker up
   uint32_t lastRecSamples = 0;     // samples captured (for /brain/lastwav)
   uint16_t rmsTrace[240];          // per-chunk RMS of the last recording (32 ms each)
   uint16_t rmsTraceLen = 0;
@@ -358,8 +363,11 @@ static int voicePostWav(const uint8_t* data, size_t len, char* resp, size_t resp
 // after the first bytes instead of after the whole clip. Long replies used to
 // spend 2-3 s downloading in silence.
 
-#define VOICE_SEG_SAMPLES      4800   // 0.2 s per queued piece
+#define VOICE_SEG_SAMPLES      4800   // first piece: 0.2 s, for a fast start
+#define VOICE_SEG_MAX_SAMPLES  36000  // later pieces up to 1.5 s, so a read that
+                                      // blocks between sentences can't starve the speaker
 #define VOICE_PREROLL_SAMPLES  7200   // 0.3 s buffered before the first piece plays
+#define VOICE_READ_BYTES       4096   // esp_http_client_read blocks until it fills this
 
 // Returns samples played (0 = the clip couldn't be fetched).
 // hintMs: the brain's estimate for how long to show the bubble (the clip may
@@ -376,6 +384,8 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
   if (!c) return 0;
   uint32_t tReq = millis();
   int64_t contentLen = -1;
+  voice.lastFirstDataMs = 0;
+  voice.lastStarved = 0;
   // A live clip arrives chunked (length unknown), so only the status decides.
   if (esp_http_client_open(c, 0) != ESP_OK ||
       ((contentLen = esp_http_client_fetch_headers(c)), esp_http_client_get_status_code(c) != 200)) {
@@ -393,14 +403,19 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
   bool eof = false;
   uint32_t clipMs = contentLen > 0 ? (uint32_t)(contentLen / 2 * 1000 / VOICE_PLAY_RATE) : 0;
 
+  uint32_t tSpk = millis();
   voiceTakeSpeaker();
+  voice.lastSpeakerMs = millis() - tSpk;
   for (;;) {
     if (voice.cancelRequested) break;
     if (!eof) {
       int r = (got < capBytes)
-          ? esp_http_client_read(c, (char*)voiceIoBuf, min(sizeof(voiceIoBuf), capBytes - got)) : 0;
-      if (r > 0) { memcpy(dst + got, voiceIoBuf, r); got += r; }
-      else eof = true;
+          ? esp_http_client_read(c, (char*)voiceIoBuf, min((size_t)VOICE_READ_BYTES, capBytes - got)) : 0;
+      if (r > 0) {
+        if (got == 0) voice.lastFirstDataMs = millis() - tReq;
+        memcpy(dst + got, voiceIoBuf, r);
+        got += r;
+      } else eof = true;
     }
     const size_t avail = got / 2;
 
@@ -412,26 +427,27 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
       if (rms > envPeak) envPeak = rms;
       voice.env[envFrames++] = (uint8_t)fminf(12.0f, rms * 12.0f / envPeak);
     }
+    voiceEnvFrames = envFrames;
 
     // Queue pieces whenever the speaker has a free slot (never block on it).
     if (t0 || avail >= VOICE_PREROLL_SAMPLES || eof) {
       while (M5.Speaker.isPlaying(0) < 2 && queued < avail) {
-        size_t n = min((size_t)VOICE_SEG_SAMPLES, avail - queued);
-        if (n < VOICE_SEG_SAMPLES && !eof) break;   // wait for a full piece
+        if (t0 && M5.Speaker.isPlaying(0) == 0) voice.lastStarved++;   // speaker ran dry mid-reply
+        size_t seg = t0 ? VOICE_SEG_MAX_SAMPLES : VOICE_SEG_SAMPLES;
+        size_t n = min(seg, avail - queued);
+        if (n < VOICE_SEG_SAMPLES && !eof) break;   // wait for at least a small piece
         if (!t0) {
           if (expr >= 0 && expr < BOT_NUM_EXPRESSIONS) cmdSetExpression((uint8_t)expr);
           if (bubble && bubble[0]) voiceShowBubble(bubble, (clipMs ? clipMs : (hintMs ? hintMs : 6000)) + 1500);
           voice.state = VOICE_SPEAKING;
           voice.lastFetchMs = millis() - tReq;      // request → first sound
           t0 = millis();
+          voiceEnv = voice.env;
+          voiceSpeakT0 = t0;
         }
         M5.Speaker.playRaw(voice.playBuf + queued, n, VOICE_PLAY_RATE, false, 1, 0, false);
         queued += n;
       }
-    }
-    if (t0) {
-      size_t f = (millis() - t0) / VOICE_ENV_FRAME_MS;
-      voiceMouthLevel = (f < envFrames) ? (int8_t)voice.env[f] : 0;
     }
     if (eof && queued >= avail) break;
     if (eof) vTaskDelay(pdMS_TO_TICKS(10));        // only waiting on speaker slots now
@@ -441,12 +457,10 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
 
   // Let the queued audio finish, mouth still moving.
   while (t0 && M5.Speaker.isPlaying(0) && !voice.cancelRequested) {
-    size_t f = (millis() - t0) / VOICE_ENV_FRAME_MS;
-    voiceMouthLevel = (f < envFrames) ? (int8_t)voice.env[f] : 0;
     vTaskDelay(pdMS_TO_TICKS(15));
   }
   if (voice.cancelRequested) M5.Speaker.stop(0);
-  voiceMouthLevel = -1;
+  voiceSpeakT0 = 0;
   voice.lastPlayMs = t0 ? millis() - t0 : 0;
   return queued;
 }
@@ -455,7 +469,7 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
 
 static void voiceFinish(VoiceState how) {
   voiceRestoreAudio();
-  voiceMouthLevel = -1;
+  voiceSpeakT0 = 0;
   if (how == VOICE_ERROR) {
     voice.failures++;
     voice.state = VOICE_ERROR;

@@ -38,6 +38,7 @@ How to answer:
 - Use tools only to change things: lab lights, the keyboard, your base LEDs, or pointing your head at a specific angle. For those, write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
 - For weather, answer from the weather in your context; call get_weather only if it's missing.
 - If a tool fails, say so plainly in a few words.
+- Your earlier replies in this conversation may end with an [actions: ...] note recording the tools you ran and their results. Treat those as done; never write such notes yourself.
 - If you didn't catch what was said, ask Kevin to say it again.
 """
 
@@ -107,8 +108,14 @@ class Brain:
                     else:
                         text = "I couldn't reach my Claude brain just now."
                     result = {"text": text, "tools": [f"error: {e}"[:200]]}
+            said = result["text"] or "(no reply)"
+            actions = [t for t in result.get("tools", []) if "(" in t]   # real tool calls, not face= tags
+            if actions:
+                # Remember what was done, not just what was said, so a later
+                # message doesn't redo it.
+                said += " [actions: " + "; ".join(a[:120] for a in actions) + "]"
             self.history += [{"role": "user", "content": heard},
-                             {"role": "assistant", "content": result["text"] or "(no reply)"}]
+                             {"role": "assistant", "content": said}]
             keep = self.settings["history_turns"] * 2
             self.history = self.history[-keep:]
             return result

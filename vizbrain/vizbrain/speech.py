@@ -199,6 +199,7 @@ class SentenceSplitter:
         for kind, value in self._TAG.findall(self.buf):
             self.on_tag(kind.lower(), value.lower())
         self.buf = self._TAG.sub("", self.buf)
+        self.buf = re.sub(r"\[actions:[^\]]*\]", "", self.buf)   # never speak action notes
         # Hold back anything after an unfinished "[" (a tag still arriving).
         cut = self.buf.rfind("[")
         ready, pending = (self.buf, "") if cut < 0 or "]" in self.buf[cut:] else (self.buf[:cut], self.buf[cut:])

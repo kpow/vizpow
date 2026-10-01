@@ -364,7 +364,12 @@ BotModeState botMode;
 // ---- Voice hooks (written by voice_client.h on Core 0, read here on Core 1) ----
 // Harmless defaults on targets without VOICE_ENABLED.
 volatile bool voiceHoldsFace = false;     // a voice turn owns the face: no random expressions/sayings
-volatile int8_t voiceMouthLevel = -1;     // -1 = no lip-sync; 0..12 mouth opening while speaking
+// Lip-sync: while voiceSpeakT0 != 0 the mouth follows voiceEnv (one 0..12 level
+// per 33 ms frame since voiceSpeakT0). Read here so the mouth keeps moving even
+// while the voice task is blocked on the network.
+volatile uint32_t voiceSpeakT0 = 0;
+uint8_t* volatile voiceEnv = nullptr;
+volatile uint32_t voiceEnvFrames = 0;
 static volatile bool voiceBubblePending = false;
 static char voiceBubbleText[MAX_SAY_LEN];
 static uint32_t voiceBubbleMs = 0;
@@ -578,8 +583,9 @@ void updateBotMode() {
 
   // Voice lip-sync: open the mouth with the reply audio's loudness, then put
   // the current expression's own mouth back when speech ends.
-  if (voiceMouthLevel >= 0) {
-    int8_t lvl = voiceMouthLevel;
+  if (voiceSpeakT0 != 0 && voiceEnv != nullptr) {
+    uint32_t f = (millis() - voiceSpeakT0) / 33;
+    int8_t lvl = (f < voiceEnvFrames) ? (int8_t)voiceEnv[f] : 0;
     botMode.face.mouthType = (lvl >= 2) ? MOUTH_OPEN_O : MOUTH_LINE;
     botMode.face.mouthCurve = 4 + lvl;          // MOUTH_OPEN_O radius
     if (botMode.face.mouthWidth < 10) botMode.face.mouthWidth = 10;
