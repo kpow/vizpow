@@ -87,9 +87,11 @@ class App:
         pcm = speech.synthesize(text, voice, self.settings["tts_rate"])
         clip = self.clips.put(pcm)
         t_tts = time.time()
+        if result.get("gesture"):
+            self.toolbox.run("head_gesture", {"name": result["gesture"]})  # async on the bot
         reply = {
             "heard": heard, "text": text, "bubble": bubble_text(text),
-            "expression": -1, "audio_id": clip, "audio_ms": speech.pcm_ms(pcm),
+            "expression": result.get("expression", -1), "audio_id": clip, "audio_ms": speech.pcm_ms(pcm),
             "timing_ms": {"brain": int((t_llm - t0) * 1000), "tts": int((t_tts - t_llm) * 1000)},
         }
         self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source,
@@ -210,7 +212,7 @@ def make_handler(app: App):
             spoke = False
             if bot and data.get("speak", True):
                 try:
-                    bot.play(reply["audio_id"], reply["bubble"], reply["audio_ms"])
+                    bot.play(reply["audio_id"], reply["bubble"], reply["audio_ms"], reply["expression"])
                     spoke = True
                 except BotError:
                     try:  # firmware without voice: show the reply as a bubble

@@ -77,6 +77,14 @@ class Wled:
             self._last_scan = time.time()
         print(f"[wled] {len(found)} device(s): {', '.join(d['name'] for d in found.values())}")
 
+    def cached_names(self) -> list[str]:
+        """Names without blocking on a scan; kicks off a background refresh when stale."""
+        if time.time() - self._last_scan >= self.REFRESH_S:
+            self._last_scan = time.time()  # one refresh at a time
+            threading.Thread(target=self.refresh, kwargs={"force": True}, daemon=True).start()
+        with self._lock:
+            return sorted(d["name"] for d in self.devices.values())
+
     def names(self) -> list[str]:
         self.refresh()
         with self._lock:

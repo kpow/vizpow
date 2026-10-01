@@ -13,6 +13,7 @@ import re
 import threading
 import time
 
+from .bot import EXPRESSIONS, GESTURES
 from .tools import Toolbox
 
 MAX_TOOL_ROUNDS = 6
@@ -30,11 +31,20 @@ Kevin talks to you by patting your head and speaking.
 How to answer:
 - Everything you write is spoken aloud by a text-to-speech voice. Reply in one to three short, natural sentences.
 - No markdown, lists, emoji, URLs or code. Spell out symbols and units the way a person would say them.
-- Use your tools to be expressive: set a fitting face for your reply, and nod, shake or look around when it fits.
-- When Kevin asks you to change lights or the keyboard, use the lab tools, then confirm briefly in words.
+- Start every reply with a face tag for how you feel, like [face:happy]. Faces: {faces}.
+- When a head gesture fits, add one gesture tag right after the face, like [gesture:nod]. Gestures: nod, shake, lookup, lookdown, left, right. Most replies need none.
+- Tags are silent: they set your face and head, and are never spoken. Don't use tools for faces or gestures.
+- Use tools only to change things: lab lights, the keyboard, your base LEDs, or pointing your head at a specific angle. Write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
 - If a tool fails, say so plainly in a few words.
 - If you didn't catch what was said, ask Kevin to say it again.
 """
+
+
+TAG_RE = re.compile(r"\[(face|gesture)\s*:\s*([a-z_]+)\]", re.I)
+
+# Faces and gestures ride in the reply as tags (one model call instead of a
+# tool round trip each); the lab-device list is in the prompt for the same reason.
+CLAUDE_SKIP_TOOLS = {"set_expression", "head_gesture", "list_lab_devices"}
 
 
 class Brain:
@@ -66,7 +76,10 @@ class Brain:
     def _context(self, personality: str) -> str:
         style = PERSONALITY_STYLE.get(personality.lower(), "friendly and curious")
         now = dt.datetime.now().strftime("%A %B %-d, %-I:%M %p")
-        return f"Current personality: {personality} — {style}.\nLocal time: {now}."
+        lights = ", ".join(self.toolbox.wled.cached_names()) or "none found yet"
+        return (f"Current personality: {personality} — {style}.\nLocal time: {now}.\n"
+                f"Lab lights (WLED names for wled_set): {lights}. "
+                f"Kevin may call them by a nickname; pick the closest name.")
 
     def turn(self, heard: str, personality: str = "Chill") -> dict:
         """Run one conversational turn. Returns {text, tools}."""
@@ -101,11 +114,11 @@ class Brain:
         import anthropic
 
         system = [
-            {"type": "text", "text": SYSTEM_PROMPT},
+            {"type": "text", "text": SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS))},
             {"type": "text", "text": self._context(personality)},
         ]
         messages = list(self.history) + [{"role": "user", "content": heard}]
-        tools = self.toolbox.api_list()
+        tools = [t for t in self.toolbox.api_list() if t["name"] not in CLAUDE_SKIP_TOOLS]
         used: list[str] = []
         text_parts: list[str] = []
 
@@ -113,7 +126,8 @@ class Brain:
             resp = self._create(system, messages, tools)
             if resp.stop_reason == "refusal":
                 return {"text": "Hmm, I'd better not answer that one.", "tools": used}
-            text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text" and b.text.strip()]
+            # Keep text from every round: words before a tool call are part of the reply.
+            text_parts += [b.text for b in resp.content if getattr(b, "type", "") == "text" and b.text.strip()]
             calls = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
             if resp.stop_reason != "tool_use" or not calls:
                 break
@@ -126,8 +140,24 @@ class Brain:
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": out, "is_error": is_err})
             messages.append({"role": "user", "content": results})
+            # Fast path: every tool worked and the confirmation was already
+            # written alongside the calls, so skip the follow-up model call.
+            round_text = [b for b in resp.content if getattr(b, "type", "") == "text" and b.text.strip()]
+            if round_text and not any(r["is_error"] for r in results):
+                break
 
-        return {"text": _speakable(" ".join(text_parts)), "tools": used}
+        raw = " ".join(text_parts)
+        expression, gesture = -1, None
+        for kind, value in TAG_RE.findall(raw):
+            value = value.lower()
+            if kind.lower() == "face" and value in EXPRESSIONS and expression < 0:
+                expression = EXPRESSIONS.index(value)
+            elif kind.lower() == "gesture" and value in GESTURES and gesture is None:
+                gesture = value
+        tags = [f"face={EXPRESSIONS[expression]}"] if expression >= 0 else []
+        tags += [f"gesture={gesture}"] if gesture else []
+        return {"text": _speakable(TAG_RE.sub("", raw)), "tools": tags + used,
+                "expression": expression, "gesture": gesture}
 
     def _create(self, system, messages, tools):
         import anthropic
@@ -195,7 +225,7 @@ def _short(args) -> str:
 
 def _speakable(text: str) -> str:
     """Strip markdown the TTS would read aloud."""
-    text = re.sub(r"[*_`#>]+", "", text)
+    text = re.sub(r"[*_`#>\[\]]+", "", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
