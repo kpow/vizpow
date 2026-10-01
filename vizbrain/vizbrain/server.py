@@ -254,6 +254,7 @@ def serve(port: int | None = None) -> None:
     threading.Thread(target=app.listener.warm, daemon=True).start()
     threading.Thread(target=app.announce, args=(port,), daemon=True).start()
     threading.Thread(target=app.wled.refresh, daemon=True).start()
+    app.toolbox.cached_weather()  # warm the prompt's weather so the first question is one call
     httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(app))
     httpd.daemon_threads = True
     app.advertise(port)
