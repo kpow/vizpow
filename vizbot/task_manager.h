@@ -73,7 +73,7 @@ enum CommandType : uint8_t {
   CMD_PLAY_SEQUENCE,
 };
 
-// ~64-byte command payload — fits all command types including multi-word phrases
+// ~100-byte command payload — fits all command types including a full MAX_SAY_LEN phrase
 struct Command {
   CommandType type;
   union {
@@ -81,7 +81,7 @@ struct Command {
     uint16_t u16val;
     int32_t  i32val;
     struct {
-      char text[60];
+      char text[MAX_SAY_LEN];   // was 60, which cut /bot/say text at 59 chars
       uint16_t duration;
     } say;
     struct {

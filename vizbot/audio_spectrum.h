@@ -27,6 +27,9 @@
 // Forward declaration — speaker state check for muting
 extern struct BotSounds botSounds;
 
+// Set by voice_client.h while a voice turn owns the mic/speaker (I2S_NUM_1).
+volatile bool voiceOwnsAudio = false;
+
 // --- FFT Configuration ---
 #define FFT_SIZE          512
 #define FFT_SAMPLE_RATE   16000
@@ -161,8 +164,9 @@ struct AudioSpectrum {
     beatEnv *= BEAT_ENV_DECAY;
     if (beatEnv < 0.01f) beatEnv = 0.0f;
 
-    // Mute while speaker is playing to avoid feedback
-    if (botSounds.playing) {
+    // Mute while speaker is playing to avoid feedback; stand aside entirely
+    // while a voice turn has the audio hardware.
+    if (botSounds.playing || voiceOwnsAudio) {
       alive = false;
       return;
     }

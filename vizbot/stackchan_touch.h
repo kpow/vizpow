@@ -20,8 +20,9 @@
 // its touch gestures on). We fire on the IMMEDIATE click (release edge) so a tap
 // responds the instant you lift — capacitive pads are often held >0.5s, which the
 // multi-click/hold machinery would otherwise misread as a "hold" and drop. Events:
-//   - Tap FRONT → nod   (yes)
-//   - Tap BACK  → shake (no)   [middle pad ignored — every tap is front or back]
+//   - Tap FRONT  → nod   (yes)
+//   - Tap BACK   → shake (no)
+//   - Tap MIDDLE → talk to vizbrain (VOICE_ENABLED builds; returns 2)
 //   - Hold 2s   → chill mode (10/30/60/120 min, see scChillMinutes)
 //
 // The tapped zone is recovered by tracking each pad's peak intensity during the
@@ -68,7 +69,7 @@ struct ScTouchState {
     chillEndMs = 0;
   }
 
-  // Returns: 0=nothing, 1=tap (see lastTapZone), 3=hold → chill
+  // Returns: 0=nothing, 1=tap front/back (see lastTapZone), 2=tap middle, 3=hold → chill
   uint8_t update() {
     if (!sysStatus.scHeadTouchReady) return 0;
 
@@ -106,11 +107,17 @@ struct ScTouchState {
     // consumed here so it doesn't also fire a tap reaction.
     if (headBtn.wasClicked()) {
       if (holdFired) { holdFired = false; return 0; }
-      // Require a FULL-strength hit (level 3) on the front or back pad. A real
-      // finger easily reaches it; stray capacitive noise (e.g. a ceiling fan)
-      // only nudges a pad to level 1, so it's rejected. Middle pad is ignored.
-      bool frontHigh = peak[SC_ZONE_FRONT] >= OUTPUT_HIGH;
-      bool backHigh  = peak[SC_ZONE_BACK]  >= OUTPUT_HIGH;
+      // Require a FULL-strength hit (level 3). A real finger easily reaches it;
+      // stray capacitive noise (e.g. a ceiling fan) only nudges a pad to level
+      // 1, so it's rejected. A middle tap counts only when neither end pad
+      // reached full strength, so existing nod/shake taps are never stolen.
+      bool frontHigh  = peak[SC_ZONE_FRONT]  >= OUTPUT_HIGH;
+      bool middleHigh = peak[SC_ZONE_MIDDLE] >= OUTPUT_HIGH;
+      bool backHigh   = peak[SC_ZONE_BACK]   >= OUTPUT_HIGH;
+      if (middleHigh && !frontHigh && !backHigh) {
+        lastTapZone = SC_ZONE_MIDDLE;
+        return 2;
+      }
       if (!frontHigh && !backHigh) return 0;
       // Back wins ties; otherwise whichever end reached full strength.
       lastTapZone = (backHigh && peak[SC_ZONE_BACK] >= peak[SC_ZONE_FRONT])

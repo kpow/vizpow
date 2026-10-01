@@ -1,10 +1,40 @@
 # vizBot Brain — LLM Voice, Lab Control and Senses
 
-**Status:** Approved for build
+**Status:** Stages 0–1 built and verified on hardware (no API key yet); Stage 2 tools built
 **Started:** October 1, 2026
 **Current production version:** `vizbot-stackchan-v3.4.2`
 **First firmware release from this plan:** `vizbot-stackchan-v3.5.0` (Stage 1, voice)
 **Companion overview:** [vizBot Brain — LLM Plan](https://claude.ai/code/artifact/80c62773-0978-4fab-8dd5-f3c01ebb9964) (plain-language summary, diagrams, cost tables)
+
+---
+
+## Build log
+
+### October 1, 2026 — Stages 0, 1 and 2 (tools) built
+
+| What | Result |
+|---|---|
+| vizbrain service (`vizbrain/` in this repo) | Running on the Mac at :4050, Bonjour `_vizbrain._tcp` |
+| Firmware `vizbot-stackchan-v3.5.5` | Flashed to vizBot-skunky over USB |
+| Voice turn, end to end | 3 of 3 spoken questions from a fresh boot transcribed and answered; reply starts ~2.6 s after end of speech with the offline stand-in |
+| Lab tools | WLED set + restore verified on "Pipe cox"; vizMac keyboard flash verified; 8 WLED lights discovered |
+| `vizlab` MCP server | 9 tools listed and called |
+| Claude | **Not yet exercised:** no Anthropic API key exists on the Mac. Run `vizbrain set-key` |
+| Middle-pad tap | **Not yet tested by hand.** Every hardware test used `GET /brain/listen` |
+
+Deviations from the plan above:
+
+- **vizbrain lives in this repo** (`vizbrain/`), not a sibling repo. One branch rolls back firmware and brain together.
+- **Text to speech is macOS `say` for v1** (D3 said Kokoro). No model download, ~0.4 s per reply, a different voice per personality. Kokoro stays a drop-in later behind `speech.synthesize()`.
+- **Speech to text is `mlx-whisper` with `whisper-small.en`** (~0.6 s for a short question on the M5 Mac).
+- **Thinking:** Sonnet 5.5 runs with `thinking: {type: "between_tools"}` at effort `low`. History between turns is plain text only, so trimming old turns never edits a request that carried thinking blocks.
+- **Bubbles during a voice turn bypass WLED** (shown on the LCD only), so the WLED matrix isn't spammed with "Listening...".
+
+Hardware findings:
+
+- **Mic chunk completion must be checked, not inferred.** Assuming a chunk is done once two more are queued read unwritten PSRAM, which looked like a constant loud noise and kept recordings open for 15 s. Each chunk's last sample is now preset to `INT16_MAX`, a value M5Unified never writes, and the chunk counts as complete once that is overwritten.
+- **The mic is restarted at the start of every turn,** with an automatic re-restart if the noise floor reads above 1500 RMS. Real room noise on skunky is 55–130 RMS; speech peaks are 2,000–3,000.
+- Bot debug endpoints added: `/brain/status?trace=1` (per-chunk mic RMS) and `/brain/lastwav` (last raw recording).
 
 ---
 
@@ -216,7 +246,7 @@ The web panel gets a "Brain" card with host, status and a test button.
 
 ---
 
-## Brain design (`~/projects/vizbrain`)
+## Brain design (`vizbrain/` in this repo)
 
 A sibling repo that mirrors vizMac's structure, so both feel the same to run and maintain.
 
@@ -381,3 +411,4 @@ Sources:
 2. Kokoro voice pick per personality. Chill, Hyper and Grumpy may each get their own voice.
 3. Whether to add a dedicated LISTENING expression instead of reusing FOCUSED.
 4. Whether `vizlab-mcp` should also wrap vizMac media controls (`/api/media`).
+5. Whether to put [Hypercolor](https://hyperb1iss.github.io/hypercolor/) behind the lab tools. It's an Apache-2.0 Rust daemon that unifies 400+ RGB devices (WLED, Razer, Corsair, Hue, Nanoleaf, Govee) behind REST/WebSocket and its own 18-tool MCP server. It could replace the hand-rolled WLED client, but vizMac's ROCCAT keyboard support would need checking first.
