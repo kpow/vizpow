@@ -38,9 +38,10 @@ extern char mdnsHostname[];
 
 #define VOICE_MIC_RATE        16000
 #define VOICE_CHUNK           512      // samples per mic read (32 ms)
-#define VOICE_MAX_REC_MS      15000
+#define VOICE_MAX_REC_MS      12000
 #define VOICE_MIN_SPEECH_MS   300
 #define VOICE_HANGOVER_MS     800      // silence that ends an utterance
+#define VOICE_END_RATIO       0.15f    // "silence" = below 15% of the speaker's level
 #define VOICE_WAIT_SPEECH_MS  6000     // give up if nothing is said
 #define VOICE_WARMUP_CHUNKS   4        // ~130 ms ignored after Mic.begin()
 #define VOICE_NOISE_CHUNKS    6        // ~190 ms to learn the room's noise
@@ -217,6 +218,7 @@ static size_t voiceRecord(bool& cancelled, bool& garbage) {
   float noise = 0, peak = 0, startThr = VOICE_SPEECH_FLOOR, endThr = VOICE_SPEECH_FLOOR * 0.6f;
   int noiseN = 0, loudRun = 0;
   bool speech = false, done = false;
+  float speechLevel = 0;
   uint32_t speechStartMs = 0, lastLoudMs = 0;
   cancelled = false;
   garbage = false;
@@ -263,7 +265,13 @@ static size_t voiceRecord(bool& cancelled, bool& garbage) {
         }
         if (!speech && tMs > VOICE_WAIT_SPEECH_MS) done = true;
       } else {
-        if (rms > endThr) lastLoudMs = tMs;
+        // Silence is relative to how loud the speaker was: someone talking at
+        // the bot is far louder than a meeting or TV across the room, which
+        // otherwise kept recordings open to the cap.
+        if (rms > speechLevel) speechLevel = rms;
+        else speechLevel = speechLevel * 0.98f + rms * 0.02f;
+        float thr = fmaxf(endThr, speechLevel * VOICE_END_RATIO);
+        if (rms > thr) lastLoudMs = tMs;
         if (tMs - lastLoudMs >= VOICE_HANGOVER_MS) done = true;
       }
     }

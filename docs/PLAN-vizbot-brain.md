@@ -30,6 +30,17 @@ Deviations from the plan above:
 - **Thinking:** Sonnet 5.5 runs with `thinking: {type: "between_tools"}` at effort `low`. History between turns is plain text only, so trimming old turns never edits a request that carried thinking blocks.
 - **Bubbles during a voice turn bypass WLED** (shown on the LCD only), so the WLED matrix isn't spammed with "Listening...".
 
+### October 1, 2026 (afternoon) — speed, weather, reliability
+
+| Change | Result |
+|---|---|
+| Faces/gestures as inline `[face:x] [gesture:y]` tags; light names in the prompt; no follow-up call when action tools succeed | Chat ~2.2 s, light/keyboard commands 6–9 s → ~2.8 s |
+| `get_weather` tool + weather cached in the prompt (15 min) | Weather questions ~2.2–3.3 s |
+| Firmware v3.5.8: end-of-speech relative to the speaker's own loudness (15%); max recording 12 s | Meant to keep background talk from holding the mic open; not yet tested in a noisy room |
+| Brain tells the bot its address at startup (`/brain/config`) | The bot's mDNS lookup of `_vizbrain._tcp` failed after a reboot; the advertisement itself was fine |
+| vizbrain runs as a launchd agent (`com.kpow.vizbrain`) | Starts at login, restarts on crash, reads the key from the Keychain |
+| Front head tap starts listening (v3.5.7) | The middle-pad tap fired nod/shake: a finger on the middle also maxes a neighbour pad |
+
 Hardware findings:
 
 - **Mic chunk completion must be checked, not inferred.** Assuming a chunk is done once two more are queued read unwritten PSRAM, which looked like a constant loud noise and kept recordings open for 15 s. Each chunk's last sample is now preset to `INT16_MAX`, a value M5Unified never writes, and the chunk counts as complete once that is overwritten.

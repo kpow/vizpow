@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import collections
 import json
+import os
+import signal
 import socket
 import subprocess
 import threading
@@ -102,7 +104,27 @@ class App:
 
     # ---- bonjour ---------------------------------------------------------
 
+    def announce(self, port: int) -> None:
+        """Tell the bot where we are (it also looks for _vizbrain._tcp, but the
+        ESP32's mDNS query has proven unreliable). Persisted on the bot, so it
+        only writes when the address changed."""
+        bot = self.get_bot()
+        if bot is None:
+            return
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((bot.host, 80))
+                me = f"{s.getsockname()[0]}:{port}"
+            status = bot._get("/brain/status")
+            if isinstance(status, dict) and status.get("brainHost") != me:
+                bot._get("/brain/config", {"host": me})
+                print(f"[bot] told {bot.host} the brain is at {me}")
+        except (OSError, BotError) as e:
+            print(f"[bot] announce failed: {e}")
+
     def advertise(self, port: int) -> None:
+        # Clear registrations orphaned by earlier runs that were killed.
+        subprocess.run(["pkill", "-f", "dns-sd -R vizbrain"], capture_output=True)
         try:
             self._bonjour = subprocess.Popen(
                 ["dns-sd", "-R", "vizbrain", "_vizbrain._tcp", "local", str(port), "api=/v1"],
@@ -230,11 +252,13 @@ def serve(port: int | None = None) -> None:
     port = port or app.settings["port"]
     print(f"[vizbrain] Claude {'ONLINE (' + app.settings['model'] + ')' if app.brain.online else 'OFFLINE (no API key; rule-based stand-in)'}")
     threading.Thread(target=app.listener.warm, daemon=True).start()
-    threading.Thread(target=app.get_bot, daemon=True).start()
+    threading.Thread(target=app.announce, args=(port,), daemon=True).start()
     threading.Thread(target=app.wled.refresh, daemon=True).start()
     httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(app))
     httpd.daemon_threads = True
     app.advertise(port)
+    # launchd stops us with SIGTERM: take the Bonjour child down with us.
+    signal.signal(signal.SIGTERM, lambda *_: (app.stop(), os._exit(0)))
     print(f"[vizbrain] listening on :{port}")
     try:
         httpd.serve_forever()
