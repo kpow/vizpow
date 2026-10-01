@@ -33,6 +33,8 @@ DEFAULTS: dict = {
     # WLED devices the brain may control, by name. null = every device found.
     "wled_allow": None,
     "vizmac_url": "http://127.0.0.1:4049",
+    # Workspace for a personal API key that isn't scoped to one workspace.
+    "workspace_id": "",
 }
 
 _lock = threading.Lock()

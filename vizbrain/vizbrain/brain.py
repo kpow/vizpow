@@ -47,7 +47,17 @@ class Brain:
         self.client = None
         if api_key:
             import anthropic
-            self.client = anthropic.Anthropic(api_key=api_key, max_retries=1, timeout=30.0)
+            headers = {}
+            if settings.get("workspace_id"):
+                # Required for identity-linked keys that aren't scoped to one workspace.
+                headers["anthropic-workspace-id"] = settings["workspace_id"]
+            if api_key.startswith("sk-ant-usr"):
+                # Personal (identity-linked) keys: send as Authorization: Bearer.
+                self.client = anthropic.Anthropic(auth_token=api_key, default_headers=headers,
+                                                  max_retries=1, timeout=30.0)
+            else:
+                self.client = anthropic.Anthropic(api_key=api_key, default_headers=headers,
+                                                  max_retries=1, timeout=30.0)
 
     @property
     def online(self) -> bool:
@@ -67,7 +77,18 @@ class Brain:
             if self.client is None:
                 result = self._offline_turn(heard)
             else:
-                result = self._claude_turn(heard, personality)
+                try:
+                    result = self._claude_turn(heard, personality)
+                except Exception as e:  # noqa: BLE001 - say it out loud rather than go silent
+                    print(f"[brain] Claude call failed: {e}")
+                    msg = str(e).lower()
+                    if "credit balance" in msg:
+                        text = "My Claude brain is out of credits. Add some in the Claude Console."
+                    elif "authentication" in msg or "api key" in msg:
+                        text = "My Claude API key isn't working."
+                    else:
+                        text = "I couldn't reach my Claude brain just now."
+                    result = {"text": text, "tools": [f"error: {e}"[:200]]}
             self.history += [{"role": "user", "content": heard},
                              {"role": "assistant", "content": result["text"] or "(no reply)"}]
             keep = self.settings["history_turns"] * 2
