@@ -34,7 +34,8 @@ How to answer:
 - Start every reply with a face tag for how you feel, like [face:happy]. Faces: {faces}.
 - When a head gesture fits, add one gesture tag right after the face, like [gesture:nod]. Gestures: nod, shake, lookup, lookdown, left, right. Most replies need none.
 - Tags are silent: they set your face and head, and are never spoken. Don't use tools for faces or gestures.
-- Use tools only to change things: lab lights, the keyboard, your base LEDs, or pointing your head at a specific angle. Write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
+- Use tools only to change things: lab lights, the keyboard, your base LEDs, or pointing your head at a specific angle. For those, write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
+- For weather, answer from the weather in your context; call get_weather only if it's missing.
 - If a tool fails, say so plainly in a few words.
 - If you didn't catch what was said, ask Kevin to say it again.
 """
@@ -45,6 +46,8 @@ TAG_RE = re.compile(r"\[(face|gesture)\s*:\s*([a-z_]+)\]", re.I)
 # Faces and gestures ride in the reply as tags (one model call instead of a
 # tool round trip each); the lab-device list is in the prompt for the same reason.
 CLAUDE_SKIP_TOOLS = {"set_expression", "head_gesture", "list_lab_devices"}
+# Tools whose result the model must read before it can answer.
+INFO_TOOLS = {"get_weather", "list_lab_devices"}
 
 
 class Brain:
@@ -79,7 +82,8 @@ class Brain:
         lights = ", ".join(self.toolbox.wled.cached_names()) or "none found yet"
         return (f"Current personality: {personality} — {style}.\nLocal time: {now}.\n"
                 f"Lab lights (WLED names for wled_set): {lights}. "
-                f"Kevin may call them by a nickname; pick the closest name.")
+                f"Kevin may call them by a nickname; pick the closest name.\n"
+                f"Weather (refreshed every 15 minutes): {self.toolbox.cached_weather() or 'not loaded yet; use get_weather'}")
 
     def turn(self, heard: str, personality: str = "Chill") -> dict:
         """Run one conversational turn. Returns {text, tools}."""
@@ -142,9 +146,13 @@ class Brain:
             messages.append({"role": "user", "content": results})
             # Fast path: every tool worked and the confirmation was already
             # written alongside the calls, so skip the follow-up model call.
+            # Only for action tools: an info tool's result still has to be said.
             round_text = [b for b in resp.content if getattr(b, "type", "") == "text" and b.text.strip()]
-            if round_text and not any(r["is_error"] for r in results):
+            if (round_text and not any(r["is_error"] for r in results)
+                    and not any(c.name in INFO_TOOLS for c in calls)):
                 break
+            if any(c.name in INFO_TOOLS for c in calls):
+                text_parts = []  # "let me check" filler is replaced by the real answer
 
         raw = " ".join(text_parts)
         expression, gesture = -1, None

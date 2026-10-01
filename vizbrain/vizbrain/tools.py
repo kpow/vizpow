@@ -7,11 +7,12 @@ servo re-init or device naming. Only looks, motion and lights.
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable
 
 from .bot import EXPRESSIONS, GESTURES, Bot
-from .lab import COLOR_NAMES, VizMac, Wled, parse_color
+from .lab import COLOR_NAMES, VizMac, Wled, parse_color, weather
 
 LED_MODES = ["off", "breathing", "rainbow", "chase", "fire", "twinkle", "pulse", "aurora", "mood", "audio"]
 
@@ -38,6 +39,7 @@ class Toolbox:
         self.wled = wled
         self.vizmac = vizmac
         self.tools: dict[str, Tool] = {}
+        self._wx, self._wx_at = "", 0.0
         self._register()
 
     def _bot(self) -> Bot:
@@ -87,6 +89,11 @@ class Toolbox:
             lambda device, on=None, brightness=None, color=None, effect=None:
                 self.wled.set(device, on, brightness, color, effect))
 
+        add("get_weather",
+            "Get the local weather: current conditions plus today's and tomorrow's forecast.",
+            _obj({}),
+            self._weather)
+
         add("keyboard_effect",
             "Set the vizMac keyboard lighting effect by name (e.g. plasma, rainbow, fire).",
             _obj({"name": {"type": "string"}}, ["name"]),
@@ -99,6 +106,31 @@ class Toolbox:
 
     def _add(self, name, description, schema, fn) -> None:
         self.tools[name] = Tool(name, description, schema, fn)
+
+    def cached_weather(self) -> str:
+        """Weather for the prompt, refreshed in the background every 15 min."""
+        now = time.time()
+        if now - self._wx_at > 900:
+            self._wx_at = now
+            def refresh():
+                try:
+                    self._wx = self._weather()
+                except Exception as e:  # noqa: BLE001
+                    print(f"[tools] weather refresh failed: {e}")
+            threading.Thread(target=refresh, daemon=True).start()
+        return self._wx
+
+    def _weather(self) -> str:
+        # The bot stores its location (set in its web panel); default Richmond, VA.
+        lat, lon = "37.54", "-77.43"
+        bot = self.get_bot()
+        if bot is not None:
+            try:
+                st = bot.state()
+                lat, lon = st.get("weatherLat") or lat, st.get("weatherLon") or lon
+            except Exception:  # noqa: BLE001 - fall back to the default location
+                pass
+        return weather(lat, lon)
 
     def _gesture(self, name: str) -> str:
         # The bot answers only after the move finishes (~1.7 s for a nod), so

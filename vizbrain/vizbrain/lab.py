@@ -168,3 +168,32 @@ class VizMac:
         _http_json("POST", f"{self.base}/api/overlay",
                    {"kind": "flash", "color": f"#{r:02x}{g:02x}{b:02x}", "ms": max(100, min(120000, int(ms)))})
         return f"keyboard flashed {color}"
+
+
+# WMO weather codes -> words (Open-Meteo, same source the bot's firmware uses).
+_WMO = {
+    0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "overcast", 45: "foggy", 48: "foggy",
+    51: "light drizzle", 53: "drizzle", 55: "heavy drizzle", 61: "light rain", 63: "rain",
+    65: "heavy rain", 66: "freezing rain", 67: "freezing rain", 71: "light snow", 73: "snow",
+    75: "heavy snow", 77: "snow grains", 80: "rain showers", 81: "rain showers",
+    82: "heavy rain showers", 85: "snow showers", 86: "heavy snow showers",
+    95: "thunderstorms", 96: "thunderstorms with hail", 99: "thunderstorms with hail",
+}
+
+
+def weather(lat: str, lon: str) -> str:
+    """Current conditions plus today and tomorrow, in °F and mph."""
+    url = ("https://api.open-meteo.com/v1/forecast"
+           f"?latitude={lat}&longitude={lon}"
+           "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m"
+           "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
+           "&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=2")
+    d = _http_json("GET", url, timeout=5.0)
+    c, day = d["current"], d["daily"]
+    parts = [f"Now: {round(c['temperature_2m'])}°F (feels like {round(c['apparent_temperature'])}), "
+             f"{_WMO.get(c['weather_code'], 'unknown sky')}, wind {round(c['wind_speed_10m'])} mph."]
+    for i, label in enumerate(("Today", "Tomorrow")):
+        parts.append(f"{label}: high {round(day['temperature_2m_max'][i])}, low {round(day['temperature_2m_min'][i])}, "
+                     f"{_WMO.get(day['weather_code'][i], 'unknown sky')}, "
+                     f"{day['precipitation_probability_max'][i]}% chance of rain.")
+    return " ".join(parts)
