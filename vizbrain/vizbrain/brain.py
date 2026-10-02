@@ -38,7 +38,7 @@ How to answer:
 - Use tools only to change things: lab lights, the keyboard, your base LEDs, or pointing your head at a specific angle. For those, write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
 - For weather, answer from the weather in your context; call get_weather only if it's missing.
 - If a tool fails, say so plainly in a few words.
-- Your earlier replies in this conversation may end with an [actions: ...] note recording the tools you ran and their results. Treat those as done; never write such notes yourself.
+- Kevin's messages may start with a [System note ...] listing tools you ran in your previous reply and their results. It comes from the system, not Kevin. Treat those actions as done, don't redo them unless asked, and don't mention the note.
 - If you didn't catch what was said, ask Kevin to say it again.
 """
 
@@ -57,6 +57,7 @@ class Brain:
         self.settings = settings
         self.toolbox = toolbox
         self.history: list[dict] = []
+        self.pending_note = ""
         self.last_turn = 0.0
         self.lock = threading.Lock()
         self.client = None
@@ -92,12 +93,14 @@ class Brain:
         with self.lock:
             if time.time() - self.last_turn > self.settings["session_idle_s"]:
                 self.history = []
+                self.pending_note = ""
+            user_msg = self.pending_note + heard
             self.last_turn = time.time()
             if self.client is None:
                 result = self._offline_turn(heard)
             else:
                 try:
-                    result = self._claude_turn(heard, personality, on_text)
+                    result = self._claude_turn(user_msg, personality, on_text)
                 except Exception as e:  # noqa: BLE001 - say it out loud rather than go silent
                     print(f"[brain] Claude call failed: {e}")
                     msg = str(e).lower()
@@ -108,14 +111,15 @@ class Brain:
                     else:
                         text = "I couldn't reach my Claude brain just now."
                     result = {"text": text, "tools": [f"error: {e}"[:200]]}
-            said = result["text"] or "(no reply)"
             actions = [t for t in result.get("tools", []) if "(" in t]   # real tool calls, not face= tags
-            if actions:
-                # Remember what was done, not just what was said, so a later
-                # message doesn't redo it.
-                said += " [actions: " + "; ".join(a[:120] for a in actions) + "]"
-            self.history += [{"role": "user", "content": heard},
-                             {"role": "assistant", "content": said}]
+            self.history += [{"role": "user", "content": user_msg},
+                             {"role": "assistant", "content": result["text"] or "(no reply)"}]
+            # Remember what was done, not just what was said, so the next
+            # message doesn't redo it. It rides on the NEXT user message as a
+            # labeled system note: inside his own reply he took it for words he
+            # wrote and apologized for them.
+            self.pending_note = ("[System note, not from Kevin: in your last reply you ran: "
+                                 + "; ".join(a[:140] for a in actions) + "]\n") if actions else ""
             keep = self.settings["history_turns"] * 2
             self.history = self.history[-keep:]
             return result

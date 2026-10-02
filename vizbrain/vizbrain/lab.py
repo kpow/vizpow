@@ -139,7 +139,10 @@ class Wled:
                 names = [e.lower() for e in self.effects(d["name"])]
                 key = effect.strip().lower()
                 if key not in names:
-                    raise ValueError(f"unknown WLED effect '{effect}'")
+                    import difflib
+                    near = difflib.get_close_matches(key, names, n=5, cutoff=0.4)
+                    raise ValueError(f"unknown WLED effect '{effect}'"
+                                     + (f"; closest: {', '.join(near)}" if near else ""))
                 seg["fx"] = names.index(key)
                 state.setdefault("on", True)
             elif color:
