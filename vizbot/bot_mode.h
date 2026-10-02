@@ -367,6 +367,8 @@ volatile bool voiceHoldsFace = false;     // a voice turn owns the face: no rand
 // Lip-sync: while voiceSpeakT0 != 0 the mouth follows voiceEnv (one 0..12 level
 // per 33 ms frame since voiceSpeakT0). Read here so the mouth keeps moving even
 // while the voice task is blocked on the network.
+volatile bool voiceLeanInPending = false;    // proximity: hand/face came close (rising edge)
+volatile bool voiceSuppressEvents = false;   // e.g. chill mode: don't report arrivals/lean-ins
 volatile uint32_t voiceSpeakT0 = 0;
 uint8_t* volatile voiceEnv = nullptr;
 volatile uint32_t voiceEnvFrames = 0;
@@ -531,6 +533,7 @@ void updateBotMode() {
       botMode.shakeReactEnd = now + 2000;
       botMode.lastProxReactionMs = now;
       botMode.registerInteraction();
+      voiceLeanInPending = true;   // vizbrain may say something (rate-limited in voice_client.h)
     }
 
     botMode.lastNearState = nearNow;

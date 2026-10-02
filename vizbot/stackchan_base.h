@@ -187,12 +187,8 @@ inline bool scInitBatteryMon() {
   return true;
 }
 
-// Camera + Photo FS remain stubs (Phase 4)
-inline bool scInitCamera() {
-  DBGLN("  Camera: deferred (Phase 4)");
-  sysStatus.scCameraReady = false;
-  return false;
-}
+// Camera: stackchan_camera.h (GC0308 photos + motion). Photo FS remains a stub.
+#include "stackchan_camera.h"
 
 inline bool scInitPhotoFs() {
   DBGLN("  Photo storage: deferred (Phase 4)");
@@ -229,13 +225,23 @@ inline void scSetServoPower(bool enabled) {
 
 // Move yaw by angle (tenths of degrees). Motion is internally mutex-guarded,
 // so this is safe to call from the render loop, the web task or anywhere else.
+// When the head will be still again (millis). The camera's motion check skips
+// frames until then, so the head's own movement never reads as someone arriving.
+volatile uint32_t scHeadBusyUntilMs = 0;
+inline void scMarkHeadBusy(uint16_t timeMs) {
+  uint32_t until = millis() + timeMs + 1200;
+  if ((int32_t)(until - scHeadBusyUntilMs) > 0) scHeadBusyUntilMs = until;
+}
+
 inline void scMoveYaw(int angleTenths, uint16_t timeMs = 500) {
   if (!sysStatus.scServoXReady) return;
+  scMarkHeadBusy(timeMs);
   scChan.Motion.moveYaw(angleTenths, scSpeedFromTimeMs(timeMs));
 }
 
 inline void scMovePitch(int angleTenths, uint16_t timeMs = 500) {
   if (!sysStatus.scServoYReady) return;
+  scMarkHeadBusy(timeMs);
   constexpr int minTenths = SC_SERVO_Y_MIN_DEG * 10;
   constexpr int maxTenths = SC_SERVO_Y_MAX_DEG * 10;
   if (angleTenths < minTenths) angleTenths = minTenths;
@@ -350,6 +356,7 @@ inline void scServoWatchdogTick() {
 
   DBGLN("Scheduled servo reinit (5min)");
   scServoReboots++;
+  scMarkHeadBusy(5000);   // the rail cycle bows and lifts the head
   scRecoverServos();
 }
 

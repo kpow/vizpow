@@ -6,13 +6,18 @@ servo re-init or device naming. Only looks, motion and lights.
 
 from __future__ import annotations
 
+import base64
 import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
 
-from .bot import EXPRESSIONS, GESTURES, Bot
+from .bot import EXPRESSIONS, GESTURES, SOUNDS, Bot
 from .lab import COLOR_NAMES, VizMac, Wled, parse_color, weather
+from .memory import Memory, Routines
+
+# Lab actions get an automatic synth chime: confirm when they work, error when not.
+CHIME_TOOLS = {"wled_set", "keyboard_effect", "keyboard_flash", "set_base_leds"}
 
 LED_MODES = ["off", "breathing", "rainbow", "chase", "fire", "twinkle", "pulse", "aurora", "mood", "audio"]
 
@@ -34,10 +39,13 @@ def _obj(props: dict, required: list[str] | None = None) -> dict:
 
 
 class Toolbox:
-    def __init__(self, get_bot: Callable[[], Bot | None], wled: Wled, vizmac: VizMac):
+    def __init__(self, get_bot: Callable[[], Bot | None], wled: Wled, vizmac: VizMac,
+                 memory: Memory | None = None, routines: Routines | None = None):
         self.get_bot = get_bot
         self.wled = wled
         self.vizmac = vizmac
+        self.memory = memory or Memory()
+        self.routines = routines or Routines()
         self.tools: dict[str, Tool] = {}
         self._wx, self._wx_at = "", 0.0
         self._register()
@@ -94,6 +102,42 @@ class Toolbox:
             _obj({}),
             self._weather)
 
+        add("look",
+            "Take a photo with your head camera and see it. Use it when asked what you see, what Kevin is "
+            "holding or wearing, or who is there. Point your head first with move_head if needed.",
+            _obj({}),
+            self._look)
+
+        add("play_sound",
+            "Play a sound effect on your synth, for fun or emphasis (a laugh at a joke, a fanfare for good news). "
+            "Use sparingly.",
+            _obj({"name": {"type": "string", "enum": list(SOUNDS)}}, ["name"]),
+            lambda name: (self._bot().sound(name), f"played {name}")[1])
+
+        add("remember",
+            "Save a short fact to remember across days: names, preferences, plans, things Kevin asks you to "
+            "keep. One fact per call, written so it makes sense later.",
+            _obj({"fact": {"type": "string"}}, ["fact"]),
+            lambda fact: self.memory.remember(fact))
+
+        add("forget",
+            "Forget remembered facts that contain the given words.",
+            _obj({"about": {"type": "string"}}, ["about"]),
+            lambda about: self.memory.forget(about))
+
+        add("add_routine",
+            "Schedule something you'll do every day or on certain days at a set time, e.g. a morning greeting "
+            "with the weather, or turning the lab lights off in the evening. 'what' is an instruction to yourself.",
+            _obj({"time": {"type": "string", "description": "like 08:30 or 5:15 pm"},
+                  "days": {"type": "string", "description": "daily, weekdays, weekends, or e.g. mon,wed,fri"},
+                  "what": {"type": "string"}}, ["time", "days", "what"]),
+            lambda time, days, what: self.routines.add(time, days, what))
+
+        add("remove_routine",
+            "Remove a scheduled routine by its id (like r2) or words from its description.",
+            _obj({"which": {"type": "string"}}, ["which"]),
+            lambda which: self.routines.remove(which))
+
         add("keyboard_effect",
             "Set the vizMac keyboard lighting effect by name (e.g. plasma, rainbow, fire).",
             _obj({"name": {"type": "string"}}, ["name"]),
@@ -132,6 +176,19 @@ class Toolbox:
                 pass
         return weather(lat, lon)
 
+    def _look(self) -> list:
+        jpeg = self._bot().photo()
+        return [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                         "data": base64.b64encode(jpeg).decode()}},
+            {"type": "text", "text": "Photo from your head camera, just now (320x240)."},
+        ]
+
+    def _chime(self, name: str) -> None:
+        bot = self.get_bot()
+        if bot is not None:
+            threading.Thread(target=lambda: _quiet(bot.sound, name), daemon=True).start()
+
     def _gesture(self, name: str) -> str:
         # The bot answers only after the move finishes (~1.7 s for a nod), so
         # fire it off and let the reply carry on in parallel.
@@ -156,15 +213,20 @@ class Toolbox:
     def api_list(self) -> list[dict]:
         return [t.to_api() for t in self.tools.values()]
 
-    def run(self, name: str, args: dict) -> tuple[str, bool]:
-        """Returns (result text, is_error)."""
+    def run(self, name: str, args: dict) -> tuple[str | list, bool]:
+        """Returns (result, is_error). Result is text, or content blocks (look's photo)."""
         tool = self.tools.get(name)
         if tool is None:
             return f"unknown tool {name}", True
         try:
-            return str(tool.fn(**(args or {}))), False
+            out = tool.fn(**(args or {}))
+            result, ok = (out if isinstance(out, list) else str(out)), True
         except Exception as e:  # noqa: BLE001 - tool errors go back to the model
-            return f"error: {e}", True
+            result, ok = f"error: {e}", False
+        if name in CHIME_TOOLS:
+            failed = (not ok) or (isinstance(result, str) and "failed:" in result)
+            self._chime("error" if failed else "confirm")
+        return result, not ok
 
 
 def _quiet(fn, *args) -> None:

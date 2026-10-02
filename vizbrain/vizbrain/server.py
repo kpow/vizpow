@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import collections
+import datetime as dt
 import json
 import os
 import signal
@@ -23,11 +24,21 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
-from . import config, speech, usage
+from . import __version__, config, speech, usage
 from .bot import EXPRESSIONS, GESTURES, Bot, BotError, discover_stackchan
 from .brain import Brain, bubble_text
 from .lab import VizMac, Wled
+from .memory import Memory, Routines
 from .tools import Toolbox
+
+# Sense events the bot reports (POST /v1/event): what to tell Claude, and how
+# long to wait before reacting to the same kind again.
+EVENTS = {
+    "arrival": ("[Event from your camera: someone just showed up at the desk after {quiet_min} quiet minutes. "
+                "Greet them in one short sentence. You can use look to see who it is.]", 600, "chime"),
+    "lean_in": ("[Event from your proximity sensor: someone just leaned in close to your face. "
+                "React in a few words, maybe ask what's up.]", 180, "curious"),
+}
 
 
 class App:
@@ -39,7 +50,8 @@ class App:
         self.vizmac = VizMac(self.settings["vizmac_url"])
         self._bot: Bot | None = None
         self._bot_lock = threading.Lock()
-        self.toolbox = Toolbox(self.get_bot, self.wled, self.vizmac)
+        self.toolbox = Toolbox(self.get_bot, self.wled, self.vizmac, Memory(), Routines())
+        self._event_last: dict[str, float] = {}
         self.brain = Brain(self.settings, self.toolbox, config.api_key())
         self.log: collections.deque = collections.deque(maxlen=50)
         self.busy = threading.Lock()
@@ -151,6 +163,56 @@ class App:
             "timing_ms": {"first_sentence": int(((st["t_first"] or time.time()) - t0) * 1000)},
         }
 
+    # ---- unprompted speech: events and routines ----------------------------
+
+    def speak_prompt(self, prompt: str, source: str, sound: str | None = None) -> dict | None:
+        """Run a turn nobody typed or said (an event or a routine) and have the
+        bot speak it. Returns None if a turn is already in progress."""
+        if not self.busy.acquire(blocking=False):
+            return None
+        try:
+            bot = self.get_bot()
+            if bot and sound:
+                threading.Thread(target=lambda: _quiet(bot.sound, sound), daemon=True).start()
+            reply = self.start_turn(prompt, source, on_done=self.busy.release)
+        except Exception:
+            self.busy.release()
+            raise
+        if bot:
+            try:
+                bot.play(reply["audio_id"], reply["bubble"], reply["audio_ms"], reply["expression"])
+            except BotError as e:
+                print(f"[speak] {source}: bot didn't take the clip: {e}")
+        return reply
+
+    def handle_event(self, evt: dict) -> str:
+        kind = str(evt.get("type", ""))
+        if kind not in EVENTS:
+            return "ignored (unknown type)"
+        template, cooldown, sound = EVENTS[kind]
+        now = time.time()
+        if now - self._event_last.get(kind, 0) < cooldown:
+            return "ignored (cooldown)"
+        self._event_last[kind] = now
+        prompt = template.format(quiet_min=evt.get("quiet_min", "several"))
+        threading.Thread(target=lambda: self.speak_prompt(prompt, f"event:{kind}", sound),
+                         daemon=True).start()
+        return "reacting"
+
+    def run_scheduler(self) -> None:
+        """Check routines every 20 s. A routine that finds the bot busy is
+        retried on the next check (it stays due for 10 minutes)."""
+        while True:
+            try:
+                now = dt.datetime.now()
+                for r in self.toolbox.routines.due(now):
+                    if self.speak_prompt(f"[Routine {r['id']}, scheduled {r['days']} at {r['time']}: {r['what']}]",
+                                         f"routine:{r['id']}", "power_up"):
+                        self.toolbox.routines.mark_run(r["id"], now.date().isoformat())
+            except Exception:  # noqa: BLE001 - keep the scheduler alive
+                traceback.print_exc()
+            time.sleep(20)
+
     # ---- bonjour ---------------------------------------------------------
 
     def announce(self, port: int) -> None:
@@ -188,7 +250,7 @@ class App:
 
 def make_handler(app: App):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "vizbrain/0.1"
+        server_version = f"vizbrain/{__version__}"
 
         def log_message(self, fmt, *args):  # quieter default logging
             if "/v1/audio/" not in self.path:
@@ -269,8 +331,11 @@ def make_handler(app: App):
                     return self._text()
                 if path == "/v1/event":
                     evt = json.loads(self._body() or b"{}")
-                    app.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": "event", "event": evt})
-                    return self._json(202, {"ok": True})
+                    outcome = app.handle_event(evt)
+                    app.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": "event",
+                                        "heard": json.dumps(evt), "text": outcome, "tools": []})
+                    print(f"[event] {evt} -> {outcome}")
+                    return self._json(202, {"ok": True, "outcome": outcome})
                 self._json(404, {"error": "not found"})
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
@@ -334,6 +399,7 @@ def serve(port: int | None = None) -> None:
     threading.Thread(target=app.announce, args=(port,), daemon=True).start()
     threading.Thread(target=app.wled.refresh, daemon=True).start()
     app.toolbox.cached_weather()  # warm the prompt's weather so the first question is one call
+    threading.Thread(target=app.run_scheduler, daemon=True).start()
     httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(app))
     httpd.daemon_threads = True
     app.advertise(port)
@@ -346,3 +412,10 @@ def serve(port: int | None = None) -> None:
         pass
     finally:
         app.stop()
+
+
+def _quiet(fn, *args) -> None:
+    try:
+        fn(*args)
+    except Exception as e:  # noqa: BLE001 - a missed chime is fine
+        print(f"[speak] {getattr(fn, '__name__', fn)} failed: {e}")

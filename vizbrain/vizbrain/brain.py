@@ -37,6 +37,9 @@ How to answer:
 - Tags are silent: they set your face and head, and are never spoken. Don't use tools for faces or gestures.
 - Use tools only to change things: lab lights, the keyboard, your base LEDs, or pointing your head at a specific angle. For those, write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
 - For weather, answer from the weather in your context; call get_weather only if it's missing.
+- You have a camera in your head: use look when asked what you see, or to see who's there.
+- When Kevin tells you something worth keeping (names, preferences, plans), save it with remember. Your memories are in your context.
+- Messages in brackets that start with Event or Routine come from your sensors or your schedule, not from Kevin talking. Respond to them naturally and briefly, as yourself.
 - If a tool fails, say so plainly in a few words.
 - Kevin's messages may start with a [System note ...] listing tools you ran in your previous reply and their results. It comes from the system, not Kevin. Treat those actions as done, don't redo them unless asked, and don't mention the note.
 - If you didn't catch what was said, ask Kevin to say it again.
@@ -49,7 +52,7 @@ TAG_RE = re.compile(r"\[(face|gesture)\s*:\s*([a-z_]+)\]", re.I)
 # tool round trip each); the lab-device list is in the prompt for the same reason.
 CLAUDE_SKIP_TOOLS = {"set_expression", "head_gesture", "list_lab_devices"}
 # Tools whose result the model must read before it can answer.
-INFO_TOOLS = {"get_weather", "list_lab_devices"}
+INFO_TOOLS = {"get_weather", "list_lab_devices", "look"}
 
 
 class Brain:
@@ -83,7 +86,10 @@ class Brain:
         style = PERSONALITY_STYLE.get(personality.lower(), "friendly and curious")
         now = dt.datetime.now().strftime("%A %B %-d, %-I:%M %p")
         lights = ", ".join(self.toolbox.wled.cached_names()) or "none found yet"
+        mem = self.toolbox.memory.prompt_text() or "(nothing yet)"
+        routines = self.toolbox.routines.prompt_text() or "(none)"
         return (f"Current personality: {personality} — {style}.\nLocal time: {now}.\n"
+                f"Things you remember:\n{mem}\nYour routines:\n{routines}\n"
                 f"Lab lights (WLED names for wled_set): {lights}. "
                 f"Kevin may call them by a nickname; pick the closest name.\n"
                 f"Weather (refreshed every 15 minutes): {self.toolbox.cached_weather() or 'not loaded yet; use get_weather'}")
@@ -152,7 +158,8 @@ class Brain:
             results = []
             for call in calls:
                 out, is_err = self.toolbox.run(call.name, call.input)
-                used.append(f"{call.name}({_short(call.input)}) -> {out}")
+                shown = out if isinstance(out, str) else "(photo)"
+                used.append(f"{call.name}({_short(call.input)}) -> {shown}")
                 results.append({"type": "tool_result", "tool_use_id": call.id,
                                 "content": out, "is_error": is_err})
             messages.append({"role": "user", "content": results})

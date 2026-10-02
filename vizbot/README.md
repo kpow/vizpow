@@ -449,7 +449,7 @@ the board portion of the name comes from the env name.
 
 | Version | Boards | Notes |
 |---|---|---|
-| `3.5.12` | stackchan | Voice with vizbrain: front-tap push-to-talk, streamed spoken replies with lip-sync, `/brain/*` endpoints, Brain card in the web panel. |
+| `3.6.0` | all (voice: stackchan) | **vizBot Brain 1.0.** Voice with vizbrain: front-tap push-to-talk, streamed spoken replies with lip-sync, `/brain/*` endpoints, Brain card in the web panel. |
 | `3.0.0-dev` | all | vizBot 3.0 line in progress — adds StackChan flagship (`stackchan` env). |
 | `2.2.1` | m5cores3 | Correct `flash_size` in merged `-factory.bin`. |
 | `2.2.0` | m5cores3 | SAM2695 MIDI synth, 37 built-in sequences. |

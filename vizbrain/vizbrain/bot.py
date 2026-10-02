@@ -21,6 +21,15 @@ EXPRESSIONS = [
 
 GESTURES = ["nod", "shake", "lookup", "lookdown", "left", "right", "recenter"]
 
+# SAM2695 synth sequences (vizbot/bot_sounds.h MidiSequenceId) that make sense on cue.
+SOUNDS = {
+    "chime": 4, "pop": 6, "chirp": 7, "notify": 8, "success": 10, "error": 11,
+    "level_up": 12, "coin": 13, "wind_chime": 14, "heartbeat": 15, "mystery": 16,
+    "fanfare": 17, "power_up": 18, "power_down": 19, "ping": 20, "whistle": 21,
+    "confirm": 29, "happy_hum": 30, "sad_sigh": 31, "curious": 32, "laugh": 33, "yawn": 34,
+    "funky_song": 35, "chill_song": 36, "retro_song": 37,
+}
+
 # Pitch limits in degrees (vizbot/config.h SC_SERVO_Y_MIN_DEG / MAX).
 PITCH_MIN, PITCH_MAX, PITCH_HOME = 25, 85, 48
 YAW_LIMIT = 60
@@ -85,6 +94,22 @@ class Bot:
         if brightness is not None:
             params["brightness"] = max(0, min(255, int(brightness)))
         return self._get("/bot/base_leds/mode", params)
+
+    def sound(self, name: str):
+        if name not in SOUNDS:
+            raise BotError(f"unknown sound {name}")
+        return self._get("/bot/sound", {"seq": SOUNDS[name]})
+
+    def photo(self, shutter: bool = True) -> bytes:
+        """A fresh JPEG from the head camera (QVGA)."""
+        url = f"http://{self.host}/bot/photo/capture" + ("" if shutter else "?sound=0")
+        try:
+            with urllib.request.urlopen(url, timeout=6) as r:
+                if r.headers.get_content_type() != "image/jpeg":
+                    raise BotError("camera not available")
+                return r.read()
+        except (urllib.error.URLError, OSError) as e:
+            raise BotError(f"photo: {e}") from e
 
     def personality(self) -> str:
         p = self._get("/bot/personality")
