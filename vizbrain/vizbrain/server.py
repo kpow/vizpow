@@ -201,9 +201,20 @@ class App:
             # Look before greeting: lights and screens also move.
             threading.Thread(target=self._arrival, args=(prompt, sound), daemon=True).start()
         else:
-            threading.Thread(target=lambda: self.speak_prompt(prompt, f"event:{kind}", sound),
-                             daemon=True).start()
+            threading.Thread(target=self._quick_event, args=(kind, prompt, sound), daemon=True).start()
         return "reacting"
+
+    def _quick_event(self, kind: str, prompt: str, sound: str) -> None:
+        """A simple reaction (lean-in): one call to the event model, no tools."""
+        if not self.busy.acquire(blocking=False):
+            return
+        try:
+            result = self.brain.quick(prompt, self.personality())
+        finally:
+            self.busy.release()
+        if result.get("text"):
+            self._say_text(result["text"], result.get("expression", -1), f"event:{kind}", sound,
+                           heard=prompt)
 
     def _arrival(self, prompt: str, sound: str, tries: int = 3, gap_s: float = 3.0) -> None:
         """Motion fires as someone walks into view, often before they're in
@@ -221,7 +232,7 @@ class App:
                 self._event_last["arrival"] = 0
                 return
             try:
-                result = self.brain.turn(prompt, self.personality(), images=[photo])
+                result = self.brain.quick(prompt, self.personality(), images=[photo])
             finally:
                 self.busy.release()
             text = (result.get("text") or "").strip()
@@ -234,7 +245,8 @@ class App:
                              "heard": f"(photo check x{tries})", "text": "(nobody there, stayed quiet)",
                              "tools": []})
 
-    def _say_text(self, text: str, expression: int, source: str, sound: str | None) -> None:
+    def _say_text(self, text: str, expression: int, source: str, sound: str | None,
+                  heard: str = "(photo check)") -> None:
         """Speak an already-written reply (no model call)."""
         personality = self.personality()
         voice = speech.PERSONALITY_VOICES.get(personality.lower(), self.settings["tts_voice"])
@@ -248,8 +260,8 @@ class App:
                 bot.play(cid, bubble_text(text), speech.pcm_ms(pcm), expression)
             except BotError as e:
                 print(f"[speak] {source}: bot didn't take the clip: {e}")
-        self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source, "heard": "(photo check)",
-                             "text": text, "tools": []})
+        self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source, "heard": heard,
+                             "text": text, "tools": [f"model={self.settings['event_model']}"]})
         print(f"[turn] {source}: -> {text!r}")
 
     def run_scheduler(self) -> None:

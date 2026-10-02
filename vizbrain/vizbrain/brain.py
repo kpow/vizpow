@@ -41,7 +41,7 @@ How to answer:
 - When Kevin tells you something worth keeping (names, preferences, plans), save it with remember. Your memories are in your context.
 - Messages in brackets that start with Event or Routine come from your sensors or your schedule, not from Kevin talking. Respond to them naturally and briefly, as yourself.
 - If a tool fails, say so plainly in a few words.
-- Kevin's messages may start with a [System note ...] listing tools you ran in your previous reply and their results. It comes from the system, not Kevin. Treat those actions as done, don't redo them unless asked, and don't mention the note.
+- A system message after Kevin's words gives live context: time, weather, personality, what you remember, and tools you already ran last turn (treat those as done; don't redo them unless asked). Don't read it out.
 - If you didn't catch what was said, ask Kevin to say it again.
 """
 
@@ -96,13 +96,13 @@ class Brain:
 
     def turn(self, heard: str, personality: str = "Chill", on_text=None,
              images: list[bytes] | None = None) -> dict:
-        """images: JPEGs attached to this message only (not kept in history)."""
-        """Run one conversational turn. Returns {text, tools}."""
+        """Run one conversational turn. Returns {text, tools, expression, gesture}.
+        images: JPEGs attached to this message only (not kept in history)."""
         with self.lock:
             if time.time() - self.last_turn > self.settings["session_idle_s"]:
                 self.history = []
                 self.pending_note = ""
-            user_msg = self.pending_note + heard
+            user_msg = heard
             self.last_turn = time.time()
             if self.client is None:
                 result = self._offline_turn(heard)
@@ -123,14 +123,54 @@ class Brain:
             self.history += [{"role": "user", "content": user_msg},
                              {"role": "assistant", "content": result["text"] or "(no reply)"}]
             # Remember what was done, not just what was said, so the next
-            # message doesn't redo it. It rides on the NEXT user message as a
-            # labeled system note: inside his own reply he took it for words he
-            # wrote and apologized for them.
-            self.pending_note = ("[System note, not from Kevin: in your last reply you ran: "
-                                 + "; ".join(a[:140] for a in actions) + "]\n") if actions else ""
-            keep = self.settings["history_turns"] * 2
-            self.history = self.history[-keep:]
+            # message doesn't redo it. It goes in the next turn's context
+            # system message (inside his own reply he took such a note for
+            # words he wrote and apologized for them).
+            self.pending_note = ("In your previous reply you ran these tools (already done): "
+                                 + "; ".join(a[:140] for a in actions)) if actions else ""
+            self._trim_history()
             return result
+
+    def _trim_history(self) -> None:
+        """Trim in chunks, not one turn at a time: every trim changes the start
+        of the conversation and so misses the prompt cache once."""
+        turns = self.settings["history_turns"]
+        if len(self.history) > turns * 2:
+            self.history = self.history[-turns:]   # keep the newest half
+
+    def quick(self, prompt: str, personality: str = "Chill", images: list[bytes] | None = None,
+              max_tokens: int = 200) -> dict:
+        """A short, tool-free reply from the event model (Haiku 4.5) for simple
+        jobs: is anyone in this photo, react to a lean-in. Not streamed. A real
+        reply is added to the conversation so later turns know it happened."""
+        import base64
+        with self.lock:
+            if self.client is None:
+                return {"text": "Oh, hi!", "tools": [], "expression": -1}
+            content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                    "data": base64.b64encode(j).decode()}} for j in images or []]
+            content.append({"type": "text", "text": f"{self._context(personality)}\n\n{prompt}"})
+            model = self.settings["event_model"]
+            resp = self.client.messages.create(
+                model=model, max_tokens=max_tokens,
+                system=SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS)),
+                messages=[{"role": "user", "content": content}])
+            try:
+                usage.record(model, resp.usage)
+            except Exception as e:  # noqa: BLE001
+                print(f"[usage] not recorded: {e}")
+            raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+            m = TAG_RE.search(raw)
+            expression = EXPRESSIONS.index(m.group(2).lower()) \
+                if m and m.group(1).lower() == "face" and m.group(2).lower() in EXPRESSIONS else -1
+            text = _speakable(TAG_RE.sub("", raw))
+            if text.lower().strip(" .!") not in ("silent", ""):
+                self.history += [{"role": "user", "content": prompt},
+                                 {"role": "assistant", "content": text}]
+                self._trim_history()
+                self.last_turn = time.time()
+            return {"text": text, "tools": [f"face={EXPRESSIONS[expression]}"] if expression >= 0 else [],
+                    "expression": expression, "model": model}
 
     # ---- Claude ---------------------------------------------------------
 
@@ -138,17 +178,26 @@ class Brain:
                      images: list[bytes] | None = None) -> dict:
         import anthropic
 
-        system = [
-            {"type": "text", "text": SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS))},
-            {"type": "text", "text": self._context(personality)},
-        ]
+        # Prompt caching: the fixed instructions (+ tools, which render first)
+        # and the conversation so far are cached; the parts that change every
+        # turn (time, weather, personality, notes) ride in a system message
+        # after Kevin's words, so they never break the cached prefix.
+        system = [{"type": "text", "text": SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS)),
+                   "cache_control": {"type": "ephemeral"}}]
+        history = [dict(m) for m in self.history]
+        if history:
+            last = history[-1]
+            history[-1] = {"role": last["role"], "content": [
+                {"type": "text", "text": last["content"], "cache_control": {"type": "ephemeral"}}]}
+        context = self._context(personality) + (f"\n{self.pending_note}" if self.pending_note else "")
         content = heard
         if images:
             import base64
             content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                                     "data": base64.b64encode(j).decode()}} for j in images]
             content.append({"type": "text", "text": heard})
-        messages = list(self.history) + [{"role": "user", "content": content}]
+        messages = history + [{"role": "user", "content": content},
+                              {"role": "system", "content": context}]
         tools = [t for t in self.toolbox.api_list() if t["name"] not in CLAUDE_SKIP_TOOLS]
         used: list[str] = []
         text_parts: list[str] = []
@@ -198,7 +247,10 @@ class Brain:
     def _create(self, system, messages, tools, on_text=None):
         resp = self._create_raw(system, messages, tools, on_text)
         try:
-            usage.record(getattr(resp, "model", None) or self.settings["model"], resp.usage)
+            u = resp.usage
+            cost = usage.record(getattr(resp, "model", None) or self.settings["model"], u)
+            print(f"[usage] in={u.input_tokens} cache_write={u.cache_creation_input_tokens or 0} "
+                  f"cache_read={u.cache_read_input_tokens or 0} out={u.output_tokens} ${cost:.4f}")
         except Exception as e:  # noqa: BLE001 - accounting must never break a turn
             print(f"[usage] not recorded: {e}")
         return resp
@@ -210,8 +262,7 @@ class Brain:
 
         model = self.settings["model"]
         common = dict(model=model, max_tokens=1024, system=system, messages=messages,
-                      tools=tools, cache_control={"type": "ephemeral"},
-                      output_config={"effort": self.settings["effort"]})
+                      tools=tools, output_config={"effort": self.settings["effort"]})
         if model == "claude-sonnet-5-5":
             # Lowest-latency thinking setting on Sonnet 5.5, plus server-side
             # refusal fallback. Retried plainly if the API rejects either.
