@@ -138,6 +138,29 @@ class Toolbox:
             _obj({"which": {"type": "string"}}, ["which"]),
             lambda which: self.routines.remove(which))
 
+        add("music_status",
+            "What's playing in Spotify or Apple Music right now (title, artist, playing or paused).",
+            _obj({}),
+            lambda: self.vizmac.now_playing())
+
+        add("music_control",
+            "Control the music on Kevin's Mac: play, pause, next, previous, or restart the song. "
+            "count skips several songs with next/previous.",
+            _obj({"action": {"type": "string", "enum": ["play", "pause", "next", "previous", "restart"]},
+                  "count": {"type": "integer"}}, ["action"]),
+            lambda action, count=1: self.vizmac.music(action, count))
+
+        add("music_play",
+            "Play something specific on Spotify. Needs a Spotify link: if you don't know one, first use "
+            "web_search to find an open.spotify.com playlist, album, artist or track link that fits, then pass it here.",
+            _obj({"link": {"type": "string", "description": "open.spotify.com/... URL or spotify:... URI"}}, ["link"]),
+            lambda link: self.vizmac.play_spotify(link))
+
+        add("music_volume",
+            "Set the Spotify volume, 0 to 100.",
+            _obj({"level": {"type": "integer"}}, ["level"]),
+            lambda level: self.vizmac.volume(level))
+
         add("keyboard_effect",
             "Set the vizMac keyboard lighting effect by name (e.g. plasma, rainbow, fire).",
             _obj({"name": {"type": "string"}}, ["name"]),

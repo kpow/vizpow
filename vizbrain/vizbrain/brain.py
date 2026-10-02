@@ -53,7 +53,7 @@ TAG_RE = re.compile(r"\[(face|gesture)\s*:\s*([a-z_]+)\]", re.I)
 # tool round trip each); the lab-device list is in the prompt for the same reason.
 CLAUDE_SKIP_TOOLS = {"set_expression", "head_gesture", "list_lab_devices"}
 # Tools whose result the model must read before it can answer.
-INFO_TOOLS = {"get_weather", "list_lab_devices", "look"}
+INFO_TOOLS = {"get_weather", "list_lab_devices", "look", "music_status"}
 
 
 class Brain:

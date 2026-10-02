@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
+import subprocess
 import threading
 import time
 import urllib.error
@@ -180,6 +182,48 @@ class VizMac:
             raise ValueError(f"unknown keyboard effect '{name}'. Known: {', '.join(known[:40])}")
         _http_json("POST", f"{self.base}/api/effect", {"name": match})
         return f"keyboard effect {match}"
+
+    # ---- music (vizMac reads Spotify/Music; vizbrain drives Spotify directly) ----
+
+    def now_playing(self) -> str:
+        m = _http_json("GET", f"{self.base}/api/state", timeout=2.0).get("media") or {}
+        if not m.get("app"):
+            return "Nothing is playing (Spotify and Music are closed)."
+        if m.get("state") == "stopped" or not m.get("title"):
+            return f"{m['app']} is open but stopped."
+        mmss = lambda s: f"{int(s) // 60}:{int(s) % 60:02d}"
+        return (f"{m['app']} is {m['state']}: \"{m['title']}\" by {m.get('artist', 'unknown')} "
+                f"({mmss(m.get('pos', 0))} of {mmss(m.get('dur', 0))}).")
+
+    def music(self, action: str, count: int = 1) -> str:
+        state = (_http_json("GET", f"{self.base}/api/state", timeout=2.0).get("media") or {}).get("state")
+        if action in ("play", "pause"):
+            if (action == "play") == (state == "playing"):
+                return f"already {'playing' if action == 'play' else 'paused'}"
+            action = "playpause"
+        _http_json("POST", f"{self.base}/api/media", {"action": action, "count": max(1, min(9, count))})
+        return f"music: {action}"
+
+    @staticmethod
+    def _spotify(script: str) -> str:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=8)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr.strip() or "Spotify didn't respond")
+        return r.stdout.strip()
+
+    def play_spotify(self, link: str) -> str:
+        """Play a Spotify playlist/album/artist/track from a URI or open.spotify.com link."""
+        m = re.search(r"(playlist|album|artist|track|show|episode)[/:]([A-Za-z0-9]{10,})", link)
+        if not m:
+            raise ValueError("need a Spotify link like https://open.spotify.com/playlist/... or spotify:playlist:...")
+        uri = f"spotify:{m.group(1)}:{m.group(2)}"
+        self._spotify(f'tell application "Spotify" to play track "{uri}"')
+        return f"playing {uri}"
+
+    def volume(self, level: int) -> str:
+        level = max(0, min(100, int(level)))
+        self._spotify(f'tell application "Spotify" to set sound volume to {level}')
+        return f"Spotify volume {level}"
 
     def flash(self, color: str, ms: int = 2000) -> str:
         r, g, b = parse_color(color)
