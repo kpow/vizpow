@@ -21,6 +21,7 @@ This document is a technical reference for development and feature planning, not
 - [HTTP API Surface](#http-api-surface)
 - [Configuration & Persistence](#configuration--persistence)
 - [WLED Integration](#wled-integration)
+- [Voice (vizbrain)](#voice-vizbrain)
 - [vizCloud Integration](#vizcloud-integration)
 - [ESP-NOW Mesh](#esp-now-mesh)
 - [Graphics Stack](#graphics-stack)
@@ -179,6 +180,7 @@ Two features layer *on top of* bot mode and are sometimes referred to loosely as
 | `cloud_client.h` | vizCloud HTTPS client — registration, sync, command dispatch, TLS pinning |
 | `content_cache.h` | LittleFS caching for cloud content (sayings, personalities, metadata) |
 | `esp_now_mesh.h` | ESP-NOW mesh — state broadcast, coordinated WLED, peer tracking |
+| `voice_client.h` | Push-to-talk with vizbrain (Stackchan, `VOICE_ENABLED`): record → POST WAV → stream the spoken reply with lip-sync |
 
 ### WLED Integration
 
@@ -314,6 +316,11 @@ Most write endpoints take query args and return `text/plain` `"OK"`; read endpoi
 | `/cloud/sync` | GET | — | text status |
 | `/schedule` | GET | `enabled`, `intervalMin` 1-120 | JSON schedule state |
 | `/update` | GET/POST | OTA upload form / firmware POST | HTML / result |
+| `/brain/status` | GET | `trace=1` adds per-chunk mic RMS | JSON voice state, timings (Stackchan voice builds) |
+| `/brain/config` | GET | `host` (ip:port, empty = auto), `enabled` 0/1 | JSON voice state |
+| `/brain/listen` | GET | — | JSON; same as a front head tap |
+| `/brain/play` | GET | `id` clip, `text` bubble, `expr`, `ms` bubble hint | JSON; vizbrain asks the bot to speak a clip |
+| `/brain/lastwav` | GET | — | WAV of the last raw recording (debug) |
 | captive-portal probes | GET | `/generate_204`, `/hotspot-detect.html`, etc. | 302 redirect |
 
 > New endpoints added in 3.0 are single-purpose, JSON-in/JSON-out, and tool-named
@@ -350,6 +357,34 @@ vizBot drives a WLED 32x8 matrix via **DDP**:
 **Palette sync** maps WLED's current palette to a local index. **Hologram mode** horizontally
 mirrors LCD + WLED buffer for Pepper's-ghost prisms. **Mesh coordination** defers DDP sends when a
 mesh peer is using the same WLED target.
+
+## Voice (vizbrain)
+
+StackChan builds (`BOARD_HAS_STACKCHAN_BASE` → `VOICE_ENABLED`) can hold a spoken
+conversation with **vizbrain**, a Python service on a Mac ([`../vizbrain/`](../vizbrain/)).
+The bot is the body; vizbrain does speech recognition, asks Claude, synthesizes the reply
+and runs lab tools. Full design: [`docs/PLAN-vizbot-brain.md`](../docs/PLAN-vizbot-brain.md).
+
+**One turn** (`voice_client.h`, all in `voiceTask` on Core 0):
+
+1. Front head tap → FOCUSED face, "Listening..." bubble.
+2. Record 16 kHz mono into PSRAM until 800 ms below 15% of the speaker's own level (max 12 s).
+3. POST the WAV to `http://<brain>:4050/v1/voice` → JSON with the first sentence, face and a clip id.
+4. GET `/v1/audio/<id>` (chunked; the clip grows sentence by sentence) and play it while it
+   downloads, 0.2 s first piece then up to 1.5 s pieces. The render loop moves the mouth
+   from a loudness envelope.
+
+**Audio hand-over.** Mic and speaker share `I2S_NUM_1`. A turn pauses the spectrum analyzer
+(`voiceOwnsAudio`), restarts the mic (`Mic.end()` / `Mic.begin()`), and restores everything
+afterwards. Mic chunk completion is detected with an `INT16_MAX` sentinel in each chunk's last
+sample (M5Unified never writes it) rather than inferred from queue order.
+
+**Finding the brain.** `brainHost` in NVS (set by vizbrain itself at startup through
+`/brain/config`, or by hand in the web panel's **Brain (voice)** card), falling back to an
+mDNS query for `_vizbrain._tcp`.
+
+**Gestures on voice builds.** Front tap = talk (tap again to cancel), back tap = shake,
+2 s hold = chill. The middle pad is ignored: a finger there also maxes a neighbour pad.
 
 ## vizCloud Integration
 
@@ -414,6 +449,7 @@ the board portion of the name comes from the env name.
 
 | Version | Boards | Notes |
 |---|---|---|
+| `3.5.12` | stackchan | Voice with vizbrain: front-tap push-to-talk, streamed spoken replies with lip-sync, `/brain/*` endpoints, Brain card in the web panel. |
 | `3.0.0-dev` | all | vizBot 3.0 line in progress — adds StackChan flagship (`stackchan` env). |
 | `2.2.1` | m5cores3 | Correct `flash_size` in merged `-factory.bin`. |
 | `2.2.0` | m5cores3 | SAM2695 MIDI synth, 37 built-in sequences. |
