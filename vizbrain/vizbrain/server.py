@@ -205,29 +205,34 @@ class App:
                              daemon=True).start()
         return "reacting"
 
-    def _arrival(self, prompt: str, sound: str) -> None:
+    def _arrival(self, prompt: str, sound: str, tries: int = 3, gap_s: float = 3.0) -> None:
+        """Motion fires as someone walks into view, often before they're in
+        frame, so an empty photo is retried a couple of times before giving up."""
         bot = self.get_bot()
-        try:
-            photo = bot.photo(shutter=False) if bot else None
-        except BotError as e:
-            print(f"[event] arrival: no photo ({e})")
-            photo = None
-        if not photo or not self.busy.acquire(blocking=False):
-            self._event_last["arrival"] = 0
-            return
-        try:
-            result = self.brain.turn(prompt, self.personality(), images=[photo])
-        finally:
-            self.busy.release()
-        text = (result.get("text") or "").strip()
-        if text.lower().strip(" .!") in ("silent", ""):
-            self._event_last["arrival"] = 0     # nobody there: don't use up the cooldown
-            self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": "event:arrival",
-                                 "heard": "(photo check)", "text": "(nobody there, stayed quiet)",
-                                 "tools": result.get("tools", [])})
-            print("[event] arrival: nobody in the photo, staying quiet")
-            return
-        self._say_text(text, result.get("expression", -1), "event:arrival", sound)
+        for attempt in range(1, tries + 1):
+            if attempt > 1:
+                time.sleep(gap_s)
+            try:
+                photo = bot.photo(shutter=False) if bot else None
+            except BotError as e:
+                print(f"[event] arrival: no photo ({e})")
+                photo = None
+            if not photo or not self.busy.acquire(blocking=False):
+                self._event_last["arrival"] = 0
+                return
+            try:
+                result = self.brain.turn(prompt, self.personality(), images=[photo])
+            finally:
+                self.busy.release()
+            text = (result.get("text") or "").strip()
+            if text.lower().strip(" .!") not in ("silent", ""):
+                self._say_text(text, result.get("expression", -1), "event:arrival", sound)
+                return
+            print(f"[event] arrival: nobody in photo {attempt}/{tries}")
+        self._event_last["arrival"] = 0     # nobody there: don't use up the cooldown
+        self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": "event:arrival",
+                             "heard": f"(photo check x{tries})", "text": "(nobody there, stayed quiet)",
+                             "tools": []})
 
     def _say_text(self, text: str, expression: int, source: str, sound: str | None) -> None:
         """Speak an already-written reply (no model call)."""
