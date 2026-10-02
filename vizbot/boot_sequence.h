@@ -619,10 +619,10 @@ void runBootSequence() {
   bootDrawResult(ok);
   delay(40);
 
-  // --- GC0308 camera (Phase 4 stub) ---
+  // --- GC0308 camera (photos + motion, stackchan_camera.h) ---
   bootDrawStage("Camera");
-  scInitCamera();
-  bootDrawDeferred();
+  ok = scInitCamera();
+  bootDrawResult(ok);
   delay(40);
 
   // --- LittleFS photo storage (Phase 4 stub) ---

@@ -2179,7 +2179,24 @@ void handleScPowerOff() {
 }
 
 // Camera endpoints remain stubs (Phase 4)
-void handleScPhotoCapture()   { scSendDeferred(4); }
+// GET /bot/photo/capture[?sound=0] → image/jpeg (QVGA). Used by vizbrain's `look` tool.
+void handleScPhotoCapture() {
+  if (!sysStatus.scCameraReady) {
+    server.send(503, "application/json", "{\"error\":\"camera not ready\"}");
+    return;
+  }
+  if (server.arg("sound") != "0") cmdPlaySequence(SEQ_SWIPE);   // shutter
+  uint8_t* jpg = nullptr;
+  size_t len = 0;
+  if (!scCameraJpeg(&jpg, &len, 80)) {
+    server.send(500, "application/json", "{\"error\":\"capture failed\"}");
+    return;
+  }
+  server.setContentLength(len);
+  server.send(200, "image/jpeg", "");
+  server.sendContent((const char*)jpg, len);
+  free(jpg);
+}
 void handleScPhotoList()      { scSendDeferred(4); }
 void handleScPhotoGet()       { scSendDeferred(4); }
 void handleScPhotoDelete()    { scSendDeferred(4); }
@@ -2265,6 +2282,13 @@ void handleBrainStatus() {
   t["speakerUp"] = voice.lastSpeakerMs;
   t["starved"] = voice.lastStarved;
   t["play"] = voice.lastPlayMs;
+  JsonObject cam = d["camera"].to<JsonObject>();
+  cam["ready"] = sysStatus.scCameraReady;
+  cam["frames"] = scCamMotion.frames;
+  cam["changedCells"] = scCamMotion.lastChangedCells;
+  cam["lastMotionSecAgo"] = (millis() - scCamMotion.lastMotionMs) / 1000;
+  cam["arrivals"] = scCamMotion.arrivals;
+  cam["maskedCells"] = scCamMotion.maskedCells;
   d["psramFree"] = ESP.getFreePsram();
   String out;
   serializeJson(d, out);

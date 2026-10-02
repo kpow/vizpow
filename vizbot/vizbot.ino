@@ -535,6 +535,7 @@ void loop() {
     }
   }
   #ifdef VOICE_ENABLED
+  voiceSuppressEvents = scTouch_state.chillMode;
   const bool voiceTurn = voice.busy();
   #else
   const bool voiceTurn = false;

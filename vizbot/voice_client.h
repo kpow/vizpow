@@ -34,6 +34,9 @@
 // ============================================================================
 
 extern void cmdSetExpression(uint8_t val);
+extern void cmdPlaySequence(uint8_t seqId);
+extern volatile bool voiceLeanInPending;
+extern volatile bool voiceSuppressEvents;
 extern char mdnsHostname[];
 
 #define VOICE_MIC_RATE        16000
@@ -473,11 +476,14 @@ static void voiceFinish(VoiceState how) {
   if (how == VOICE_ERROR) {
     voice.failures++;
     voice.state = VOICE_ERROR;
+    cmdPlaySequence(SEQ_ERROR);
     cmdSetExpression(EXPR_CONFUSED);
     vTaskDelay(pdMS_TO_TICKS(2500));
   }
   voiceHoldsFace = false;
   voice.cancelRequested = false;
+  scCamMotion.paused = false;
+  scCamMotion.havePrev = false;   // the room changed while we were busy; re-baseline
   voice.state = VOICE_IDLE;
 }
 
@@ -492,10 +498,14 @@ static void voiceRunTurn() {
   voiceHoldsFace = true;
   voice.cancelRequested = false;
 
-  // 1. Listen
+  // 1. Listen — a synth cue first, and wait for it so the mic doesn't hear it
   voice.state = VOICE_LISTENING;
+  scCamMotion.paused = true;
   cmdSetExpression(EXPR_FOCUSED);
   voiceShowBubble("Listening...", VOICE_MAX_REC_MS);
+  cmdPlaySequence(SEQ_CURIOUS_BEEP);
+  vTaskDelay(pdMS_TO_TICKS(80));                       // let the render loop start it
+  for (int i = 0; i < 60 && botSounds.playing; i++) vTaskDelay(pdMS_TO_TICKS(20));
   voiceTakeMic();
   bool cancelled = false, garbage = false;
   size_t samples = voiceRecord(cancelled, garbage);
@@ -510,6 +520,7 @@ static void voiceRunTurn() {
   if (M5.Mic.isRunning()) M5.Mic.end();
 
   if (cancelled) {
+    cmdPlaySequence(SEQ_DISMISS);
     voiceShowBubble("Never mind.", 1500);
     cmdSetExpression(EXPR_NEUTRAL);
     voiceFinish(VOICE_IDLE);
@@ -524,6 +535,7 @@ static void voiceRunTurn() {
 
   // 2. Think
   voice.state = VOICE_THINKING;
+  cmdPlaySequence(SEQ_TYPING);
   cmdSetExpression(EXPR_THINKING);
   voiceShowBubble("Hmm...", 20000);
   if (!voiceResolveBrain()) {
@@ -580,6 +592,7 @@ static void voiceRunPlay() {
   }
   voiceHoldsFace = true;
   voice.state = VOICE_THINKING;
+  scCamMotion.paused = true;
   voiceOwnsAudio = true;
   vTaskDelay(pdMS_TO_TICKS(60));
   if (voiceStreamSpeak(voice.playId, voice.playText, voice.playExpr, voice.playMs) == 0) {
@@ -587,6 +600,52 @@ static void voiceRunPlay() {
     voiceShowBubble(voice.playText, 4000);
   }
   voiceFinish(VOICE_IDLE);
+}
+
+// ---- Events: tell vizbrain what the senses noticed ------------------------------
+// The brain decides whether to say anything (it rate-limits too).
+
+static int voicePostEvent(const char* json) {
+  if (!voiceResolveBrain()) return -1;
+  char url[128];
+  snprintf(url, sizeof(url), "http://%s/v1/event", voice.resolved);
+  esp_http_client_config_t cfg = {};
+  cfg.url = url;
+  cfg.method = HTTP_METHOD_POST;
+  cfg.timeout_ms = 3000;
+  esp_http_client_handle_t c = esp_http_client_init(&cfg);
+  if (!c) return -1;
+  esp_http_client_set_header(c, "Content-Type", "application/json");
+  esp_http_client_set_header(c, "X-Bot-Id", mdnsHostname);
+  esp_http_client_set_post_field(c, json, strlen(json));
+  int status = (esp_http_client_perform(c) == ESP_OK) ? esp_http_client_get_status_code(c) : -1;
+  esp_http_client_cleanup(c);
+  Serial.printf("[Voice] event %s -> %d\n", json, status);
+  return status;
+}
+
+#define VOICE_LEAN_IN_COOLDOWN_MS (3UL * 60UL * 1000UL)
+
+// Called from voiceTask while idle: camera motion check + pending sense events.
+static void voicePollSenses() {
+  static uint32_t lastCamMs = 0, lastLeanMs = 0;
+  uint32_t now = millis();
+  if (now - lastCamMs >= SC_CAM_MOTION_MS) {
+    lastCamMs = now;
+    if (scCameraMotionTick() && !voiceSuppressEvents) {
+      char j[80];
+      snprintf(j, sizeof(j), "{\"type\":\"arrival\",\"quiet_min\":%lu}",
+               (unsigned long)scCamMotion.arrivalQuietMin);
+      voicePostEvent(j);
+    }
+  }
+  if (voiceLeanInPending) {
+    voiceLeanInPending = false;
+    if (!voiceSuppressEvents && (lastLeanMs == 0 || now - lastLeanMs >= VOICE_LEAN_IN_COOLDOWN_MS)) {
+      lastLeanMs = now;
+      voicePostEvent("{\"type\":\"lean_in\"}");
+    }
+  }
 }
 
 // ---- Entry points ----------------------------------------------------------------
@@ -612,6 +671,8 @@ void voiceTask(void*) {
     } else if (voice.playRequested) {
       voice.playRequested = false;
       voiceRunPlay();
+    } else if (voice.enabled) {
+      voicePollSenses();
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }
