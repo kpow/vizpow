@@ -432,12 +432,77 @@ void resetWifiProvisioning() {
 // Main loop poll — call once per frame
 // ============================================================================
 
+// ============================================================================
+// STA watchdog — rejoin the saved network after it drops
+// ============================================================================
+// Auto-reconnect is off (setAutoReconnect(false) above) and the boot attempt
+// is the only other retry, so a router blip at night used to leave the bot
+// offline until someone power-cycled it. Now: if STA has been down 30 s, call
+// WiFi.begin() again with the saved, verified credentials, backing off
+// 30 s → 1 → 2 → 4 → 5 min. This also covers a failed boot join (AP-only
+// fallback). It never runs mid-provisioning or while someone is on the setup
+// hotspot, so it can't pull the portal out from under them.
+
+#define STA_RETRY_FIRST_MS  30000UL
+#define STA_RETRY_MAX_MS    300000UL
+
+static uint32_t staDownSinceMs = 0;
+static uint32_t staNextRetryMs = 0;
+static uint32_t staRetryGapMs = STA_RETRY_FIRST_MS;
+uint16_t staReconnects = 0;          // successful rejoins since boot (shown in /state)
+
+void pollStaWatchdog() {
+  if (wifiProv.state == PROV_CONNECT_REQUESTED || wifiProv.state == PROV_CONNECTING) return;
+  uint32_t now = millis();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    IPAddress ip = WiFi.localIP();
+    if (!sysStatus.staConnected || ip != sysStatus.staIP) {
+      bool rejoined = staDownSinceMs != 0;
+      sysStatus.staConnected = true;
+      sysStatus.staIP = ip;
+      MDNS.end();
+      startMDNS();
+      if (rejoined) staReconnects++;
+      Serial.printf("[WiFi] STA %s, IP %s\n", rejoined ? "rejoined" : "up", ip.toString().c_str());
+    }
+    staDownSinceMs = 0;
+    staRetryGapMs = STA_RETRY_FIRST_MS;
+    return;
+  }
+
+  if (staDownSinceMs == 0) {
+    staDownSinceMs = now;
+    staNextRetryMs = now + STA_RETRY_FIRST_MS;
+    if (sysStatus.staConnected) Serial.println("[WiFi] STA lost — will rejoin");
+    sysStatus.staConnected = false;
+    return;
+  }
+  if ((int32_t)(now - staNextRetryMs) < 0) return;
+  staNextRetryMs = now + staRetryGapMs;
+  staRetryGapMs = min(staRetryGapMs * 2, STA_RETRY_MAX_MS);
+
+  if (WiFi.softAPgetStationNum() > 0) return;   // someone's using the setup hotspot
+
+  static char ssid[33], pass[64];
+  static bool haveCreds = false;
+  if (!haveCreds) haveCreds = loadWifiCredentials(ssid, pass);
+  if (!haveCreds) return;                        // never set up: the portal is the way in
+
+  Serial.printf("[WiFi] rejoining \"%s\" (down %lus)\n", ssid, (unsigned long)((now - staDownSinceMs) / 1000));
+  if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);   // boot fell back to AP-only
+  WiFi.disconnect(false, false);
+  WiFi.begin(ssid, pass);                        // non-blocking; the next polls see the result
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER);
+}
+
 // Called from WiFi task on Core 0 — same core as handler
 void pollWifiConnectTask() {
   if (wifiProv.state == PROV_CONNECT_REQUESTED) {
     doWifiConnectBlocking();  // blocks ~15s, exactly like the POC
   }
   pollWifiApLinger();
+  pollStaWatchdog();
 }
 
 // Called from main loop on Core 1 — only scan (no connect state needed)

@@ -8,6 +8,7 @@
 #include "config.h"
 #include "palettes.h"
 #include "ota_update.h"
+extern uint16_t staReconnects;   // wifi_provisioning.h (STA rejoin watchdog)
 
 // External references to globals
 extern WebServer server;
@@ -1204,6 +1205,8 @@ void handleState() {
                   (sysStatus.psramAvailable ? ",\"psramTotal\":" + String(ESP.getPsramSize()) +
                                               ",\"psramFree\":" + String(ESP.getFreePsram()) : "") +
                   ",\"sta\":" + (sysStatus.staConnected ? "true" : "false") +
+                  ",\"staRejoins\":" + String(staReconnects) +
+                  ",\"upSec\":" + String(millis() / 1000) +
                   (sysStatus.staConnected ? ",\"staIP\":\"" + sysStatus.staIP.toString() + "\"" : "") +
                 "},\"wled\":" + getWledStatusJson() +
                 ",\"wledEmoji\":" + getWledEmojiJson() +
@@ -2369,6 +2372,14 @@ void handleBrainPlay() {
 }
 #endif
 
+// Debug: drop the STA link (as a router blip would) to exercise the rejoin
+// watchdog in wifi_provisioning.h. The bot should be back within ~30 s.
+void handleDebugWifiDrop() {
+  server.send(200, "text/plain", "dropping STA; expect a rejoin in ~30 s");
+  delay(100);
+  WiFi.disconnect(false, false);
+}
+
 void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/state", handleState);
@@ -2377,6 +2388,7 @@ void setupWebServer() {
   server.on("/debug/touch", handleDebugTouch);
   #endif
   server.on("/brightness", handleBrightness);
+  server.on("/debug/wifidrop", handleDebugWifiDrop);
 
   // Bot mode endpoints
   server.on("/bot/expression", handleBotExpression);
