@@ -37,6 +37,7 @@ How to answer:
 - Tags are silent: they set your face and head, and are never spoken. Don't use tools for faces or gestures.
 - Use tools only to change things: lab lights, the keyboard, your base LEDs, or pointing your head at a specific angle. For those, write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
 - For weather, answer from the weather in your context; call get_weather only if it's missing.
+- You can search the web for anything current or that you don't know: events and show dates, scores, news, opening hours, facts. Say a quick "let me check" first, then answer in a sentence or two. Don't narrate the search or comment on the results; after searching, just give the answer. Never read out URLs or list sources unless asked.
 - You have a camera in your head: use look when asked what you see, or to see who's there.
 - When Kevin tells you something worth keeping (names, preferences, plans), save it with remember. Your memories are in your context.
 - Messages in brackets that start with Event or Routine come from your sensors or your schedule, not from Kevin talking. Respond to them naturally and briefly, as yourself.
@@ -199,6 +200,11 @@ class Brain:
         messages = history + [{"role": "user", "content": content},
                               {"role": "system", "content": context}]
         tools = [t for t in self.toolbox.api_list() if t["name"] not in CLAUDE_SKIP_TOOLS]
+        if self.settings.get("web_search"):
+            # Server tool: Anthropic runs the search; results come back in the same response.
+            tools.append({"type": "web_search_20260209", "name": "web_search",
+                          "max_uses": self.settings.get("web_search_max_uses", 2),
+                          "user_location": self.settings["location"]})
         used: list[str] = []
         text_parts: list[str] = []
 
@@ -206,8 +212,17 @@ class Brain:
             resp = self._create(system, messages, tools, on_text)
             if resp.stop_reason == "refusal":
                 return {"text": "Hmm, I'd better not answer that one.", "tools": used}
-            # Keep text from every round: words before a tool call are part of the reply.
-            text_parts += [b.text for b in resp.content if getattr(b, "type", "") == "text" and b.text.strip()]
+            # Keep text from every round: words before a tool call are part of the
+            # reply. With web search, keep what came before the first search and
+            # after the last one (the notes in between aren't for Kevin).
+            text_parts += _answer_text(resp.content)
+            searches = sum(1 for b in resp.content if getattr(b, "type", "") == "server_tool_use")
+            if searches:
+                used.append(f"web_search x{searches}")
+            if resp.stop_reason == "pause_turn":
+                # A long server-side search loop paused; send it back as-is to resume.
+                messages.append({"role": "assistant", "content": resp.content})
+                continue
             calls = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
             if resp.stop_reason != "tool_use" or not calls:
                 break
@@ -278,11 +293,27 @@ class Brain:
     def _call(api, params: dict, on_text):
         if on_text is None:
             return api.create(**params)
+        # With web search, the model may write notes between searches ("let me
+        # look at what came back"). Speak text before the first search right
+        # away; hold text written after a search, drop it if another search
+        # follows, and speak what's left (the answer) at the end.
+        held: list[str] = []
+        searched = False
         with api.stream(**params) as stream:
             for event in stream:
-                if (event.type == "content_block_delta"
+                if event.type == "content_block_start":
+                    kind = getattr(event.content_block, "type", "")
+                    if kind == "server_tool_use":
+                        if not searched:
+                            on_text(" ")   # end the "let me check" sentence so it's spoken now
+                        searched, held = True, []
+                    elif kind == "text":
+                        (held.append if searched else on_text)(" ")   # blocks arrive unspaced
+                elif (event.type == "content_block_delta"
                         and getattr(event.delta, "type", "") == "text_delta"):
-                    on_text(event.delta.text)
+                    (held.append if searched else on_text)(event.delta.text)
+            if held:
+                on_text("".join(held))
             return stream.get_final_message()
 
     # ---- No API key: tiny rule-based stand-in ---------------------------
@@ -321,6 +352,17 @@ class Brain:
 
 _COLOR_WORDS = ["red", "orange", "yellow", "green", "teal", "cyan", "blue", "purple",
                 "violet", "magenta", "pink", "white", "gold", "lime"]
+
+
+def _answer_text(content) -> list[str]:
+    """Text Kevin should hear: everything, or with web search only what came
+    before the first search and after the last one."""
+    blocks = list(content)
+    kinds = [getattr(b, "type", "") for b in blocks]
+    search = [i for i, k in enumerate(kinds) if k == "server_tool_use"]
+    first, last = (search[0], search[-1]) if search else (len(blocks), -1)
+    return [b.text for i, b in enumerate(blocks)
+            if kinds[i] == "text" and b.text.strip() and (i < first or i > last)]
 
 
 def _short(args) -> str:

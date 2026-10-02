@@ -37,6 +37,9 @@ def record(model: str, usage) -> float:
     cr = getattr(usage, "cache_read_input_tokens", 0) or 0
     cw = getattr(usage, "cache_creation_input_tokens", 0) or 0
     cost = (inp * p_in + out * p_out + cr * p_cr + cw * p_cw) / 1_000_000
+    stu = getattr(usage, "server_tool_use", None)
+    searches = (getattr(stu, "web_search_requests", 0) or 0) if stu else 0
+    cost += searches * 0.01   # web search: $10 per 1,000
     day = dt.date.today().isoformat()
     with _lock:
         data = _load()

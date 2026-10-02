@@ -35,6 +35,11 @@ DEFAULTS: dict = {
     "vizmac_url": "http://127.0.0.1:4049",
     # Workspace for a personal API key that isn't scoped to one workspace.
     "workspace_id": "",
+    # Claude's built-in web search (about 1 cent per search, plus the result tokens).
+    "web_search": True,
+    "web_search_max_uses": 2,
+    "location": {"type": "approximate", "city": "Richmond", "region": "Virginia",
+                 "country": "US", "timezone": "America/New_York"},
 }
 
 _lock = threading.Lock()

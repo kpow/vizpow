@@ -54,7 +54,7 @@ extern char mdnsHostname[];
 #define VOICE_MAX_PLAY_MS     30000
 #define VOICE_BRAIN_PORT      4050
 #define VOICE_CONNECT_MS      2500
-#define VOICE_HTTP_TIMEOUT_MS 25000
+#define VOICE_HTTP_TIMEOUT_MS 45000   // a web search can pause a reply ~20 s
 #define VOICE_ENV_FRAME_MS    33       // lip-sync envelope resolution
 
 #define VOICE_WAV_HDR_SAMPLES 22       // 44-byte WAV header, in int16 slots
@@ -402,7 +402,7 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
   uint8_t* dst = (uint8_t*)voice.playBuf;
   size_t got = 0, queued = 0, envFrames = 0;
   float envPeak = 2000.0f;      // running loudness reference for the mouth
-  uint32_t t0 = 0;
+  uint32_t t0 = 0, lastIdleCheckMs = 0;
   bool eof = false;
   uint32_t clipMs = contentLen > 0 ? (uint32_t)(contentLen / 2 * 1000 / VOICE_PLAY_RATE) : 0;
 
@@ -431,6 +431,17 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
       voice.env[envFrames++] = (uint8_t)fminf(12.0f, rms * 12.0f / envPeak);
     }
     voiceEnvFrames = envFrames;
+
+    // The clip can pause mid-reply (a web search between "let me check" and the
+    // answer). While the speaker sits empty, slide the lip-sync clock along so
+    // the mouth lines up with the audio again when it resumes.
+    if (t0 && queued >= avail && !eof && M5.Speaker.isPlaying(0) == 0) {
+      uint32_t nowMs = millis();
+      if (lastIdleCheckMs) voiceSpeakT0 += nowMs - lastIdleCheckMs;
+      lastIdleCheckMs = nowMs;
+    } else {
+      lastIdleCheckMs = 0;
+    }
 
     // Queue pieces whenever the speaker has a free slot (never block on it).
     if (t0 || avail >= VOICE_PREROLL_SAMPLES || eof) {

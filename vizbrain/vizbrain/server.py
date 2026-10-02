@@ -381,7 +381,7 @@ def make_handler(app: App):
                     pos += len(data)
                 if done:
                     break
-                data, done = clip.read_from(pos, timeout=30)
+                data, done = clip.read_from(pos, timeout=45)
                 if not data and not done:
                     break   # synthesis stalled; end the response rather than hang the bot
             self.wfile.write(b"0\r\n\r\n")
