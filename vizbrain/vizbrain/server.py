@@ -4,6 +4,7 @@
   GET  /v1/audio/<id>  reply clip, raw s16le mono PCM @ 24 kHz
   POST /v1/text        {"text": ...} typed turn; the bot speaks the reply
   POST /v1/event       presence events (Stage 3; logged for now)
+  POST /v1/say         {"text": ..., "voice"?: ...} speak exact text, no model call
   GET  /v1/health      status
   GET  /v1/log         recent turns
   GET  /               typing page
@@ -104,7 +105,7 @@ class App:
         """
         t0 = time.time()
         personality = self.personality()
-        voice = speech.PERSONALITY_VOICES.get(personality.lower(), self.settings["tts_voice"])
+        voice = speech.voice_for(self.settings)
         clip = speech.LiveClip()
         cid = self.clips.add(clip)
         mouth = speech.Mouth(clip, voice, self.settings["tts_rate"])
@@ -246,10 +247,9 @@ class App:
                              "tools": []})
 
     def _say_text(self, text: str, expression: int, source: str, sound: str | None,
-                  heard: str = "(photo check)") -> None:
+                  heard: str = "(photo check)", voice: str | None = None) -> None:
         """Speak an already-written reply (no model call)."""
-        personality = self.personality()
-        voice = speech.PERSONALITY_VOICES.get(personality.lower(), self.settings["tts_voice"])
+        voice = voice or speech.voice_for(self.settings)
         pcm = speech.synthesize(text, voice, self.settings["tts_rate"])
         cid = self.clips.put(pcm)
         bot = self.get_bot()
@@ -346,7 +346,7 @@ def make_handler(app: App):
                 bot = app._bot
                 return self._json(200, {
                     "ok": True, "claude": app.brain.online, "model": app.settings["model"],
-                    "stt": app.settings["stt_model"], "tts": "macos-say",
+                    "stt": app.settings["stt_model"], "tts": app.settings.get("tts_engine", "kokoro"),
                     "bot": bot.host if bot else None, "spend": usage.summary(),
                 })
             if path == "/v1/log":
@@ -401,6 +401,13 @@ def make_handler(app: App):
                                         "heard": json.dumps(evt), "text": outcome, "tools": []})
                     print(f"[event] {evt} -> {outcome}")
                     return self._json(202, {"ok": True, "outcome": outcome})
+                if path == "/v1/say":
+                    req = json.loads(self._body() or b"{}")
+                    text = (req.get("text") or "").strip()
+                    if not text:
+                        return self._json(400, {"error": "text required"})
+                    app._say_text(text, -1, "say", None, heard="(say)", voice=req.get("voice"))
+                    return self._json(200, {"ok": True})
                 self._json(404, {"error": "not found"})
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
@@ -461,6 +468,7 @@ def serve(port: int | None = None) -> None:
     port = port or app.settings["port"]
     print(f"[vizbrain] Claude {'ONLINE (' + app.settings['model'] + ')' if app.brain.online else 'OFFLINE (no API key; rule-based stand-in)'}")
     threading.Thread(target=app.listener.warm, daemon=True).start()
+    threading.Thread(target=speech.kokoro.warm, daemon=True).start()
     threading.Thread(target=app.announce, args=(port,), daemon=True).start()
     threading.Thread(target=app.wled.refresh, daemon=True).start()
     app.toolbox.cached_weather()  # warm the prompt's weather so the first question is one call

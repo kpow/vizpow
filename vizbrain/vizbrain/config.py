@@ -28,7 +28,8 @@ DEFAULTS: dict = {
     "history_turns": 10,
     "session_idle_s": 300,
     "stt_model": "mlx-community/whisper-small.en-mlx",
-    "tts_voice": "Samantha",
+    "tts_voice": "",                 # "" = default (Kokoro am_puck); e.g. "kokoro:af_heart@1.0" or a macOS voice
+    "tts_engine": "kokoro",          # "kokoro" (local neural) or "say" (macOS voices)
     "tts_rate": 190,
     # WLED devices the brain may control, by name. null = every device found.
     "wled_allow": None,

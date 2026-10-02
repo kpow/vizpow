@@ -1,8 +1,8 @@
-"""Local speech: whisper (mlx) for listening, macOS `say` for speaking.
+"""Local speech: whisper (mlx) for listening; Kokoro (or macOS `say`) for speaking.
 
-Both run on the Mac; no audio leaves the LAN (plan decision D3). `say` is the
-v1 voice because it needs no model download; Kokoro can replace it later
-behind the same synthesize() call.
+Everything runs on the Mac; no audio leaves the LAN (plan decision D3).
+Kokoro's model lives in ~/Library/Application Support/vizbrain/kokoro/; without
+it, or with settings "tts_engine": "say", the macOS voices are used.
 """
 
 from __future__ import annotations
@@ -17,17 +17,59 @@ import threading
 import time
 import uuid
 import wave
+from pathlib import Path
 
 import numpy as np
 
 PLAY_RATE = 24000  # Hz, s16le mono — what the bot's speaker plays
 
-# A distinct voice per personality (vizbot/bot_mode.h built-ins).
-PERSONALITY_VOICES = {
-    "chill": "Eddy (English (US))",
-    "hyper": "Junior",
-    "grumpy": "Grandpa (English (US))",
-}
+# One voice everywhere (Kevin: the voice doesn't change with the mood).
+# "kokoro:<voice>[@speed]" uses Kokoro (local neural TTS); anything else is a macOS `say` voice.
+KOKORO_VOICE = "kokoro:am_puck@1.12"
+SAY_VOICE = "Junior"   # macOS fallback when Kokoro isn't installed
+KOKORO_DIR = Path.home() / "Library" / "Application Support" / "vizbrain" / "kokoro"
+
+
+def voice_for(settings: dict) -> str:
+    """The bot's voice: settings["tts_voice"] if set, else Kokoro's am_puck (or `say` without Kokoro)."""
+    if settings.get("tts_voice"):
+        return settings["tts_voice"]
+    if settings.get("tts_engine", "kokoro") == "kokoro" and (KOKORO_DIR / "kokoro-v1.0.onnx").exists():
+        return KOKORO_VOICE
+    return SAY_VOICE
+
+
+class _Kokoro:
+    """Kokoro-82M via onnxruntime on the CPU (~3.8x real time on an M5; the
+    Neural Engine and the int8 model were both slower). One shared session."""
+
+    def __init__(self):
+        self._k = None
+        self._lock = threading.Lock()
+
+    def _load(self):
+        if self._k is None:
+            from kokoro_onnx import Kokoro
+            self._k = Kokoro(str(KOKORO_DIR / "kokoro-v1.0.onnx"), str(KOKORO_DIR / "voices-v1.0.bin"))
+        return self._k
+
+    def warm(self) -> None:
+        try:
+            self.speak("Ready.", "am_puck", 1.12)
+            print("[tts] kokoro ready")
+        except Exception as e:  # noqa: BLE001
+            print(f"[tts] kokoro unavailable: {e}")
+
+    def speak(self, text: str, voice: str, speed: float) -> bytes:
+        with self._lock:
+            samples, rate = self._load().create(text, voice=voice, speed=speed, lang="en-us")
+        if rate != PLAY_RATE:
+            n = int(len(samples) * PLAY_RATE / rate)
+            samples = np.interp(np.linspace(0, len(samples), n, endpoint=False), np.arange(len(samples)), samples)
+        return (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+
+
+kokoro = _Kokoro()
 
 
 class Listener:
@@ -83,7 +125,16 @@ def normalize(samples: np.ndarray, target_peak: float = 0.7) -> np.ndarray:
 
 
 def synthesize(text: str, voice: str, rate: int) -> bytes:
-    """Speak text with macOS `say`; returns raw s16le mono PCM at PLAY_RATE."""
+    """Speak text; returns raw s16le mono PCM at PLAY_RATE. Kokoro voices look
+    like "kokoro:am_puck@1.12"; anything else goes to macOS `say` (also the
+    fallback if Kokoro fails)."""
+    if voice.startswith("kokoro:"):
+        name, _, speed = voice[7:].partition("@")
+        try:
+            return kokoro.speak(text, name, float(speed or 1.0))
+        except Exception as e:  # noqa: BLE001 - fall back to say rather than go silent
+            print(f"[tts] kokoro failed ({e}); using say")
+            voice = ""
     fd, path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     try:
