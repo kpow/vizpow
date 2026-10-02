@@ -2288,6 +2288,7 @@ void handleBrainStatus() {
   cam["changedCells"] = scCamMotion.lastChangedCells;
   cam["lastMotionSecAgo"] = (millis() - scCamMotion.lastMotionMs) / 1000;
   cam["arrivals"] = scCamMotion.arrivals;
+  cam["maskedCells"] = scCamMotion.maskedCells;
   d["psramFree"] = ESP.getFreePsram();
   String out;
   serializeJson(d, out);

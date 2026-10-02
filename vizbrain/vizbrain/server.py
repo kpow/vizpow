@@ -34,8 +34,10 @@ from .tools import Toolbox
 # Sense events the bot reports (POST /v1/event): what to tell Claude, and how
 # long to wait before reacting to the same kind again.
 EVENTS = {
-    "arrival": ("[Event from your camera: someone just showed up at the desk after {quiet_min} quiet minutes. "
-                "Greet them in one short sentence. You can use look to see who it is.]", 600, "chime"),
+    "arrival": ("[Event from your camera: movement at the desk after {quiet_min} quiet minutes. The photo is what "
+                "your camera sees right now. If a person is in it, greet them in one short sentence. If nobody "
+                "is there (an empty room, a screen or light changing), reply with only the word silent.]",
+                600, "chime"),
     "lean_in": ("[Event from your proximity sensor: someone just leaned in close to your face. "
                 "React in a few words, maybe ask what's up.]", 180, "curious"),
 }
@@ -195,9 +197,55 @@ class App:
             return "ignored (cooldown)"
         self._event_last[kind] = now
         prompt = template.format(quiet_min=evt.get("quiet_min", "several"))
-        threading.Thread(target=lambda: self.speak_prompt(prompt, f"event:{kind}", sound),
-                         daemon=True).start()
+        if kind == "arrival":
+            # Look before greeting: lights and screens also move.
+            threading.Thread(target=self._arrival, args=(prompt, sound), daemon=True).start()
+        else:
+            threading.Thread(target=lambda: self.speak_prompt(prompt, f"event:{kind}", sound),
+                             daemon=True).start()
         return "reacting"
+
+    def _arrival(self, prompt: str, sound: str) -> None:
+        bot = self.get_bot()
+        try:
+            photo = bot.photo(shutter=False) if bot else None
+        except BotError as e:
+            print(f"[event] arrival: no photo ({e})")
+            photo = None
+        if not photo or not self.busy.acquire(blocking=False):
+            self._event_last["arrival"] = 0
+            return
+        try:
+            result = self.brain.turn(prompt, self.personality(), images=[photo])
+        finally:
+            self.busy.release()
+        text = (result.get("text") or "").strip()
+        if text.lower().strip(" .!") in ("silent", ""):
+            self._event_last["arrival"] = 0     # nobody there: don't use up the cooldown
+            self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": "event:arrival",
+                                 "heard": "(photo check)", "text": "(nobody there, stayed quiet)",
+                                 "tools": result.get("tools", [])})
+            print("[event] arrival: nobody in the photo, staying quiet")
+            return
+        self._say_text(text, result.get("expression", -1), "event:arrival", sound)
+
+    def _say_text(self, text: str, expression: int, source: str, sound: str | None) -> None:
+        """Speak an already-written reply (no model call)."""
+        personality = self.personality()
+        voice = speech.PERSONALITY_VOICES.get(personality.lower(), self.settings["tts_voice"])
+        pcm = speech.synthesize(text, voice, self.settings["tts_rate"])
+        cid = self.clips.put(pcm)
+        bot = self.get_bot()
+        if bot:
+            if sound:
+                threading.Thread(target=lambda: _quiet(bot.sound, sound), daemon=True).start()
+            try:
+                bot.play(cid, bubble_text(text), speech.pcm_ms(pcm), expression)
+            except BotError as e:
+                print(f"[speak] {source}: bot didn't take the clip: {e}")
+        self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source, "heard": "(photo check)",
+                             "text": text, "tools": []})
+        print(f"[turn] {source}: -> {text!r}")
 
     def run_scheduler(self) -> None:
         """Check routines every 20 s. A routine that finds the bot busy is

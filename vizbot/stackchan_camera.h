@@ -28,7 +28,8 @@
 // motion; a change across most of the view is the head turning or the lights
 // changing, and is ignored. Frames taken while the head is moving are skipped
 // (scHeadBusyUntilMs, set by every head move in stackchan_base.h).
-// An "arrival" is motion after SC_CAM_QUIET_MS without any.
+// An "arrival" is sustained motion after SC_CAM_QUIET_MS without any. vizbrain
+// then looks (a photo) and only greets if a person is actually there.
 // ============================================================================
 
 #define SC_CAM_GRID_W        32
@@ -37,7 +38,9 @@
 #define SC_CAM_CELL_DELTA    22       // luma change that counts a cell as changed
 #define SC_CAM_MIN_CELLS     45       // >= ~6% of cells = motion (idle noise peaks ~22)
 #define SC_CAM_GLOBAL_CELLS  420      // >= ~55% of cells = head moved / lights changed
-#define SC_CAM_QUIET_MS      (5UL * 60UL * 1000UL)   // quiet this long, then motion = arrival
+#define SC_CAM_QUIET_MS      (3UL * 60UL * 1000UL)   // quiet this long, then motion = arrival
+#define SC_CAM_SUSTAIN       2        // motion in this many of the last 3 checks (~1 s)
+#define SC_CAM_BUSY_LEVEL    120      // cells this active are flickering lights/screens: ignored
 
 extern volatile uint32_t scHeadBusyUntilMs;   // stackchan_base.h
 
@@ -45,7 +48,10 @@ static SemaphoreHandle_t scCamLock = nullptr;
 
 struct ScCamMotion {
   uint8_t  prev[SC_CAM_GRID_W * SC_CAM_GRID_H];
+  uint8_t  activity[SC_CAM_GRID_W * SC_CAM_GRID_H];   // how often each cell changes (decays)
+  uint8_t  recent = 0;                                // bit history of motion checks
   bool     havePrev = false;
+  uint32_t maskedCells = 0;
   uint32_t lastMotionMs = 0;
   uint32_t lastChangedCells = 0;
   uint32_t frames = 0;
@@ -153,12 +159,23 @@ inline bool scCameraMotionTick() {
 
   bool arrival = false;
   if (scCamMotion.havePrev) {
-    uint32_t changed = 0;
+    // Cells that change all the time (LED strips, screens, a TV) are learned
+    // and ignored, so they can't keep the room from ever being "quiet".
+    uint32_t changed = 0, all = 0, masked = 0;
     for (int i = 0; i < SC_CAM_GRID_W * SC_CAM_GRID_H; i++) {
-      if (abs((int)grid[i] - (int)scCamMotion.prev[i]) > SC_CAM_CELL_DELTA) changed++;
+      bool diff = abs((int)grid[i] - (int)scCamMotion.prev[i]) > SC_CAM_CELL_DELTA;
+      uint8_t& a = scCamMotion.activity[i];
+      bool busy = a >= SC_CAM_BUSY_LEVEL;
+      if (busy) masked++;
+      if (diff) { all++; if (!busy) changed++; }
+      a = diff ? (uint8_t)min(255, a + 40) : (uint8_t)(a - (a >> 4) - (a ? 1 : 0));
     }
     scCamMotion.lastChangedCells = changed;
-    if (changed >= SC_CAM_MIN_CELLS && changed < SC_CAM_GLOBAL_CELLS) {
+    scCamMotion.maskedCells = masked;
+    bool moving = changed >= SC_CAM_MIN_CELLS && all < SC_CAM_GLOBAL_CELLS;
+    scCamMotion.recent = (uint8_t)((scCamMotion.recent << 1) | (moving ? 1 : 0)) & 0x07;
+    // Sustained (2 of the last 3 checks) so a single flick of light doesn't count.
+    if (__builtin_popcount(scCamMotion.recent) >= SC_CAM_SUSTAIN) {
       uint32_t quiet = now - scCamMotion.lastMotionMs;
       if (quiet >= SC_CAM_QUIET_MS) {
         scCamMotion.arrivals++;

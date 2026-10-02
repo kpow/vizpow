@@ -94,7 +94,9 @@ class Brain:
                 f"Kevin may call them by a nickname; pick the closest name.\n"
                 f"Weather (refreshed every 15 minutes): {self.toolbox.cached_weather() or 'not loaded yet; use get_weather'}")
 
-    def turn(self, heard: str, personality: str = "Chill", on_text=None) -> dict:
+    def turn(self, heard: str, personality: str = "Chill", on_text=None,
+             images: list[bytes] | None = None) -> dict:
+        """images: JPEGs attached to this message only (not kept in history)."""
         """Run one conversational turn. Returns {text, tools}."""
         with self.lock:
             if time.time() - self.last_turn > self.settings["session_idle_s"]:
@@ -106,7 +108,7 @@ class Brain:
                 result = self._offline_turn(heard)
             else:
                 try:
-                    result = self._claude_turn(user_msg, personality, on_text)
+                    result = self._claude_turn(user_msg, personality, on_text, images)
                 except Exception as e:  # noqa: BLE001 - say it out loud rather than go silent
                     print(f"[brain] Claude call failed: {e}")
                     msg = str(e).lower()
@@ -132,14 +134,21 @@ class Brain:
 
     # ---- Claude ---------------------------------------------------------
 
-    def _claude_turn(self, heard: str, personality: str, on_text=None) -> dict:
+    def _claude_turn(self, heard: str, personality: str, on_text=None,
+                     images: list[bytes] | None = None) -> dict:
         import anthropic
 
         system = [
             {"type": "text", "text": SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS))},
             {"type": "text", "text": self._context(personality)},
         ]
-        messages = list(self.history) + [{"role": "user", "content": heard}]
+        content = heard
+        if images:
+            import base64
+            content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                    "data": base64.b64encode(j).decode()}} for j in images]
+            content.append({"type": "text", "text": heard})
+        messages = list(self.history) + [{"role": "user", "content": content}]
         tools = [t for t in self.toolbox.api_list() if t["name"] not in CLAUDE_SKIP_TOOLS]
         used: list[str] = []
         text_parts: list[str] = []
