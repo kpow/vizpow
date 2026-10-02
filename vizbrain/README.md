@@ -42,14 +42,28 @@ claude mcp add vizlab -- ~/projects/vizpow/vizbrain/.venv/bin/vizbrain mcp
 
 Tools: `list_lab_devices`, `wled_set`, `keyboard_effect`, `keyboard_flash`, `bot_expression`, `bot_head`, `bot_gesture`, `bot_base_leds`, `bot_say`. Nothing can power off, reflash or re-network the bot.
 
+## What he can do (vizbrain 1.0)
+
+- **Talk:** tap the front of his head; replies start ~3.5 s after you stop talking and stream sentence by sentence.
+- **Lab:** WLED lights (all or by name), vizMac keyboard effects and flashes, his base LEDs, head moves, weather.
+- **Look:** "what am I holding?" takes a photo with his head camera.
+- **Notice you:** the bot reports arrivals (camera motion) and lean-ins (proximity). Arrivals are checked with a photo first, so he only greets a real person.
+- **Remember:** "remember that the pugs are Roosevelt and Maybe" lasts across days (`memory.json`).
+- **Routines:** "every weekday at 9, say good morning with the weather" (`routines.json`, checked every 20 s).
+- **Sounds:** synth cues while listening and thinking, chimes after light changes, a `play_sound` tool.
+
+Models: Claude Sonnet 5.5 for conversation (prompt caching keeps it ~0.2¢ a reply), Claude Haiku 4.5 for arrival checks and lean-ins. Room scanning runs on the bot and costs nothing. Spend shows on the typing page.
+
 ## How it fits together
 
 | Piece | What it does |
 |---|---|
-| `server.py` | HTTP API on :4050 (`/v1/voice`, `/v1/audio/<id>`, `/v1/text`, `/v1/health`, `/v1/log`), Bonjour `_vizbrain._tcp` |
+| `server.py` | HTTP API on :4050 (`/v1/voice`, `/v1/audio/<id>`, `/v1/text`, `/v1/event`, `/v1/health`, `/v1/log`), event handling, routine scheduler, Bonjour `_vizbrain._tcp` |
 | `brain.py` | Claude conversation (Sonnet 5.5, tool loop), or the offline stand-in |
 | `speech.py` | whisper (mlx) to hear, macOS `say` to speak (24 kHz PCM), one voice per personality |
 | `tools.py` | The tool registry shared by the brain and MCP |
+| `memory.py` | Remembered facts and scheduled routines (JSON next to settings.json, reloaded when edited) |
+| `usage.py` | Daily Claude spend (`usage.json`) |
 | `bot.py`, `lab.py` | Clients for the vizBot, WLED and vizMac APIs |
 | `mcp_server.py` | `vizlab` MCP server over stdio |
 

@@ -1,14 +1,27 @@
 # vizBot Brain — LLM Voice, Lab Control and Senses
 
-**Status:** Stages 0–1 built and verified on hardware (no API key yet); Stage 2 tools built
+**Status:** **1.0 shipped** (October 1, 2026): Stages 0–2, a camera/proximity version of Stage 3, memory and routines, in firmware `v3.6.0` + vizbrain `1.0.0`. The LD2412 radar (full Stage 3) is the next sprint.
 **Started:** October 1, 2026
-**Current production version:** `vizbot-stackchan-v3.4.2`
-**First firmware release from this plan:** `vizbot-stackchan-v3.5.0` (Stage 1, voice)
+**Released in:** `v3.6.0` (all boards; voice on Stackchan) with vizbrain `1.0.0`
 **Companion overview:** [vizBot Brain — LLM Plan](https://claude.ai/code/artifact/80c62773-0978-4fab-8dd5-f3c01ebb9964) (plain-language summary, diagrams, cost tables)
 
 ---
 
 ## Build log
+
+### 1.0 — what shipped
+
+| Area | In 1.0 |
+|---|---|
+| Talk | Front head tap → listen → Claude Sonnet 5.5 → spoken reply with lip-sync; ~3.5 s from end of speech to first sound |
+| Lab | WLED lights (all or by name), vizMac keyboard effects and flashes, base LEDs, head moves and gestures, weather |
+| Claude Code | `vizlab` MCP server with the same tools |
+| Senses (Stage 3 lite) | Head camera: `look` tool ("what am I holding?"); arrival detection (on-device motion, flicker mask, then a photo check so he only greets a real person); proximity lean-in reactions |
+| Memory & routines | `remember`/`forget` facts across days; scheduled routines ("weekdays at 9, good morning with the weather") |
+| Sound | Synth cues while listening and thinking, confirm/error chimes for lab actions, shutter, `play_sound` tool |
+| Ops | vizbrain runs at login (launchd), key in the Keychain, spend tracking, web panel Brain card, `/brain/status` timings |
+| Cost | Sonnet 5.5 for conversation with prompt caching (~0.2¢ per reply); Haiku 4.5 for arrival checks and lean-ins; room scanning is free (on-device) |
+| Not in 1.0 | LD2412 radar, wake word, bare CoreS3 voice, Kokoro voices |
 
 ### October 1, 2026 — Stages 0, 1 and 2 (tools) built
 

@@ -79,7 +79,7 @@ driver bring-up planned for Phase 2+.
 | `/bot/head/recenter` | 2 |
 | `/bot/base_leds/set` | 2 |
 | `/bot/battery/status` | 2 |
-| `/bot/photo/capture` | 4 |
+| `/bot/photo/capture` | done in 3.6.0 (JPEG) |
 | `/bot/photos` | 4 |
 | `/bot/photo/get` | 4 |
 | `/bot/photo/delete` | 4 |
@@ -386,6 +386,19 @@ mDNS query for `_vizbrain._tcp`.
 **Gestures on voice builds.** Front tap = talk (tap again to cancel), back tap = shake,
 2 s hold = chill. The middle pad is ignored: a finger there also maxes a neighbour pad.
 
+**Senses** (`stackchan_camera.h`, polled by `voiceTask` while idle):
+
+- **Camera.** GC0308 on the CoreS3 (M5's pin map). The internal I2C bus is released for
+  `esp_camera_init` and taken back. `GET /bot/photo/capture` returns a QVGA JPEG.
+- **Arrivals.** Every 0.5 s the frame is reduced to a 32x24 luma grid. Cells that change
+  all the time (LED strips, screens) are learned and ignored; a whole-view change (head
+  turning, lights) is ignored; frames during head moves are skipped (`scHeadBusyUntilMs`).
+  Sustained motion after 3 quiet minutes POSTs `{"type":"arrival"}` to vizbrain, which
+  takes a photo and only greets if someone is in it.
+- **Lean-in.** The proximity sensor's near edge POSTs `{"type":"lean_in"}` (3 min cooldown).
+- **Sounds.** Curious beep before listening (recording waits for it), typing while
+  thinking, error/dismiss cues, shutter on photos.
+
 ## vizCloud Integration
 
 HTTPS to a DigitalOcean App Platform server:
@@ -449,7 +462,7 @@ the board portion of the name comes from the env name.
 
 | Version | Boards | Notes |
 |---|---|---|
-| `3.6.0` | all (voice: stackchan) | **vizBot Brain 1.0.** Voice with vizbrain: front-tap push-to-talk, streamed spoken replies with lip-sync, `/brain/*` endpoints, Brain card in the web panel. |
+| `3.6.0` | all (voice + camera: stackchan) | **vizBot Brain 1.0.** Voice with vizbrain: front-tap push-to-talk, streamed spoken replies with lip-sync, `/brain/*` endpoints, Brain card in the web panel. GC0308 camera (`/bot/photo/capture`, arrival detection), proximity lean-in events, synth cues. |
 | `3.0.0-dev` | all | vizBot 3.0 line in progress — adds StackChan flagship (`stackchan` env). |
 | `2.2.1` | m5cores3 | Correct `flash_size` in merged `-factory.bin`. |
 | `2.2.0` | m5cores3 | SAM2695 MIDI synth, 37 built-in sequences. |
