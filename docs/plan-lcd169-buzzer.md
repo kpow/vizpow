@@ -17,8 +17,7 @@ from the existing `BotSounds` sequencer so the 1.69 chirps on a few interactions
 - Passive = needs a square wave (LEDC `ledcWriteTone`), not just HIGH.
 - Waveshare FAQ: leaving the buzzer pin floating keeps the buzzer drawing current,
   loading the LDO and heating the board. **Firmware never touches GPIO42 today**, so it
-  floats. Possibly related to [[lcd169-wifi-tx-power]] (WiFi fails at 19.5 dBm) — worth
-  re-testing TX power after step 1.
+  floated before v3.7.1. Ruled out as the cause of the 19.5 dBm WiFi failure (step 5).
 
 Source: https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.69
 
@@ -72,4 +71,10 @@ Later: notifications / cloud command alert, timer/alarm, shake rattle.
       brightness sheet), Sound toggle, Volume slider (previews a boop while dragging). Dock
       Light tile still goes straight to brightness. Verified on device via /debug/touch +
       /debug/screen; toggle and slider persist through /state. v3.7.5.
-- [ ] Step 5: WiFi TX power retest at 19.5 dBm, heat check, render-loop check.
+- [x] Step 5 WiFi: 19.5 dBm with buzzer pin held LOW = 0/6 connects (same silent
+      no-associate -> AP fallback as before); 15 dBm = 5/5. The floating buzzer pin is
+      NOT the 19.5 dBm cause. 15 dBm stays.
+- [x] Step 5 stress: 6 songs + 21 injected gestures + 12 volume changes in ~45 s — no
+      panic/reset on serial, bot responsive after.
+- [ ] Step 5 heat: compare board temperature by touch vs. pre-3.7.1 (needs Kevin).
+- [ ] Idle chirp heard in the wild (quiet hours 22:00-08:00, so daytime).
