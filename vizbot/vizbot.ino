@@ -64,7 +64,7 @@
 #include "settings.h"
 #if defined(TOUCH_ENABLED)
 #include "touch_control.h"
-#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
+#ifdef HAS_BASE_LEDS
 #include "stackchan_leds.h"
 #endif
 #ifdef BOARD_HAS_FACES_BASE
@@ -407,6 +407,10 @@ void setup() {
   botSounds.init();   // CoreS3 does this in the boot sequence's sensor stage
   #endif
 
+  #ifdef HAS_BASE_LEDS
+  scLeds.init();      // state only (no hardware); before loadSettings() so saved ring values stick
+  #endif
+
   // Load persistent settings from NVS (brightness, palette, etc.) — after
   // botSounds.init(), which would otherwise reset the saved volume
   loadSettings();
@@ -444,13 +448,10 @@ void setup() {
   // when WiFi signal is marginal. First sync happens ~2s after WiFi task starts.
 
   // Initialize StackChan base LED effects + head touch + idle servo
-  #ifdef BOARD_HAS_FACES_BASE
-  // boot_sequence.h owns the stack-chan LED bring-up; on this base there is no
-  // expander to wait for, so the strips come up here in one call.
+  #if defined(BOARD_HAS_FACES_BASE) || defined(BOARD_HAS_RING_LEDS)
+  // boot_sequence.h owns the stack-chan LED bring-up; the Faces strips and the
+  // 1.69 ring have no expander to wait for, so they come up here in one call.
   scInitBaseLeds();
-  #endif
-  #if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
-  scLeds.init();
   #endif
   #ifdef BOARD_HAS_STACKCHAN_BASE
   scTouch_state.init();
@@ -670,8 +671,13 @@ void loop() {
   }
 
   // Update StackChan base LED ring effects
-  #if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
-  scLeds.update();
+  #ifdef HAS_BASE_LEDS
+  {
+    uint32_t t0 = micros();
+    scLeds.update();
+    uint32_t us = micros() - t0;
+    if (us > scLeds.updateMaxUs) scLeds.updateMaxUs = us;
+  }
   #endif
 
   #ifdef BOARD_HAS_FACES_BASE

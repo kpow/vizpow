@@ -971,7 +971,7 @@ static void uiBuildRows(uint8_t cat) {
       snprintf(buf, sizeof(buf), "%u%%", (unsigned)((lcdBrightness * 100 + 127) / 255));
 #if UI_LANDSCAPE
       uiAddRow("Screen", ROW_SLIDER, RK_SCREEN, buf, false, lcdBrightness / 255.0f);
-#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
+#ifdef HAS_BASE_LEDS
       if (sysStatus.scBaseLedsReady) {
         snprintf(buf, sizeof(buf), "%u%%", (unsigned)(scLeds.brightness * 100 / 255));
         uiAddRow("Base LEDs", ROW_SLIDER, RK_BASE_LEDS, buf, false, scLeds.brightness / 255.0f);
@@ -985,6 +985,13 @@ static void uiBuildRows(uint8_t cat) {
       uiAddRow("Reactivity", ROW_SLIDER, RK_REACT, buf, false, audioDrama / 200.0f);
 #else
       uiAddRow("Screen", ROW_NAV, RK_SCREEN, buf);
+#ifdef BOARD_HAS_RING_LEDS
+      if (sysStatus.scBaseLedsReady) {
+        snprintf(buf, sizeof(buf), "%u%%", (unsigned)(scLeds.brightness * 100 / 255));
+        uiAddRow("Ring", ROW_SLIDER, RK_BASE_LEDS, buf, false, scLeds.brightness / 255.0f);
+        uiAddRow("Ring mode", ROW_STEP, RK_LED_MODE, SC_LED_MODE_NAMES[scLeds.mode % SC_LED_MODE_COUNT]);
+      }
+#endif
 #ifdef HAS_SOUND
       uiAddRow("Sound", ROW_TOGGLE, RK_SOUND, "", botSounds.enabled);
       snprintf(buf, sizeof(buf), "%u%%", (unsigned)(botSounds.volume * 100 / 255));
@@ -1469,9 +1476,10 @@ static void uiRowAction(uint8_t i, int16_t x) {
       uiOpenSheet(UI_LIGHT, UI_CAT);
 #endif
       break;
-#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
+#ifdef HAS_BASE_LEDS
     case RK_LED_MODE:
       scLeds.mode = (scLeds.mode + SC_LED_MODE_COUNT + dir) % SC_LED_MODE_COUNT;
+      markSettingsDirty();
       break;
 #endif
 #ifdef HAS_SOUND
@@ -1615,8 +1623,11 @@ static void uiSliderTo(uint8_t row, int16_t x) {
   float f = constrain((x - UI_ROW_L - 8) / (float)(UI_ROW_R - UI_ROW_L - 16), 0.0f, 1.0f);
   switch (uiRows[row].key) {
     case RK_SCREEN: uiSetBrightPct(max(5, (int)lroundf(f * 100))); break;
-#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
-    case RK_BASE_LEDS: scLeds.brightness = (uint8_t)lroundf(f * 255); break;
+#ifdef HAS_BASE_LEDS
+    case RK_BASE_LEDS:
+      scLeds.brightness = (uint8_t)lroundf(f * 255);
+      markSettingsDirty();
+      break;
 #endif
 #ifdef HAS_SOUND
     case RK_VOLUME:

@@ -86,6 +86,14 @@ void loadSettings() {
   timezoneTZ[sizeof(timezoneTZ) - 1] = '\0';
   applyTimezone();
 
+  #ifdef BOARD_HAS_RING_LEDS
+  // Ring defaults come from scLeds.init(), which setup() runs before this
+  scLeds.mode       = prefs.getUChar("ringMode", scLeds.mode);
+  if (scLeds.mode >= SC_LED_MODE_COUNT) scLeds.mode = SC_LED_MODE_SCREEN;
+  scLeds.brightness = prefs.getUChar("ringBri",  scLeds.brightness);
+  scLeds.speed      = prefs.getUChar("ringSpd",  scLeds.speed);
+  #endif
+
   #ifdef HAS_SOUND
   botSounds.enabled   = prefs.getBool("sndOn", true);
   botSounds.volume    = prefs.getUChar("sndVol", 120);
@@ -146,6 +154,11 @@ void saveSettings() {
   prefs.putString("wLon",   weatherLon);
   prefs.putString("tz",     timezoneTZ);
 
+  #ifdef BOARD_HAS_RING_LEDS
+  prefs.putUChar("ringMode", scLeds.mode);
+  prefs.putUChar("ringBri",  scLeds.brightness);
+  prefs.putUChar("ringSpd",  scLeds.speed);
+  #endif
   #ifdef HAS_SOUND
   prefs.putBool ("sndOn",   botSounds.enabled);
   prefs.putUChar("sndVol",  botSounds.volume);

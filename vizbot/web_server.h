@@ -30,9 +30,8 @@ extern CRGBPalette16 currentPalette;
 #include "stackchan_leds.h"
 #include "stackchan_touch.h"
 #endif
-#ifdef BOARD_HAS_FACES_BASE
-#include "faces_base.h"
-#include "stackchan_leds.h"
+#if defined(BOARD_HAS_FACES_BASE) || defined(BOARD_HAS_RING_LEDS)
+#include "stackchan_leds.h"   // pulls in faces_base.h / ring_leds.h
 #endif
 
 // Web interface HTML
@@ -320,7 +319,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       </div>
 
       <div class="card" id="facesCard" style="display:none">
-        <h2 class="shdr" onclick="tgl('secFaces')">Faces Base <span class="chv">&#9662;</span></h2>
+        <h2 class="shdr" onclick="tgl('secFaces')"><span id="fcTitle">Faces Base</span> <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secFaces">
           <span class="lbl">Base LEDs <span id="fcLedCount" style="opacity:.6"></span></span>
           <select id="fcLedMode" onchange="fcSetLedMode(this.value)" class="sel" style="margin-top:6px"></select>
@@ -334,7 +333,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             <button onclick="fcSolid(0,60,255)" class="flex1">Blue</button>
             <button onclick="fcSolid(0,0,0)" class="flex1">Off</button>
           </div>
-          <div class="hint" style="margin-top:10px">The strips share GPIO13 with the I2S bit clock, so Audio FX takes them over while it runs. Turn audio off to get the LEDs back.</div>
+          <div class="hint" id="fcHint" style="margin-top:10px">The strips share GPIO13 with the I2S bit clock, so Audio FX takes them over while it runs. Turn audio off to get the LEDs back.</div>
         </div>
       </div>
 
@@ -734,7 +733,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           renderEmojiQueue();
         }
         if (state.stackchan) scUpdateFromState(state);
-        if (state.faces) fcUpdateFromState(state);
+        if (state.faces || state.ring) fcUpdateFromState(state);
         render();
       } catch(e) {}
     }
@@ -966,7 +965,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     }
 
     // ---- Faces base controls (LEDs only: this base has no head) ----
-    const fcLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood','audio'];
+    const fcLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood','audio','screen'];
     let fcLedMode = 2;
 
     function fcSetLedMode(v) {
@@ -995,7 +994,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     }
 
     // ---- StackChan controls ----
-    const scLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood','audio'];
+    const scLedModes = ['off','breathing','rainbow','chase','fire','twinkle','pulse','aurora','mood','audio','screen'];
     let scLedMode = 2;
 
     function scPreset(name) { api('/bot/head/preset?name=' + name); }
@@ -1074,9 +1073,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     }
 
     function fcUpdateFromState(s) {
-      if (!s.faces) return;
+      const f = s.faces || s.ring;
+      if (!f) return;
       document.getElementById('facesCard').style.display = '';
-      const f = s.faces;
+      if (s.ring) {   // 1.69 interior ring reuses this card
+        document.getElementById('fcTitle').textContent = 'LED Ring';
+        document.getElementById('fcHint').style.display = 'none';
+      }
       if (f.ledCount) {
         document.getElementById('fcLedCount').textContent = '(' + f.ledCount + ')';
       }
@@ -1249,13 +1252,18 @@ void handleState() {
                   ",\"soundVolume\":" + String(botSounds.volume) +
                 "}" +
 #endif
-#ifdef BOARD_HAS_FACES_BASE
+#if defined(BOARD_HAS_FACES_BASE) || defined(BOARD_HAS_RING_LEDS)
+  #ifdef BOARD_HAS_RING_LEDS
+                ",\"ring\":{"
+  #else
                 ",\"faces\":{"
+  #endif
                   "\"baseLeds\":" + String(sysStatus.scBaseLedsReady ? "true" : "false") +
                   ",\"ledMode\":" + String(scLeds.mode) +
                   ",\"ledBrightness\":" + String(scLeds.brightness) +
                   ",\"ledSpeed\":" + String(scLeds.speed) +
                   ",\"ledCount\":" + String(SC_BASE_LED_COUNT) +
+                  ",\"updateMaxUs\":" + String(scLeds.updateMaxUs) +
                 "}" +
 #endif
 #ifdef BOARD_HAS_STACKCHAN_BASE
@@ -1299,6 +1307,9 @@ void handleState() {
                 "}" +
 #endif
                 "}";
+#if defined(BOARD_HAS_FACES_BASE) || defined(BOARD_HAS_RING_LEDS)
+  scLeds.updateMaxUs = 0;   // reported above; next read covers a fresh window
+#endif
   server.send(200, "application/json", json);
 }
 
@@ -1949,7 +1960,7 @@ void handleSchedule() {
 // their backend. These two handlers were inside the stack-chan block, which is
 // full of servo code that cannot compile without that hardware — so they live
 // out here instead, and each base gets the same LED control surface.
-#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
+#ifdef HAS_BASE_LEDS
 
 // POST /bot/base_leds/set?r=N&g=N&b=N  OR  ?index=N&r=N&g=N&b=N
 void handleScBaseLeds() {
@@ -1970,7 +1981,7 @@ void handleScBaseLeds() {
     scSetBaseLedColor(idx, r, g, b);
     scRefreshBaseLeds();
   } else {
-#ifdef BOARD_HAS_FACES_BASE
+#ifndef BOARD_HAS_STACKCHAN_BASE
     scShowBaseLedColor(r, g, b);
 #else
     scSetAllBaseLeds(r, g, b);
@@ -1987,7 +1998,7 @@ void handleScBaseLeds() {
   server.send(200, "application/json", json);
 }
 
-// POST /bot/base_leds/mode?mode=N (0-8) or ?name=rainbow etc.
+// POST /bot/base_leds/mode?mode=N (0-10) or ?name=rainbow etc.
 // Optional: ?brightness=N (0-255), ?speed=N (0-255)
 void handleScBaseLedMode() {
   if (!sysStatus.scBaseLedsReady) {
@@ -2013,6 +2024,7 @@ void handleScBaseLedMode() {
   if (server.hasArg("speed")) {
     scLeds.speed = constrain(server.arg("speed").toInt(), 0, 255);
   }
+  markSettingsDirty();   // only the 1.69 ring persists these; harmless elsewhere
 
   String json = "{\"ok\":true,\"mode\":";
   json += scLeds.mode;
@@ -2487,8 +2499,8 @@ void setupWebServer() {
   #endif
 
   // StackChan stub endpoints (501 until driver bring-up)
-  #if defined(BOARD_HAS_FACES_BASE)
-  // This base has strips but no head: LEDs only, no servo or touch endpoints.
+  #if defined(BOARD_HAS_FACES_BASE) || defined(BOARD_HAS_RING_LEDS)
+  // Strips but no head: LEDs only, no servo or touch endpoints.
   server.on("/bot/base_leds/set", handleScBaseLeds);
   server.on("/bot/base_leds/mode", handleScBaseLedMode);
   #endif

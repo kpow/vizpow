@@ -2,6 +2,7 @@
 #define SYSTEM_STATUS_H
 
 #include <Arduino.h>
+#include "config.h"   // HAS_BASE_LEDS is derived there, not a build flag
 
 // ============================================================================
 // System Status — Tracks what subsystems are alive
@@ -28,11 +29,11 @@ struct SystemStatus {
   bool proxLightReady;   // Core S3 proximity/light sensor initialized
   bool psramAvailable;   // PSRAM detected at boot
   bool ntpSynced;            // NTP time obtained
-  // Addressable base strip. Both bases have one — a 12-LED WS2812C ring behind
-  // the stack-chan IO expander, or ten SK6812 on GPIO13 on a Faces Bottom3 —
-  // and the shared LED effect engine gates on this flag, so it belongs outside
-  // the stack-chan-only block below.
-#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
+  // Addressable base strip — a 12-LED WS2812C ring behind the stack-chan IO
+  // expander, ten SK6812 on GPIO13 on a Faces Bottom3, or the 1.69's interior
+  // ring on GPIO17. The shared LED effect engine gates on this flag, so it
+  // belongs outside the stack-chan-only block below.
+#ifdef HAS_BASE_LEDS
   bool scBaseLedsReady;
 #endif
   // StackChan base subsystems (only meaningful when BOARD_HAS_STACKCHAN_BASE)
