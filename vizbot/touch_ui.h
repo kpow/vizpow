@@ -988,8 +988,8 @@ static void uiBuildRows(uint8_t cat) {
 #ifdef BOARD_HAS_RING_LEDS
       if (sysStatus.scBaseLedsReady) {
         snprintf(buf, sizeof(buf), "%u%%", (unsigned)(scLeds.brightness * 100 / 255));
-        uiAddRow("Ring", ROW_SLIDER, RK_BASE_LEDS, buf, false, scLeds.brightness / 255.0f);
-        uiAddRow("Ring mode", ROW_STEP, RK_LED_MODE, SC_LED_MODE_NAMES[scLeds.mode % SC_LED_MODE_COUNT]);
+        uiAddRow("LEDs", ROW_SLIDER, RK_BASE_LEDS, buf, false, scLeds.brightness / 255.0f);
+        uiAddRow("LED mode", ROW_STEP, RK_LED_MODE, SC_LED_MODE_NAMES[scLeds.mode % SC_LED_MODE_COUNT]);
       }
 #endif
 #ifdef HAS_SOUND
