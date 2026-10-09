@@ -23,6 +23,8 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <esp_wifi.h>   // esp_wifi_set_max_tx_power (WiFi.setTxPower no-ops before start event)
+#include <mbedtls/platform.h>
+#include <esp_heap_caps.h>
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ESPmDNS.h>
@@ -246,7 +248,9 @@ void introAnimation() {
 
 void readIMU() {
   #ifdef TARGET_CORES3
-  // BMI270 via M5Unified — no I2C mutex needed (M5Unified manages internally)
+  // BMI270 via M5Unified — no I2C mutex needed (M5Unified manages internally),
+  // but stay off the bus while the camera configures its sensor.
+  if (i2cInLongHold()) return;
   M5.Imu.getAccel(&accelX, &accelY, &accelZ);
   M5.Imu.getGyro(&gyroX, &gyroY, &gyroZ);
   #else
@@ -319,7 +323,19 @@ void toggleWifiAP() {
   }
 }
 
+// TLS memory goes to PSRAM. The prebuilt framework sets
+// CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC, so every HTTPS connection (cloud sync each
+// minute, weather, updates) took ~44 KB of internal RAM for its 16 KB record
+// buffers and handshake state — the RAM WiFi, DMA and the camera need. This is
+// what CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC does, set at runtime. Boards without
+// PSRAM fall back to internal RAM.
+static void* tlsCalloc(size_t n, size_t size) {
+  void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p ? p : heap_caps_calloc(n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
 void setup() {
+  mbedtls_platform_set_calloc_free(tlsCalloc, heap_caps_free);   // before any TLS
   Serial.begin(115200);
   delay(500);
 

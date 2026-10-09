@@ -88,7 +88,8 @@ struct ProxLightState {
 
   // Call each frame — rate-limited internally
   void update() {
-    if (!initialized) return;
+    extern bool i2cInLongHold();
+    if (!initialized || i2cInLongHold()) return;   // camera is configuring its sensor
 
     unsigned long now = millis();
     if (now - lastUpdateMs < PROX_UPDATE_MS) return;

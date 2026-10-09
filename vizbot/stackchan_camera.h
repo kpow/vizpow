@@ -7,12 +7,15 @@
 #include <M5Unified.h>
 #include <esp_camera.h>
 #include <img_converters.h>
+#include <Preferences.h>
+#include "soc/gdma_struct.h"
+#include "soc/lcd_cam_struct.h"
+#include "soc/system_struct.h"
 #include "config.h"
 #include "system_status.h"
 
 // ============================================================================
-// GC0308 camera (CoreS3) — photos for vizbrain's `look` tool, and a cheap
-// motion check that notices when someone arrives at the desk.
+// GC0308 camera (CoreS3) — photos for vizbrain's `look` tool, on demand.
 // ============================================================================
 // Pins and settings are M5's own (m5stack/M5CoreS3 src/utility/GC0308.cpp).
 // The sensor's SCCB control bus IS the CoreS3 internal I2C (SDA 12 / SCL 11),
@@ -62,13 +65,36 @@ struct ScCamMotion {
 };
 static ScCamMotion scCamMotion;
 
-inline bool scInitCamera() {
+extern bool i2cAcquire(uint32_t timeoutMs);   // task_manager.h
+extern void i2cRelease();
+extern void i2cSetLongHold(bool on);
+
+static bool scCamDetected = false;           // sensor answered at boot
+static volatile bool scCamRunning = false;   // driver up (only during a photo)
+
+#define SC_CAM_SETTLE_FRAMES 8               // frames dropped after start so exposure settles
+
+// Saved switch (NVS "camOn", default on). Off = no photos, camera never started.
+// /bot/camera/enable sets it; applies at once.
+inline bool scCameraEnabledPref() {
+  Preferences p;
+  if (!p.begin("vizbot", true)) return true;
+  bool on = p.getBool("camOn", true);
+  p.end();
+  return on;
+}
+
+inline void scCameraApplyEnabled(bool on) {
+  sysStatus.scCameraReady = scCamDetected && on;
+}
+
+static camera_config_t scCameraConfig() {
   camera_config_t c = {};
   c.pin_pwdn = -1;
   c.pin_reset = -1;
   c.pin_xclk = -1;
-  c.pin_sccb_sda = 12;
-  c.pin_sccb_scl = 11;
+  c.pin_sccb_sda = -1;   // -1 = reuse the bus already on sccb_i2c_port (SDA 12 / SCL 11)
+  c.pin_sccb_scl = -1;
   c.pin_d7 = 47;
   c.pin_d6 = 48;
   c.pin_d5 = 16;
@@ -86,37 +112,136 @@ inline bool scInitCamera() {
   c.pixel_format = PIXFORMAT_RGB565;
   c.frame_size = FRAMESIZE_QVGA;
   c.jpeg_quality = 0;
-  c.fb_count = 2;
+  c.fb_count = 1;
   c.fb_location = CAMERA_FB_IN_PSRAM;
-  c.grab_mode = CAMERA_GRAB_LATEST;
-  c.sccb_i2c_port = -1;
+  c.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  c.sccb_i2c_port = 1;   // M5's internal bus (I2C_NUM_1 on the S3)
+  return c;
+}
 
-  M5.In_I2C.release();
+// GDMA peripheral id of LCD_CAM in a channel's peri_sel register (63 = none).
+#define SC_GDMA_PERI_LCD_CAM 5
+#define SC_GDMA_PERI_NONE    63
+
+// esp32-camera connects its RX channel to LCD_CAM by writing peri_sel directly
+// (it never calls gdma_connect), and ll_cam_deinit() frees the channel without
+// clearing it. The channel is then still wired to the camera. The next start
+// gets whichever channel is free; when that is a different one (the mic's I2S
+// channel is free during a voice turn), two channels select LCD_CAM, the old
+// one takes the data and the new one never completes a buffer:
+// "cam_hal: FB-SIZE: 0 != 153600" and no frame. Disconnect after every stop.
+static void scCameraReleaseDma() {
+  for (int i = 0; i < SOC_GDMA_PAIRS_PER_GROUP_MAX; i++) {
+    if (GDMA.channel[i].in.peri_sel.sel == SC_GDMA_PERI_LCD_CAM) {
+      GDMA.channel[i].in.peri_sel.sel = SC_GDMA_PERI_NONE;
+    }
+  }
+}
+
+// Start the driver; the sensor is set up over M5's I2C port 1 bus.
+static esp_err_t scCameraStart() {
+  if (scCamRunning) return ESP_OK;
+  camera_config_t c = scCameraConfig();
+  scCameraReleaseDma();    // a failed init frees its channel the same leaky way
+  // PSRAM DMA mode would save the 32 KB internal bounce buffer, but this
+  // driver hands over PSRAM-mode frames unchecked and they come out as shifted
+  // noise (tried with and without GDMA burst). Default mode checks each frame.
+  esp_camera_set_psram_mode(false);
+  i2cSetLongHold(true);    // other I2C users wait for the sensor setup, not barge in
+  bool held = i2cAcquire(1000);
   esp_err_t err = esp_camera_init(&c);
-  M5.In_I2C.begin();    // take the internal bus back for touch, IMU, PMIC, head sensors
+  if (held) i2cRelease();
+  i2cSetLongHold(false);
+  scCamRunning = (err == ESP_OK);
+  return err;
+}
 
-  sysStatus.scCameraReady = (err == ESP_OK);
-  if (!sysStatus.scCameraReady) {
+// Stop the driver and free its buffers. The camera only leaves the shared
+// bus; M5 keeps it.
+static void scCameraStop() {
+  if (!scCamRunning) return;
+  i2cSetLongHold(true);
+  bool held = i2cAcquire(1000);
+  esp_camera_deinit();
+  scCameraReleaseDma();
+  scCamRunning = false;
+  if (held) i2cRelease();
+  i2cSetLongHold(false);
+}
+
+inline bool scInitCamera() {
+  scCamLock = xSemaphoreCreateMutex();
+  esp_err_t err = scCameraStart();
+  scCamDetected = (err == ESP_OK);
+  scCameraStop();
+  scCameraApplyEnabled(scCameraEnabledPref());
+  scCamMotion.lastMotionMs = millis();   // assume someone's here at boot: no instant "arrival"
+  if (!scCamDetected) {
     Serial.printf("  Camera: init failed (%s)\n", esp_err_to_name(err));
     return false;
   }
-  scCamLock = xSemaphoreCreateMutex();
-  scCamMotion.lastMotionMs = millis();   // assume someone's here at boot: no instant "arrival"
-  Serial.println("  Camera: GC0308 QVGA ready");
+  Serial.printf("  Camera: GC0308 QVGA, on demand%s\n", sysStatus.scCameraReady ? "" : " (disabled, camOn=0)");
   return true;
 }
 
-// JPEG of a fresh frame. The caller frees *out with free(). quality 1-100.
+// ---- DMA diagnostics (GET /bot/camera/diag) -------------------------------------
+// Register snapshot of all 5 GDMA channel pairs + LCD_CAM, taken at points in the
+// last photo. peri_sel: 0 SPI2, 1 SPI3, 2 UHCI0, 3 I2S0, 4 I2S1, 5 LCD_CAM, 6 AES,
+// 7 SHA, 8 ADC, 9 RMT, 63 none.
+static char scCamDiag[3072];
+static size_t scCamDiagLen = 0;
+
+static void scCamDiagf(const char* fmt, ...) {
+  if (scCamDiagLen >= sizeof(scCamDiag) - 1) return;
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(scCamDiag + scCamDiagLen, sizeof(scCamDiag) - scCamDiagLen, fmt, ap);
+  va_end(ap);
+  if (n > 0) scCamDiagLen = min(sizeof(scCamDiag) - 1, scCamDiagLen + (size_t)n);
+}
+
+static void scCamDiagSnap(const char* tag) {
+  scCamDiagf("[%s t=%lu core=%d] dmaClk=%d dmaRst=%d camCtrl1=%08lx lcInt ena=%08lx raw=%08lx\n",
+             tag, (unsigned long)millis(), xPortGetCoreID(),
+             (int)SYSTEM.perip_clk_en1.dma_clk_en, (int)SYSTEM.perip_rst_en1.dma_rst,
+             (unsigned long)LCD_CAM.cam_ctrl1.val, (unsigned long)LCD_CAM.lc_dma_int_ena.val,
+             (unsigned long)LCD_CAM.lc_dma_int_raw.val);
+  for (int i = 0; i < 5; i++) {
+    scCamDiagf("  ch%d in:sel=%lu conf0=%08lx ena=%08lx raw=%08lx link=%08lx state=%08lx | out:sel=%lu\n", i,
+               (unsigned long)GDMA.channel[i].in.peri_sel.val, (unsigned long)GDMA.channel[i].in.conf0.val,
+               (unsigned long)GDMA.channel[i].in.int_ena.val, (unsigned long)GDMA.channel[i].in.int_raw.val,
+               (unsigned long)GDMA.channel[i].in.link.val, (unsigned long)GDMA.channel[i].in.state.val,
+               (unsigned long)GDMA.channel[i].out.peri_sel.val);
+  }
+}
+
+// JPEG of a fresh frame: starts the camera, lets exposure settle, grabs one
+// frame and stops it again (~1 s). The caller frees *out with free(). quality 1-100.
 inline bool scCameraJpeg(uint8_t** out, size_t* len, uint8_t quality = 80) {
   if (!sysStatus.scCameraReady || !scCamLock) return false;
-  if (xSemaphoreTake(scCamLock, pdMS_TO_TICKS(2000)) != pdTRUE) return false;
-  // GRAB_LATEST keeps the newest frame, but drop one so the shot is from now.
-  camera_fb_t* fb = esp_camera_fb_get();
-  if (fb) { esp_camera_fb_return(fb); fb = esp_camera_fb_get(); }
+  if (xSemaphoreTake(scCamLock, pdMS_TO_TICKS(3000)) != pdTRUE) return false;
   bool ok = false;
-  if (fb) {
-    ok = frame2jpg(fb, quality, out, len);
-    esp_camera_fb_return(fb);
+  esp_err_t err = scCameraStart();
+  if (err != ESP_OK) {
+    Serial.printf("[Camera] start failed (%s), free heap %u, max block %u\n", esp_err_to_name(err),
+                  (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+  } else {
+    scCamDiagLen = 0;
+    scCamDiagf("heap=%u maxBlock=%u\n", (unsigned)ESP.getFreeHeap(),
+               (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    scCamDiagSnap("started");
+    camera_fb_t* fb = nullptr;
+    for (int i = 0; i <= SC_CAM_SETTLE_FRAMES; i++) {
+      fb = esp_camera_fb_get();          // the driver waits up to 4 s for a frame
+      if (!fb) { scCamDiagf("frame %d: none\n", i); scCamDiagSnap("no-frame"); break; }
+      if (i == 0) scCamDiagSnap("frame0");
+      if (i < SC_CAM_SETTLE_FRAMES) { esp_camera_fb_return(fb); fb = nullptr; }
+    }
+    if (fb) {
+      ok = frame2jpg(fb, quality, out, len);
+      esp_camera_fb_return(fb);
+    }
+    scCameraStop();
   }
   xSemaphoreGive(scCamLock);
   return ok;
@@ -124,7 +249,7 @@ inline bool scCameraJpeg(uint8_t** out, size_t* len, uint8_t quality = 80) {
 
 // One motion check. Returns true when this check counts as an arrival.
 inline bool scCameraMotionTick() {
-  if (!sysStatus.scCameraReady || scCamMotion.paused) return false;
+  if (!scCamRunning || scCamMotion.paused) return false;
   uint32_t now = millis();
   if ((int32_t)(scHeadBusyUntilMs - now) > 0) {   // head moving: view is shifting
     scCamMotion.havePrev = false;

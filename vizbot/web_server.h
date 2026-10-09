@@ -2181,6 +2181,26 @@ void handleScPowerOff() {
   M5.Power.powerOff();
 }
 
+// GET /bot/camera/enable[?on=0|1] — saved camera switch (photos on/off), applies at once.
+void handleScCameraEnable() {
+  Preferences p;
+  if (server.hasArg("on") && p.begin("vizbot", false)) {
+    p.putBool("camOn", server.arg("on") != "0");
+    p.end();
+  }
+  bool saved = scCameraEnabledPref();
+  scCameraApplyEnabled(saved);
+  String out = String("{\"enabled\":") + (saved ? "true" : "false") +
+               ",\"detected\":" + (scCamDetected ? "true" : "false") +
+               ",\"running\":" + (scCamRunning ? "true" : "false") + "}";
+  server.send(200, "application/json", out);
+}
+
+// GET /bot/camera/diag — DMA register snapshots from the last photo
+void handleScCameraDiag() {
+  server.send(200, "text/plain", String(scCamDiag, scCamDiagLen));
+}
+
 // Camera endpoints remain stubs (Phase 4)
 // GET /bot/photo/capture[?sound=0] → image/jpeg (QVGA). Used by vizbrain's `look` tool.
 void handleScPhotoCapture() {
@@ -2462,6 +2482,8 @@ void setupWebServer() {
   server.on("/bot/base_leds/set", handleScBaseLeds);
   server.on("/bot/base_leds/mode", handleScBaseLedMode);
   server.on("/bot/chill", handleScChillToggle);
+  server.on("/bot/camera/enable", handleScCameraEnable);
+  server.on("/bot/camera/diag", handleScCameraDiag);
   server.on("/bot/chill/minutes", handleScChillMinutes);
   server.on("/bot/photo/capture", handleScPhotoCapture);
   server.on("/bot/photos", handleScPhotoList);

@@ -101,10 +101,11 @@ class Bot:
         return self._get("/bot/sound", {"seq": SOUNDS[name]})
 
     def photo(self, shutter: bool = True) -> bytes:
-        """A fresh JPEG from the head camera (QVGA)."""
+        """A fresh JPEG from the head camera (QVGA). The camera starts per photo
+        (fw 3.6.10+), so allow for its ~1.3 s start."""
         url = f"http://{self.host}/bot/photo/capture" + ("" if shutter else "?sound=0")
         try:
-            with urllib.request.urlopen(url, timeout=6) as r:
+            with urllib.request.urlopen(url, timeout=10) as r:
                 if r.headers.get_content_type() != "image/jpeg":
                     raise BotError("camera not available")
                 return r.read()
