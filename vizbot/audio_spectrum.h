@@ -59,6 +59,22 @@ volatile bool voiceOwnsAudio = false;
 #define BEAT_REFRACTORY_MS    200      // min ms between beats
 #define BEAT_ENV_DECAY        0.92f    // beatEnv *= this each frame (~150ms decay at 30Hz)
 
+// Wake-word stream tap (voice_client.h). While the wake stream owns the mic it
+// is the only reader, and it hands each 512-sample chunk over here instead.
+// Written on Core 0, read on Core 1: wakeTapSeq is odd while a copy is in flight.
+volatile bool wakeTapActive = false;
+volatile uint32_t wakeTapSeq = 0;
+int16_t wakeTapBuf[FFT_SIZE];
+
+static bool wakeTapRead(int16_t* dst, uint32_t& lastSeq) {
+  uint32_t s1 = wakeTapSeq;
+  if ((s1 & 1) || s1 == lastSeq) return false;
+  memcpy(dst, wakeTapBuf, sizeof(wakeTapBuf));
+  if (wakeTapSeq != s1) return false;
+  lastSeq = s1;
+  return true;
+}
+
 struct AudioSpectrum {
   // --- PCM capture buffer ---
   int16_t pcmBuf[FFT_SIZE];
@@ -151,6 +167,7 @@ struct AudioSpectrum {
   }
 
   bool micRunning = false;
+  uint32_t tapSeq = 0;
 
   // Call each frame — rate-limited internally to ~30Hz
   void update() {
@@ -171,8 +188,12 @@ struct AudioSpectrum {
       return;
     }
 
-    // --- Capture mic samples (non-blocking DMA) ---
-    if (!M5.Mic.record(pcmBuf, FFT_SIZE, FFT_SAMPLE_RATE)) return;
+    // --- Capture mic samples (non-blocking DMA), or take the wake stream's ---
+    if (wakeTapActive) {
+      if (!wakeTapRead(pcmBuf, tapSeq)) return;
+    } else if (!M5.Mic.record(pcmBuf, FFT_SIZE, FFT_SAMPLE_RATE)) {
+      return;
+    }
 
     // --- Load PCM into FFT real buffer, zero imaginary ---
     for (int i = 0; i < FFT_SIZE; i++) {

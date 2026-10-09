@@ -2340,6 +2340,19 @@ void handleBrainStatus() {
   cam["lastMotionSecAgo"] = (millis() - scCamMotion.lastMotionMs) / 1000;
   cam["arrivals"] = scCamMotion.arrivals;
   cam["maskedCells"] = scCamMotion.maskedCells;
+  JsonObject wk = d["wake"].to<JsonObject>();
+  wk["enabled"] = wake.enabled;
+  wk["streaming"] = wake.active;
+  wk["gateOpen"] = wake.open;
+  wk["noiseRms"] = (int)wake.noise;
+  wk["rms"] = (int)wake.lastRms;
+  wk["host"] = wake.host;
+  wk["sent"] = wake.sent;
+  wk["sendFails"] = wake.sendFails;
+  wk["bursts"] = wake.bursts;
+  wk["wakes"] = wake.wakes;
+  wk["lastWakeSecAgo"] = wake.lastWakeMs ? (long)((millis() - wake.lastWakeMs) / 1000) : -1L;
+  wk["micRestarts"] = wake.micRestarts;
   d["psramFree"] = ESP.getFreePsram();
   String out;
   serializeJson(d, out);
@@ -2369,7 +2382,7 @@ void handleBrainLastWav() {
   }
 }
 
-// /brain/config?host=<ip[:port]|empty>&enabled=0|1
+// /brain/config?host=<ip[:port]|empty>&enabled=0|1&wake=0|1
 void handleBrainConfig() {
   if (server.hasArg("host")) {
     String h = server.arg("host");
@@ -2379,6 +2392,7 @@ void handleBrainConfig() {
     voice.resolved[0] = '\0';
   }
   if (server.hasArg("enabled")) voice.enabled = server.arg("enabled").toInt() != 0;
+  if (server.hasArg("wake")) wake.enabled = server.arg("wake").toInt() != 0;
   saveVoiceSettings();
   handleBrainStatus();
 }
@@ -2387,6 +2401,12 @@ void handleBrainConfig() {
 void handleBrainListen() {
   voiceOnTalkTap();
   server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// vizbrain heard the wake word: start a turn if idle (never cancels one).
+void handleBrainWake() {
+  if (voiceOnWake()) server.send(200, "application/json", "{\"ok\":true}");
+  else server.send(409, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
 }
 
 // Brain-initiated speech: /brain/play?id=<clip>&text=<bubble>&expr=<n>
@@ -2526,6 +2546,7 @@ void setupWebServer() {
   server.on("/brain/status", handleBrainStatus);
   server.on("/brain/config", handleBrainConfig);
   server.on("/brain/listen", handleBrainListen);
+  server.on("/brain/wake", handleBrainWake);
   server.on("/brain/play", handleBrainPlay);
   server.on("/brain/lastwav", handleBrainLastWav);
   #endif

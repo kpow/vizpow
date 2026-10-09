@@ -39,6 +39,9 @@ DEFAULTS: dict = {
     # Claude's built-in web search (about 1 cent per search, plus the result tokens).
     "web_search": True,
     "web_search_max_uses": 2,
+    # "Hey vizBot": score (0-1) the wake model must reach to start a turn.
+    "wake_enabled": True,
+    "wake_threshold": 0.5,
     "location": {"type": "approximate", "city": "Richmond", "region": "Virginia",
                  "country": "US", "timezone": "America/New_York"},
 }

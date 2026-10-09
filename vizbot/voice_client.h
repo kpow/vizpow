@@ -7,6 +7,7 @@
 #include <M5Unified.h>
 #include <Preferences.h>
 #include <ESPmDNS.h>
+#include <WiFiUdp.h>
 #include <ArduinoJson.h>
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
@@ -118,6 +119,34 @@ struct VoiceClient {
 
 VoiceClient voice;
 
+// Wake-word mic stream state (see "Wake-word mic stream" below).
+#define WAKE_UDP_PORT        4051
+#define WAKE_RING_CHUNKS     40       // 1.28 s of 32 ms chunks in PSRAM
+#define WAKE_PREROLL_CHUNKS  32       // ~1 s sent ahead of the chunk that opened the gate
+#define WAKE_HANGOVER_MS     1500     // quiet time that closes the gate
+#define WAKE_OPEN_RATIO      2.5f     // gate opens above 2.5x the noise floor
+#define WAKE_FLOOR_RMS       150.0f   // ...and never below this
+#define WAKE_BEAT_MS         5000
+#define WAKE_F_START 0x01
+#define WAKE_F_END   0x02
+#define WAKE_F_BEAT  0x04
+
+struct WakeStream {
+  bool     enabled = true;       // NVS "wakeOn"
+  bool     active = false;       // mic owned for streaming
+  bool     open = false;         // gate open: chunks are being sent
+  int16_t* ring = nullptr;
+  uint32_t queued = 0, done = 0; // chunk indices handed to the mic / analysed
+  uint32_t chunks = 0;           // analysed since the mic started
+  float    noise = 0, lastRms = 0;
+  uint32_t lastLoudMs = 0, lastBeatMs = 0, lastWakeMs = 0;
+  uint32_t sent = 0, sendFails = 0, bursts = 0, wakes = 0, micRestarts = 0;
+  char     host[64] = "";
+  WiFiUDP  udp;
+};
+
+WakeStream wake;
+
 // ---- Settings (NVS, same "vizbot" namespace as the rest) -------------------
 
 void loadVoiceSettings() {
@@ -126,6 +155,7 @@ void loadVoiceSettings() {
   String h = prefs.getString("brainHost", "");
   strncpy(voice.brainHost, h.c_str(), sizeof(voice.brainHost) - 1);
   voice.enabled = prefs.getBool("voiceOn", true);
+  wake.enabled = prefs.getBool("wakeOn", true);
   prefs.end();
 }
 
@@ -134,6 +164,7 @@ void saveVoiceSettings() {
   if (!prefs.begin("vizbot", false)) return;
   prefs.putString("brainHost", voice.brainHost);
   prefs.putBool("voiceOn", voice.enabled);
+  prefs.putBool("wakeOn", wake.enabled);
   prefs.end();
 }
 
@@ -659,6 +690,166 @@ static void voicePollSenses() {
   }
 }
 
+// ---- Wake-word mic stream ---------------------------------------------------------
+// While idle, the mic runs and every 32 ms chunk is checked against the room's
+// noise floor. When someone talks, the chunks (plus ~1 s of pre-roll) go to
+// vizbrain over UDP, which runs the "Hey vizBot" model and calls /brain/wake.
+// A quiet room sends nothing but a heartbeat every 5 s.
+//
+// Packet: "VZW1" | seq u32 (chunk index) | flags u8 | pad[3] | 512 x s16le.
+// Flags: WAKE_F_START first chunk of a burst, WAKE_F_END burst over (no
+// samples), WAKE_F_BEAT heartbeat (payload: noise RMS u16, no samples).
+//
+// The mic is shared: the stream stands aside while a turn runs and while the
+// speaker holds the shared I2S port. With Audio FX on, the stream is the mic's
+// only reader and feeds the analyzer through wakeTapBuf (audio_spectrum.h).
+
+static bool wakeShouldRun() {
+  return voice.enabled && wake.enabled && voice.state == VOICE_IDLE &&
+         !voice.listenRequested && !voice.playRequested &&
+         !M5.Speaker.isRunning() && WiFi.isConnected();
+}
+
+static void wakeStop() {
+  wakeTapActive = false;
+  wake.active = false;
+  wake.open = false;
+}
+
+static bool wakeStart() {
+  static uint32_t lastTryMs = 0;
+  if (lastTryMs && millis() - lastTryMs < 10000) return false;   // brain lookup backoff
+  lastTryMs = millis();
+  if (!wake.ring) {
+    wake.ring = (int16_t*)heap_caps_malloc(WAKE_RING_CHUNKS * VOICE_CHUNK * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    if (!wake.ring) return false;
+  }
+  if (!voiceResolveBrain()) return false;
+  const char* colon = strchr(voice.resolved, ':');
+  size_t len = colon ? (size_t)(colon - voice.resolved) : strlen(voice.resolved);
+  if (len >= sizeof(wake.host)) return false;
+  memcpy(wake.host, voice.resolved, len);
+  wake.host[len] = '\0';
+  if (!M5.Mic.isRunning()) M5.Mic.begin();
+  audioSpectrum.micRunning = M5.Mic.isRunning();
+  wake.queued = wake.done = wake.chunks = 0;
+  wake.noise = 0;
+  wake.open = false;
+  wake.active = true;
+  wakeTapActive = true;
+  lastTryMs = 0;
+  return true;
+}
+
+static void wakeSend(uint32_t seq, uint8_t flags, const void* payload, size_t len) {
+  uint8_t hdr[12] = {'V', 'Z', 'W', '1'};
+  memcpy(hdr + 4, &seq, 4);
+  hdr[8] = flags;
+  if (wake.udp.beginPacket(wake.host, WAKE_UDP_PORT) &&
+      wake.udp.write(hdr, sizeof(hdr)) == sizeof(hdr) &&
+      (len == 0 || wake.udp.write((const uint8_t*)payload, len) == len) &&
+      wake.udp.endPacket()) {
+    wake.sent++;
+  } else {
+    wake.sendFails++;
+  }
+}
+
+static inline int16_t* wakeChunk(uint32_t idx) {
+  return wake.ring + (size_t)(idx % WAKE_RING_CHUNKS) * VOICE_CHUNK;
+}
+
+static void wakeProcessChunk(uint32_t idx) {
+  const int16_t* c = wakeChunk(idx);
+  wakeTapSeq++;                                         // odd: copy in flight
+  memcpy(wakeTapBuf, c, sizeof(wakeTapBuf));
+  wakeTapSeq++;
+  float rms = voiceChunkRms(c, VOICE_CHUNK);
+  wake.lastRms = rms;
+  if (++wake.chunks <= VOICE_WARMUP_CHUNKS) return;     // codec settling after begin()
+
+  // Noise floor: falls fast, rises slowly (~15 s), so speech barely moves it
+  // but a fan or a TV left on becomes the new "quiet".
+  if (wake.noise <= 0) wake.noise = rms;
+  else wake.noise += (rms - wake.noise) * (rms < wake.noise ? 0.1f : 0.002f);
+
+  // Same stale-DMA failure as voiceRecord: a "quiet" room in the thousands.
+  if (wake.chunks == VOICE_WARMUP_CHUNKS + 30 && wake.noise > VOICE_GARBAGE_NOISE) {
+    wake.micRestarts++;
+    Serial.println("[Wake] mic delivering stale data, restarting it");
+    M5.Mic.end();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    M5.Mic.begin();
+    wake.queued = wake.done = wake.chunks = 0;
+    wake.noise = 0;
+    wake.open = false;
+    return;
+  }
+
+  uint32_t now = millis();
+  float thr = fmaxf(WAKE_FLOOR_RMS, wake.noise * WAKE_OPEN_RATIO);
+  if (rms > thr) wake.lastLoudMs = now;
+
+  if (!wake.open && rms > thr) {
+    wake.open = true;
+    wake.bursts++;
+    uint32_t avail = min((uint32_t)WAKE_PREROLL_CHUNKS, wake.chunks - 1);
+    avail = min(avail, idx);
+    for (uint32_t k = idx - avail; k < idx; k++) {
+      wakeSend(k, k == idx - avail ? WAKE_F_START : 0, wakeChunk(k), VOICE_CHUNK * sizeof(int16_t));
+    }
+    wakeSend(idx, avail ? 0 : WAKE_F_START, c, VOICE_CHUNK * sizeof(int16_t));
+    return;
+  }
+  if (wake.open) {
+    if (now - wake.lastLoudMs > WAKE_HANGOVER_MS) {
+      wake.open = false;
+      wakeSend(idx, WAKE_F_END, nullptr, 0);
+    } else {
+      wakeSend(idx, 0, c, VOICE_CHUNK * sizeof(int16_t));
+    }
+    return;
+  }
+  if (now - wake.lastBeatMs >= WAKE_BEAT_MS) {
+    wake.lastBeatMs = now;
+    uint16_t n = (uint16_t)fminf(wake.noise, 65535.0f);
+    wakeSend(idx, WAKE_F_BEAT, &n, sizeof(n));
+  }
+}
+
+// One step of the idle loop: queue the next chunk (blocks up to ~32 ms for a
+// free mic slot), then analyse whatever the mic task has finished.
+static void wakeStep() {
+  if (!wake.active && !wakeStart()) {
+    vTaskDelay(pdMS_TO_TICKS(20));
+    return;
+  }
+  if (!M5.Mic.isRunning()) {                            // someone else ended it
+    wakeStop();
+    return;
+  }
+  int16_t* slot = wakeChunk(wake.queued);
+  slot[VOICE_CHUNK - 1] = VOICE_SENTINEL;               // see voiceRecord
+  if (!M5.Mic.record(slot, VOICE_CHUNK, VOICE_MIC_RATE)) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+    return;
+  }
+  wake.queued++;
+  while (wake.done < wake.queued && wakeChunk(wake.done)[VOICE_CHUNK - 1] != VOICE_SENTINEL) {
+    wakeProcessChunk(wake.done++);
+    if (!wake.active || wake.queued == 0) break;        // mic was restarted
+  }
+}
+
+// vizbrain heard "Hey vizBot": start a turn if idle. Never cancels one.
+bool voiceOnWake() {
+  if (!voice.enabled || voice.busy() || voice.listenRequested || voice.playRequested) return false;
+  wake.wakes++;
+  wake.lastWakeMs = millis();
+  voice.listenRequested = true;
+  return true;
+}
+
 // ---- Entry points ----------------------------------------------------------------
 
 // Front head-pad tap: start listening, or cancel if already listening.
@@ -677,13 +868,24 @@ static StaticTask_t voiceTaskTCB;
 void voiceTask(void*) {
   for (;;) {
     if (voice.listenRequested) {
+      wakeStop();
       voice.listenRequested = false;
       voiceRunTurn();
     } else if (voice.playRequested) {
+      wakeStop();
       voice.playRequested = false;
       voiceRunPlay();
     } else if (voice.enabled) {
       voicePollSenses();
+      if (wakeShouldRun()) {
+        wakeStep();            // paced by the mic: no extra delay
+        continue;
+      }
+      if (wake.active) {
+        wakeStop();
+        if (!audioSpectrum.enabled && M5.Mic.isRunning()) M5.Mic.end();
+        audioSpectrum.micRunning = M5.Mic.isRunning();
+      }
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }
