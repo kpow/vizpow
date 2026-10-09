@@ -42,4 +42,17 @@ Downloads run one at a time, in the foreground.
 
 ## Results
 
-(filled in as steps finish)
+### October 9, 2026 — steps 1–4 done, first live wake worked
+
+| What | Result |
+|---|---|
+| Firmware 3.7.13 | Gated UDP stream works; ~1 lost chunk in 500; heap flat (~83 KB), 0 WiFi rejoins over 90 min. Audio FX shares the mic through `wakeTapBuf` |
+| Labelling | Whisper can't label quiet clips (it invents "Thanks for watching!", and the "Hey vizBot." prompt makes it hear the phrase in music). Fixed with `python -m vizbrain.wake studio`: a page with a Record button and a script; one labelled clip per press |
+| Data | 47 real "Hey vizBot"s + 13 real sound-alikes (bot mic), 7,129 synthetic positives (Kokoro voice blends, Piper libritts, macOS `say`), 5,000 synthetic sound-alikes, 600 h ACAV100M negatives |
+| Training recipe | First model: ~1,000 false accepts / 10 h. Fix = openWakeWord's recipe: negative weight ramped to 1500, 32-unit net, 10% positives per batch, 8,000 steps (longer overfits) |
+| Model | `hey_vizbot.onnx` at threshold 0.5: 6.5 false accepts / 10 h on the 10.7 h validation set (openWakeWord's hey_jarvis: 4.7 with the same eval); 11/11 held-out real clips score 1.0 when streamed; room/TV clips 0.0. "Hey, this bot" still fires |
+| Live | Kevin said "Hey vizBot" → score 0.99 → beep → answered. Reply started ~1.5 s after he stopped talking |
+
+Rebuild: `training/wakeword.py` (gen → real/studio → features → train). Data and models live in `~/Library/Application Support/vizbrain/wakeword/`; vizbrain loads `models/hey_vizbot.onnx`.
+
+Next: step 5, a day of normal use with music/TV on, then tune `wake_threshold` in settings.json.
