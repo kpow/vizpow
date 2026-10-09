@@ -656,9 +656,17 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           hiResOn = state.hiRes;
           document.getElementById('hiResToggle').className = 'tog ' + (hiResOn ? 'on' : '');
         }
-        if (state.sensors && state.sensors.soundVolume !== undefined) {
-          document.getElementById('volume').value = state.sensors.soundVolume;
-          document.getElementById('volumeVal').textContent = state.sensors.soundVolume;
+        if (state.sound) {
+          // 1.69 piezo: same sound grid + volume, no MIDI/mic
+          document.getElementById('soundsCard').style.display = '';
+          document.getElementById('volumeRow').style.display = '';
+          var bs = document.getElementById('midiStatus');
+          bs.textContent = 'Buzzer'; bs.style.color = '#FFA552';
+        }
+        var snd = state.sensors || state.sound;
+        if (snd && snd.soundVolume !== undefined) {
+          document.getElementById('volume').value = snd.soundVolume;
+          document.getElementById('volumeVal').textContent = snd.soundVolume;
         }
         if (state.ambientEffect !== undefined) {
           curAmbient = state.ambientEffect;
@@ -1235,6 +1243,11 @@ void handleState() {
                 ",\"audioFx\":" + (audioSpectrum.enabled ? "true" : "false") +
                 ",\"audioDrama\":" + String(audioDrama) +
                 ",\"hasMic\":true" +
+#elif defined(HAS_SOUND)
+                ",\"sound\":{\"buzzer\":true" +
+                  ",\"soundEnabled\":" + (botSounds.enabled ? "true" : "false") +
+                  ",\"soundVolume\":" + String(botSounds.volume) +
+                "}" +
 #endif
 #ifdef BOARD_HAS_FACES_BASE
                 ",\"faces\":{"
@@ -1801,11 +1814,8 @@ void handleCloudSync() {
 // ============================================================================
 // Core S3 Sensor Endpoints — Sound & Mic
 // ============================================================================
-#ifdef TARGET_CORES3
+#ifdef HAS_SOUND
 extern struct BotSounds botSounds;
-extern struct AudioSpectrum audioSpectrum;
-extern uint8_t audioDrama;
-extern struct ProxLightState proxLight;
 
 void handleBotSound() {
   if (server.hasArg("seq")) {
@@ -1839,6 +1849,12 @@ void handleBotVolume() {
   }
   server.send(200, "text/plain", "OK");
 }
+#endif
+
+#ifdef TARGET_CORES3
+extern struct AudioSpectrum audioSpectrum;
+extern uint8_t audioDrama;
+extern struct ProxLightState proxLight;
 
 void handleAudioFx() {
   if (server.hasArg("v")) {
@@ -2451,10 +2467,12 @@ void setupWebServer() {
   server.on("/wled/emoji/settings", handleWledEmojiSettings);
 
   // Core S3 sensor endpoints
-  #ifdef TARGET_CORES3
+  #ifdef HAS_SOUND
   server.on("/bot/sound", handleBotSound);
   server.on("/bot/volume", handleBotVolume);
   server.on("/bot/sequences", handleBotSequences);
+  #endif
+  #ifdef TARGET_CORES3
   server.on("/bot/audiofx", handleAudioFx);
   server.on("/bot/audiodrama", handleAudioDrama);
   #ifdef MIDI_SYNTH_ENABLED

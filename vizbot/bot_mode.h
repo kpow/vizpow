@@ -48,6 +48,15 @@ enum BotState : uint8_t {
 
 #define BOT_WAKE_THRESHOLD     1.8f      // Acceleration magnitude to wake from sleep
 #define BOT_FRAME_DELAY_MS     33        // ~30 FPS target
+
+// Idle chirp: once nobody has touched the bot for a while, it now and then makes
+// a small sound with a matching face. Randomized so it never feels like a timer.
+#define IDLE_CHIRP_AFTER_MS    (5UL * 60 * 1000)   // quiet time before the first chirp
+#define IDLE_CHIRP_JITTER_MS   (3UL * 60 * 1000)   // first chirp lands 0-3 min after that
+#define IDLE_CHIRP_MIN_MS      (4UL * 60 * 1000)   // then every 4-12 min
+#define IDLE_CHIRP_MAX_MS      (12UL * 60 * 1000)
+#define IDLE_CHIRP_QUIET_FROM  22                  // local hours with no chirps (needs NTP time)
+#define IDLE_CHIRP_QUIET_TO    8
 #define WLED_SAY_PRE_DELAY_MS  50        // ms WLED gets head-start before LCD bubble appears
 
 // ============================================================================
@@ -175,6 +184,7 @@ struct BotModeState {
   unsigned long nextRandomExpr;      // Next random idle expression change
   unsigned long nextIdleSaying;      // Next random idle saying
   unsigned long stateEnteredTime;    // When current state was entered
+  unsigned long nextIdleChirp;       // Earliest next idle chirp (BUZZER_PIN boards)
   unsigned long lastMotionMag;       // For motion detection
 
   // Sleeping animation
@@ -233,6 +243,7 @@ struct BotModeState {
     personalityRotIntervalMs = 300000;  // 5 min default
     lastPersonalityRotMs = millis();
     lastInteraction = millis();
+    nextIdleChirp = lastInteraction + IDLE_CHIRP_AFTER_MS + random(IDLE_CHIRP_JITTER_MS);
     lastFrameTime = millis();
     nextRandomExpr = millis() + random(personality->exprMinMs, personality->exprMaxMs);
     nextIdleSaying = millis() + random(personality->sayMinMs, personality->sayMaxMs);
@@ -258,6 +269,7 @@ struct BotModeState {
   // Register an interaction (resets idle timers)
   void registerInteraction() {
     lastInteraction = millis();
+    nextIdleChirp = lastInteraction + IDLE_CHIRP_AFTER_MS + random(IDLE_CHIRP_JITTER_MS);
     if (state != BOT_ACTIVE) {
       wake();
     }
@@ -276,7 +288,7 @@ struct BotModeState {
       getRandomSayingText(SAY_WAKE, buf, sizeof(buf));
       speechBubble.show(buf, 2000);
 
-      #ifdef TARGET_CORES3
+      #ifdef HAS_SOUND
       botSounds.play(SEQ_WAKE_CHIME);
       #endif
     }
@@ -296,7 +308,7 @@ struct BotModeState {
     uint8_t pick = reactions[random(0, 8)];
     face.transitionTo(pick, 150);
 
-    #ifdef TARGET_CORES3
+    #ifdef HAS_SOUND
     botSounds.play(SEQ_TAP_BOOP);
     #endif
 
@@ -317,7 +329,7 @@ struct BotModeState {
     registerInteraction();
     face.transitionTo(EXPR_DIZZY, 150);
 
-    #ifdef TARGET_CORES3
+    #ifdef HAS_SOUND
     botSounds.play(SEQ_SHAKE_RATTLE);
     #endif
 
@@ -427,7 +439,7 @@ void updateBotMode() {
   // ---- Shake reaction timeout (return to neutral) ----
   if (botMode.shakeReacting && now >= botMode.shakeReactEnd) {
     botMode.shakeReacting = false;
-    if (botMode.state == BOT_ACTIVE) {
+    if (botMode.state != BOT_SLEEPING) {
       botMode.face.transitionTo(EXPR_NEUTRAL, 400);
     }
   }
@@ -463,6 +475,31 @@ void updateBotMode() {
     botMode.face.transitionTo(pick, 500);
     botMode.nextRandomExpr = now + random(p->exprMinMs, p->exprMaxMs);
   }
+
+  // ---- Idle chirp: small sound + face after a long quiet spell (1.69 piezo) ----
+  #ifdef BUZZER_PIN
+  if (timeSinceInteraction >= IDLE_CHIRP_AFTER_MS && now >= botMode.nextIdleChirp &&
+      !voiceHoldsFace && !botMode.shakeReacting && !botSounds.playing) {
+    botMode.nextIdleChirp = now + random(IDLE_CHIRP_MIN_MS, IDLE_CHIRP_MAX_MS);
+    struct tm t;
+    bool quiet = getLocalTime(&t, 0) &&
+                 (t.tm_hour >= IDLE_CHIRP_QUIET_FROM || t.tm_hour < IDLE_CHIRP_QUIET_TO);
+    if (!quiet) {
+      static const struct { MidiSequenceId seq; uint8_t expr; } chirps[] = {
+        { SEQ_CURIOUS_BEEP, EXPR_CONFUSED },
+        { SEQ_HAPPY_HUM,    EXPR_HAPPY },
+        { SEQ_EXPR_CHIRP,   EXPR_SURPRISED },
+        { SEQ_WHISTLE,      EXPR_MISCHIEF },
+        { SEQ_YAWN,         EXPR_CHILL },
+      };
+      uint8_t i = random(sizeof(chirps) / sizeof(chirps[0]));
+      botSounds.play(chirps[i].seq);
+      botMode.face.transitionTo(chirps[i].expr, 300);
+      botMode.shakeReacting = true;            // reuse the timed return to neutral
+      botMode.shakeReactEnd = now + 1800;
+    }
+  }
+  #endif
 
   // ---- Random idle sayings (personality-driven) ----
   if ((botMode.state == BOT_ACTIVE || botMode.state == BOT_IDLE) && !voiceHoldsFace &&
@@ -844,7 +881,7 @@ void enterBotMode() {
 
     botMode.init();
 
-    #ifdef TARGET_CORES3
+    #ifdef HAS_SOUND
     botSounds.play(SEQ_BOOT_CHIME);
     #endif
 

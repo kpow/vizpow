@@ -1,29 +1,8 @@
 #ifndef MIDI_SYNTH_H
 #define MIDI_SYNTH_H
 
-#ifdef MIDI_SYNTH_ENABLED
-
-#include <Arduino.h>
-#include <M5_SAM2695.h>
-#include "config.h"
-
-// Runtime-selected synth Grove port (0=Port C, 1=Port A). Defined in vizbot.ino,
-// loaded from NVS, changeable on the web config page.
-extern uint8_t midiSynthPort;
-static inline uint8_t midiTxPin() {
-  return midiSynthPort == MIDI_SYNTH_PORT_A ? MIDI_PORTA_TX_PIN : MIDI_PORTC_TX_PIN;
-}
-static inline uint8_t midiRxPin() {
-  return midiSynthPort == MIDI_SYNTH_PORT_A ? MIDI_PORTA_RX_PIN : MIDI_PORTC_RX_PIN;
-}
-
-// ============================================================================
-// MIDI Synthesizer Driver — SAM2695 via official M5Stack library
-// ============================================================================
-// Wraps https://github.com/m5stack/M5-SAM2695
-// Core S3 Port C: GPIO 18 (TXD2), GPIO 17 (RXD2)
-// ============================================================================
-
+// Instrument/percussion constants are shared with bot_sounds.h sequence tables,
+// which also play on boards without the SAM2695 (speaker / piezo fallback).
 // GM instrument presets (subset)
 #define GM_PIANO          0
 #define GM_BRIGHT_PIANO   1
@@ -61,6 +40,30 @@ static inline uint8_t midiRxPin() {
 // MIDI channels
 #define MIDI_CH_PERCUSSION 9
 #define MIDI_MAX_CHANNELS  16
+
+#ifdef MIDI_SYNTH_ENABLED
+
+#include <Arduino.h>
+#include <M5_SAM2695.h>
+#include "config.h"
+
+// Runtime-selected synth Grove port (0=Port C, 1=Port A). Defined in vizbot.ino,
+// loaded from NVS, changeable on the web config page.
+extern uint8_t midiSynthPort;
+static inline uint8_t midiTxPin() {
+  return midiSynthPort == MIDI_SYNTH_PORT_A ? MIDI_PORTA_TX_PIN : MIDI_PORTC_TX_PIN;
+}
+static inline uint8_t midiRxPin() {
+  return midiSynthPort == MIDI_SYNTH_PORT_A ? MIDI_PORTA_RX_PIN : MIDI_PORTC_RX_PIN;
+}
+
+// ============================================================================
+// MIDI Synthesizer Driver — SAM2695 via official M5Stack library
+// ============================================================================
+// Wraps https://github.com/m5stack/M5-SAM2695
+// Core S3 Port C: GPIO 18 (TXD2), GPIO 17 (RXD2)
+// ============================================================================
+
 
 // Thin wrapper around M5_SAM2695 official library
 struct MidiSynth {

@@ -400,8 +400,8 @@ static void uiSetScene(uint8_t i) {
   markSettingsDirty();
 }
 
-// UI sounds: CoreS3 has a speaker; the 1.69 stays silent
-#ifdef TARGET_CORES3
+// UI sounds: CoreS3 speaker/MIDI, 1.69 piezo
+#ifdef HAS_SOUND
 #define uiSound(seq) botSounds.play(seq)
 #else
 #define uiSound(seq) ((void)0)
@@ -898,7 +898,7 @@ enum UiRowKey : uint8_t {
   RK_SCREEN,
   RK_NETWORK, RK_ADDRESS, RK_IP, RK_SIGNAL, RK_NEARBY, RK_HOTSPOT,
   RK_FIRMWARE, RK_DEVICE, RK_UPTIME, RK_MEMORY, RK_RESTART,
-  RK_BASE_LEDS, RK_LED_MODE, RK_VOLUME, RK_AUDIOFX, RK_REACT,
+  RK_BASE_LEDS, RK_LED_MODE, RK_SOUND, RK_VOLUME, RK_AUDIOFX, RK_REACT,
   RK_CHILL, RK_CHILL_TIME, RK_NOD, RK_SHAKE, RK_LOOKUP, RK_LOOKDOWN, RK_CENTER,
   RK_BATTERY, RK_GAMES, RK_POWEROFF,
 };
@@ -985,6 +985,11 @@ static void uiBuildRows(uint8_t cat) {
       uiAddRow("Reactivity", ROW_SLIDER, RK_REACT, buf, false, audioDrama / 200.0f);
 #else
       uiAddRow("Screen", ROW_NAV, RK_SCREEN, buf);
+#ifdef HAS_SOUND
+      uiAddRow("Sound", ROW_TOGGLE, RK_SOUND, "", botSounds.enabled);
+      snprintf(buf, sizeof(buf), "%u%%", (unsigned)(botSounds.volume * 100 / 255));
+      uiAddRow("Volume", ROW_SLIDER, RK_VOLUME, buf, false, botSounds.volume / 255.0f);
+#endif
 #endif
       break;
 #ifdef BOARD_HAS_STACKCHAN_BASE
@@ -1469,6 +1474,14 @@ static void uiRowAction(uint8_t i, int16_t x) {
       scLeds.mode = (scLeds.mode + SC_LED_MODE_COUNT + dir) % SC_LED_MODE_COUNT;
       break;
 #endif
+#ifdef HAS_SOUND
+    case RK_SOUND:
+      // Off: chirp first so the toggle is audible. On: enable, then chirp.
+      if (botSounds.enabled) { uiSound(SEQ_TOGGLE_OFF); botSounds.enabled = false; }
+      else { botSounds.enabled = true; uiSound(SEQ_TOGGLE_ON); }
+      markSettingsDirty();
+      break;
+#endif
 #ifdef TARGET_CORES3
     case RK_AUDIOFX:
       audioSpectrum.setEnabled(!audioSpectrum.enabled);
@@ -1580,7 +1593,9 @@ static void uiActivate(uint8_t id) {
         ui.cat = c;
         ui.scroll = 0;
 #else
+#ifndef HAS_SOUND
         if (c == CAT_LIGHT) { uiOpenSheet(UI_LIGHT, UI_SETTINGS); break; }
+#endif
         ui.cat = c;
         uiGo(UI_CAT);
 #endif
@@ -1603,8 +1618,14 @@ static void uiSliderTo(uint8_t row, int16_t x) {
 #if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE)
     case RK_BASE_LEDS: scLeds.brightness = (uint8_t)lroundf(f * 255); break;
 #endif
+#ifdef HAS_SOUND
+    case RK_VOLUME:
+      botSounds.setVolume((uint8_t)lroundf(f * 255));
+      markSettingsDirty();
+      if (!botSounds.playing) uiSound(SEQ_TAP_BOOP);   // preview level; rate-limited by its own length
+      break;
+#endif
 #ifdef TARGET_CORES3
-    case RK_VOLUME: botSounds.setVolume((uint8_t)lroundf(f * 255)); markSettingsDirty(); break;
     case RK_REACT: audioDrama = (uint8_t)lroundf(f * 200); markSettingsDirty(); break;
 #endif
     default: break;
