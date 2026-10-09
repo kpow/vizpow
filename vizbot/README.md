@@ -198,7 +198,7 @@ Two features layer *on top of* bot mode and are sometimes referred to loosely as
 | File | Purpose |
 |------|---------|
 | `effects_ambient.h` | 11 ambient effects with hi-res LCD variants (plasma, fire, ocean, aurora, etc.) |
-| `palettes.h` | 15 color palette definitions |
+| `palettes.h` | shared Noodle/viz palette set (23, synced from noodlez-v2) |
 | `touch_control.h` | Touch menu gestures and UI (long-press, swipe, shared I2C mutex) |
 | `audio_analysis.h` | Mic audio analysis — spike/speech/silence detection (Core S3 only) |
 | `proximity_light.h` | Proximity/ambient light sensor reactions (Core S3 only) |

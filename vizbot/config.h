@@ -164,7 +164,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.6.16"
+#define FIRMWARE_VERSION "3.7.0"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -253,7 +253,8 @@
 
 // Ambient effect count (used for bot background overlay)
 #define NUM_AMBIENT_EFFECTS 16
-#define NUM_PALETTES 15
+#include "fx_palettes.h"
+#define NUM_PALETTES FX_NUM_PALETTES   // shared Noodle/viz set, see palettes.h
 #define MAX_SAY_LEN 96  // Max characters for speech text (LCD + WLED)
 
 // Shake detection threshold (for bot reactions)

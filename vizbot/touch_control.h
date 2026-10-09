@@ -105,12 +105,8 @@ const char* ambientEffectNames[] = {
   "Snakes", "Sinusoid", "Puzzle", "Bumpmap", "Xorcery", "Hiphotic"
 };
 
-// Palette names (must match order in palettes.h)
-const char* paletteNames[] = {
-  "Rainbow", "Ocean", "Lava", "Forest", "Party",
-  "Heat", "Cloud", "Sunset", "Cyber", "Toxic",
-  "Ice", "Blood", "Vaporwave", "DeepForest", "Gold"
-};
+// Palette names come from the shared set (fx_palettes.h, via config.h).
+const char* const* paletteNames = FX_PALETTE_NAMES;
 
 // Reset touch controller (CST816T only — Core S3 uses M5Unified)
 void resetTouch() {

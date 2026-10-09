@@ -390,30 +390,82 @@ String wledHttpGet(const char* path) {
 // Capture current WLED segment state (for restore)
 // ============================================================================
 
-// Map WLED palette ID → local palettes[] index (best visual match)
-// WLED IDs 0-5 are meta/dynamic; 6-11 are FastLED standard palettes.
+// Map WLED palette ID → local palettes[] index.
+// The shared set is built from WLED's own gradients, so "=" rows are the SAME
+// gradient (exact match); the rest are the nearest look. Ids are WLED 0.15's.
 static const int8_t WLED_TO_LOCAL_PAL[] = {
-  0,  // 0  Default          → Rainbow
-  0,  // 1  Random Cycle     → Rainbow
-  0,  // 2  Color 1          → Rainbow
-  0,  // 3  Colors 1&2       → Rainbow
-  7,  // 4  Color Gradient   → Sunset
-  0,  // 5  Colors Only      → Rainbow
-  4,  // 6  Party            → PartyColors_p
-  6,  // 7  Cloud            → CloudColors_p
-  2,  // 8  Lava             → LavaColors_p
-  1,  // 9  Ocean            → OceanColors_p
-  3,  // 10 Forest           → ForestColors_p
-  0,  // 11 Rainbow          → RainbowColors_p
-  0,  // 12 Rainbow Bands    → Rainbow
-  7,  // 13 Sunset           → Sunset
-  8,  // 14 Rivendell        → Cyber (closest cool-green)
-  1,  // 15 Analogous        → Ocean
-  9,  // 16 Splash           → Toxic
-  10, // 17 Pastel           → Ice
-  5,  // 18 Sunset 2         → HeatColors_p
-  11, // 19 Beech            → Blood
-  12, // 20 Vintage          → Vaporwave
+   0,  //  0 Default           → Rainbow
+   0,  //  1 Random Cycle      → Rainbow
+   0,  //  2 Color 1           → Rainbow
+   0,  //  3 Colors 1&2        → Rainbow
+   3,  //  4 Color Gradient    → Sunset
+   0,  //  5 Colors Only       → Rainbow
+  16,  //  6 Party             = Party
+  22,  //  7 Cloud             → Aqua Flash
+   4,  //  8 Lava              → Heat
+  17,  //  9 Ocean             → Aurora
+  14,  // 10 Forest            → Hult
+   0,  // 11 Rainbow           = Rainbow
+   0,  // 12 Rainbow Bands     → Rainbow
+   3,  // 13 Sunset            = Sunset
+  14,  // 14 Rivendell         → Hult
+  22,  // 15 Breeze            → Aqua Flash
+  10,  // 16 Red & Blue        → Temperature
+   9,  // 17 Yellowout         = Retro
+   1,  // 18 Analogous         = Analogous
+  19,  // 19 Splash            = Splash
+   3,  // 20 Pastel            → Sunset
+   3,  // 21 Sunset2           → Sunset
+  14,  // 22 Beech             → Hult
+   9,  // 23 Vintage           → Retro
+  12,  // 24 Departure         → Drywet
+  12,  // 25 Landscape         → Drywet
+  12,  // 26 Beach             → Drywet
+  11,  // 27 Sherbet           → Clown
+  14,  // 28 Hult              → Hult
+  14,  // 29 Hult64            = Hult
+  12,  // 30 Drywet            = Drywet
+   7,  // 31 Jul               → Tertiary
+   9,  // 32 Grintage          → Retro
+  20,  // 33 Rewhi             → Light Pink
+   7,  // 34 Tertiary          = Tertiary
+   4,  // 35 Fire              → Heat
+  22,  // 36 Icefire           → Aqua Flash
+  13,  // 37 Cyane             → Toxy Reaf
+  20,  // 38 Light Pink        = Light Pink
+   5,  // 39 Autumn            → Red Tide
+   8,  // 40 Magenta           → Garnet
+   8,  // 41 Magred            = Garnet
+   6,  // 42 Yelmag            = Ember
+   2,  // 43 Yelblu            = Electric
+  10,  // 44 Orange & Teal     → Temperature
+  21,  // 45 Tiamat            = Tiamat
+  17,  // 46 April Night       → Aurora
+   5,  // 47 Orangery          → Red Tide
+  16,  // 48 C9                → Party
+  19,  // 49 Sakura            → Splash
+  17,  // 50 Aurora            = Aurora
+  17,  // 51 Atlantica         → Aurora
+  16,  // 52 C9 2              → Party
+  16,  // 53 C9 New            → Party
+  10,  // 54 Temperature       = Temperature
+  18,  // 55 Aurora 2          = Aurora 2
+  11,  // 56 Retro Clown       = Clown
+  11,  // 57 Candy             → Clown
+  13,  // 58 Toxy Reaf         = Toxy Reaf
+  13,  // 59 Fairy Reaf        → Toxy Reaf
+   1,  // 60 Semi Blue         → Analogous
+  19,  // 61 Pink Candy        → Splash
+   5,  // 62 Red Reaf          → Red Tide
+  22,  // 63 Aqua Flash        = Aqua Flash
+  15,  // 64 Yelblu Hot        = Yelblu Hot
+  20,  // 65 Lite Light        → Light Pink
+   8,  // 66 Red Flash         → Garnet
+   8,  // 67 Blink Red         → Garnet
+   6,  // 68 Red Shift         → Ember
+   5,  // 69 Red Tide          = Red Tide
+  11,  // 70 Candy2            → Clown
+   7,  // 71 Traffic Light     → Tertiary
 };
 #define WLED_TO_LOCAL_PAL_SIZE (sizeof(WLED_TO_LOCAL_PAL)/sizeof(WLED_TO_LOCAL_PAL[0]))
 

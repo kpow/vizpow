@@ -731,7 +731,8 @@ vizpow/
 │   ├── audio_spectrum.h         # 512-point FFT spectrum — bass/mid/treble/beat for audio FX
 │   ├── proximity_light.h        # Proximity/light sensor (Core S3 — peek-a-boo, cover detection)
 │   ├── effects_ambient.h        # 16 ambient effects + kaleidoscope + hi-res variants
-│   ├── palettes.h               # 15 color palette definitions
+│   ├── palettes.h               # shared Noodle/viz palette set (23)
+│   ├── fx_palettes.h            # GENERATED in noodlez-v2, synced — don't edit
 │   ├── emoji_sprites.h          # Pixel art sprite data for WLED emoji display
 │   ├── display_lcd.h            # LovyanGFX LCD rendering + DisplayProxy initialization
 │   ├── tween.h                  # TweenManager — 16-slot animation engine with 8 easing functions

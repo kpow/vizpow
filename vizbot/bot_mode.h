@@ -104,7 +104,7 @@ void initBuiltinPersonalities() {
                            EXPR_WINKING, EXPR_SHY, EXPR_PROUD, EXPR_SASSY };
   memcpy(chill.favoriteExprs, chillExprs, 8);
   chill.favoritePaletteCount = 4;
-  uint8_t chillPals[] = { 0, 1, 7, 12 };  // Rainbow, Ocean, Sunset, Vaporwave
+  uint8_t chillPals[] = { 17, 1, 3, 20 };  // Aurora, Analogous, Sunset, Light Pink
   memcpy(chill.favoritePalettes, chillPals, 4);
   chill.favoriteEffectCount = 4;
   uint8_t chillFx[] = { 2, 3, 0, 4 };  // lava, ocean, rainbow, fire
@@ -124,7 +124,7 @@ void initBuiltinPersonalities() {
                            EXPR_PROUD, EXPR_WINKING, EXPR_KISSING, EXPR_SASSY };
   memcpy(hyper.favoriteExprs, hyperExprs, 8);
   hyper.favoritePaletteCount = 4;
-  uint8_t hyperPals[] = { 4, 0, 9, 8 };  // Party, Rainbow, Toxic, Cyber
+  uint8_t hyperPals[] = { 16, 0, 2, 13 };  // Party, Rainbow, Electric, Toxy Reaf
   memcpy(hyper.favoritePalettes, hyperPals, 4);
   hyper.favoriteEffectCount = 4;
   uint8_t hyperFx[] = { 1, 0, 4, 6 };  // confetti, rainbow, party, plasma
@@ -145,7 +145,7 @@ void initBuiltinPersonalities() {
                             EXPR_DEVIOUS, EXPR_NERVOUS, EXPR_GLITCHING, EXPR_FOCUSED };
   memcpy(grumpy.favoriteExprs, grumpyExprs, 8);
   grumpy.favoritePaletteCount = 4;
-  uint8_t grumpyPals[] = { 2, 11, 5, 3 };  // Lava, Blood, Heat, Forest
+  uint8_t grumpyPals[] = { 6, 8, 4, 5 };  // Ember, Garnet, Heat, Red Tide
   memcpy(grumpy.favoritePalettes, grumpyPals, 4);
   grumpy.favoriteEffectCount = 4;
   uint8_t grumpyFx[] = { 4, 2, 8, 10 };  // fire, lava, meteor, noise
