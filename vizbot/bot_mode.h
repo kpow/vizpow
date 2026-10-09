@@ -8,7 +8,7 @@
 #include "bot_eyes.h"
 #include "bot_sayings.h"
 #include "bot_overlays.h"
-#ifdef BOARD_HAS_STACKCHAN_BASE
+#ifdef HAS_BASE_LEDS
 #include "stackchan_leds.h"
 #endif
 
@@ -291,6 +291,9 @@ struct BotModeState {
       #ifdef HAS_SOUND
       botSounds.play(SEQ_WAKE_CHIME);
       #endif
+      #ifdef HAS_BASE_LEDS
+      scFlashMood(EXPR_SURPRISED, 600);
+      #endif
     }
     state = BOT_ACTIVE;
     stateEnteredTime = millis();
@@ -310,6 +313,9 @@ struct BotModeState {
 
     #ifdef HAS_SOUND
     botSounds.play(SEQ_TAP_BOOP);
+    #endif
+    #ifdef HAS_BASE_LEDS
+    scFlashMood(pick, 400);   // the colour of the face it just pulled
     #endif
 
     // Maybe show a tap saying
@@ -331,6 +337,9 @@ struct BotModeState {
 
     #ifdef HAS_SOUND
     botSounds.play(SEQ_SHAKE_RATTLE);
+    #endif
+    #ifdef HAS_BASE_LEDS
+    scFlashMood(EXPR_DIZZY, 700);
     #endif
 
     // Show shake saying
@@ -643,8 +652,8 @@ void updateBotMode() {
   botMode.speechBubble.update();
   botMode.notification.update();
 
-  // StackChan: sync mood ring LEDs to current expression
-  #ifdef BOARD_HAS_STACKCHAN_BASE
+  // Base LEDs: sync mood colour to current expression (mood + screen modes)
+  #ifdef HAS_BASE_LEDS
   scUpdateMoodFromExpression(botMode.face.targetExpr);
   #endif
 }

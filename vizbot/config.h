@@ -168,7 +168,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.7.5"
+#define FIRMWARE_VERSION "3.7.11"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -211,6 +211,26 @@
   // !! Also CoreS3's I2S bit clock. Audio and the strips cannot both run; see
   // the header comment in faces_base.h.
   #define FACES_LED_PIN      13
+#endif
+
+// ============================================================================
+// Interior LED ring (1.69 build flag: -DBOARD_HAS_RING_LEDS)
+// ============================================================================
+// A small addressable ring that lights the inside of the bot. It runs the same
+// base LED engine as the stack-chan ring and Faces strips (ring_leds.h).
+#ifdef BOARD_HAS_RING_LEDS
+  #ifndef BOARD_ESP32S3_LCD_169
+    #error "BOARD_HAS_RING_LEDS is wired for the 1.69 only (GPIO17)"
+  #endif
+  #define SC_BASE_LED_COUNT  8            // 8 x WS2812B, powered from 5V
+  #define RING_LED_PIN       17
+  #define RING_LED_CHIPSET   WS2812B
+  #define RING_LED_ORDER     GRB
+#endif
+
+// Any target with an addressable strip the base LED engine (stackchan_leds.h) drives
+#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(BOARD_HAS_FACES_BASE) || defined(BOARD_HAS_RING_LEDS)
+  #define HAS_BASE_LEDS
 #endif
 
 // ============================================================================
