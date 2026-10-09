@@ -8,6 +8,7 @@
   GET  /v1/health      status
   GET  /v1/log         recent turns
   GET  /               typing page
+  UDP  :4051           the bot's idle mic stream; "Hey vizBot" starts a turn (wake.py)
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from .brain import Brain, bubble_text
 from .lab import VizMac, Wled
 from .memory import Memory, Routines
 from .tools import Toolbox
+from .wake import WakeDetector
 
 # Sense events the bot reports (POST /v1/event): what to tell Claude, and how
 # long to wait before reacting to the same kind again.
@@ -59,6 +61,7 @@ class App:
         self.log: collections.deque = collections.deque(maxlen=50)
         self.busy = threading.Lock()
         self._bonjour: subprocess.Popen | None = None
+        self.wake = WakeDetector(self.on_wake, threshold=self.settings["wake_threshold"])
 
     # ---- bot address ------------------------------------------------------
 
@@ -84,6 +87,18 @@ class App:
             if self._bot is None or self._bot.host != ip:
                 self._bot = Bot(ip)
                 print(f"[bot] adopted {ip}")
+
+    def on_wake(self, host: str, score: float) -> None:
+        """The bot's mic stream said "Hey vizBot": have that bot start a turn."""
+        print(f"[wake] Hey vizBot from {host} (score {score:.2f})")
+        self.adopt_bot(host)
+
+        def go() -> None:
+            try:
+                Bot(host)._get("/brain/wake")
+            except BotError as e:   # busy (409) or offline: nothing to do
+                print(f"[wake] {e}")
+        threading.Thread(target=go, daemon=True).start()
 
     def personality(self) -> str:
         bot = self.get_bot()
@@ -348,6 +363,8 @@ def make_handler(app: App):
                     "ok": True, "claude": app.brain.online, "model": app.settings["model"],
                     "stt": app.settings["stt_model"], "tts": app.settings.get("tts_engine", "kokoro"),
                     "bot": bot.host if bot else None, "spend": usage.summary(),
+                    "wake": {"model": app.wake.available, "threshold": app.wake.threshold,
+                             "wakes": app.wake.wakes, "packets": app.wake.receiver.packets},
                 })
             if path == "/v1/log":
                 return self._json(200, list(app.log))
@@ -473,6 +490,12 @@ def serve(port: int | None = None) -> None:
     threading.Thread(target=app.wled.refresh, daemon=True).start()
     app.toolbox.cached_weather()  # warm the prompt's weather so the first question is one call
     threading.Thread(target=app.run_scheduler, daemon=True).start()
+    if app.settings["wake_enabled"] and app.wake.available:
+        app.wake.start()
+        print(f"[wake] listening for 'Hey vizBot' on UDP :{app.wake.receiver.port} "
+              f"(threshold {app.wake.threshold})")
+    else:
+        print(f"[wake] off (enabled={app.settings['wake_enabled']}, model={app.wake.model_path})")
     httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(app))
     httpd.daemon_threads = True
     app.advertise(port)
