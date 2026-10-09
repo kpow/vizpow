@@ -367,7 +367,7 @@ void drainCommandQueue() {
         markSettingsDirty();
         break;
       case CMD_PLAY_SOUND:
-        #ifdef TARGET_CORES3
+        #ifdef HAS_SOUND
         {
           extern BotSounds botSounds;
           botSounds.playTone(cmd.sound.freq, cmd.sound.duration);
@@ -375,7 +375,7 @@ void drainCommandQueue() {
         #endif
         break;
       case CMD_SET_VOLUME:
-        #ifdef TARGET_CORES3
+        #ifdef HAS_SOUND
         {
           extern BotSounds botSounds;
           botSounds.setVolume(cmd.u8val);
@@ -384,7 +384,7 @@ void drainCommandQueue() {
         #endif
         break;
       case CMD_PLAY_SEQUENCE:
-        #ifdef TARGET_CORES3
+        #ifdef HAS_SOUND
         {
           extern BotSounds botSounds;
           botSounds.play((MidiSequenceId)cmd.u8val);

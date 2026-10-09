@@ -29,9 +29,11 @@ extern uint8_t kaleidoscopeSlice;
 extern char    weatherLat[12];
 extern char    weatherLon[12];
 extern char    timezoneTZ[TZ_BUF_LEN];
+#ifdef HAS_SOUND
+extern struct BotSounds botSounds;
+#endif
 #ifdef TARGET_CORES3
 extern struct ProxLightState proxLight;
-extern struct BotSounds botSounds;
 extern struct AudioSpectrum audioSpectrum;
 extern uint8_t audioDrama;
 #ifdef MIDI_SYNTH_ENABLED
@@ -84,11 +86,14 @@ void loadSettings() {
   timezoneTZ[sizeof(timezoneTZ) - 1] = '\0';
   applyTimezone();
 
-  #ifdef TARGET_CORES3
-  // Core S3 sensor settings
+  #ifdef HAS_SOUND
   botSounds.enabled   = prefs.getBool("sndOn", true);
   botSounds.volume    = prefs.getUChar("sndVol", 120);
   if (botSounds.volume > 0) botSounds.setVolume(botSounds.volume);
+  #endif
+
+  #ifdef TARGET_CORES3
+  // Core S3 sensor settings
 #ifdef BOARD_HAS_FACES_BASE
   // The Faces base cannot do both: the mic's I2S bit clock is the LED data
   // line. LEDs are this base's whole character, so audio starts off however the
@@ -141,9 +146,11 @@ void saveSettings() {
   prefs.putString("wLon",   weatherLon);
   prefs.putString("tz",     timezoneTZ);
 
-  #ifdef TARGET_CORES3
+  #ifdef HAS_SOUND
   prefs.putBool ("sndOn",   botSounds.enabled);
   prefs.putUChar("sndVol",  botSounds.volume);
+  #endif
+  #ifdef TARGET_CORES3
   prefs.putBool ("audioFx", audioSpectrum.enabled);
   prefs.putUChar("audioDrm", audioDrama);
   #ifdef MIDI_SYNTH_ENABLED

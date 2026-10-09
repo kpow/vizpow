@@ -38,10 +38,11 @@
 #include "device_id.h"  // Per-device unique SSID + mDNS hostname (from eFuse MAC)
 #include "palettes.h"
 #include "display_lcd.h"    // Must come before any file that calls gfx->methods() (defines DisplayProxy)
+#include "buzzer.h"         // 1.69 passive piezo (LEDC square wave); no-op without BUZZER_PIN
 #include "tween.h"          // Tween animation system (must come before bot_mode.h)
+#include "midi_synth.h"     // SAM2695 driver (CoreS3) + GM constants (must come before bot_sounds.h)
+#include "bot_sounds.h"     // Sequence engine: MIDI / M5.Speaker / piezo (must come before bot_mode.h)
 #ifdef TARGET_CORES3
-#include "midi_synth.h"     // SAM2695 MIDI synth driver (must come before bot_sounds.h)
-#include "bot_sounds.h"     // MIDI sequence engine + M5.Speaker fallback (must come before bot_mode.h)
 #include "audio_spectrum.h"  // FFT spectrum analyzer (must come before effects_ambient.h)
 #include "proximity_light.h" // Core S3 proximity & ambient light sensor
 #endif
@@ -340,6 +341,9 @@ void setup() {
   delay(500);
 
   DBGLN("\n=== vizBot starting ===");
+  #ifdef BUZZER_PIN
+  buzzer.init();    // Drive the piezo pin LOW first — floating, it draws current and heats the board
+  #endif
   initDeviceID();   // Compute unique apSSID / mdnsHostname from eFuse MAC
   otaMarkBootValid();
   #ifdef BOARD_HAS_FACES_BASE
@@ -399,7 +403,12 @@ void setup() {
   // This handles: LEDs, I2C, IMU, Touch, WiFi AP, Web Server
   runBootSequence();
 
-  // Load persistent settings from NVS (brightness, palette, etc.)
+  #if defined(HAS_SOUND) && !defined(TARGET_CORES3)
+  botSounds.init();   // CoreS3 does this in the boot sequence's sensor stage
+  #endif
+
+  // Load persistent settings from NVS (brightness, palette, etc.) — after
+  // botSounds.init(), which would otherwise reset the saved volume
   loadSettings();
 
   // Load WLED display settings from NVS
@@ -591,10 +600,15 @@ void loop() {
   tweenManager.update();
 
   // Advance sound effect sequencer, spectrum analyzer, and proximity (Core S3 only)
-  #ifdef TARGET_CORES3
+  #ifdef HAS_SOUND
   botSounds.update();
+  #endif
+  #ifdef TARGET_CORES3
   audioSpectrum.update();
   proxLight.update();
+  #endif
+  #ifdef BUZZER_PIN
+  buzzer.update();
   #endif
 
   // Apply queued commands from WiFi/touch before rendering

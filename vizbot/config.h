@@ -113,6 +113,10 @@
   #define TOUCH_ENABLED
   #define TOUCH_UI_V2              // Face-first touch UI (touch_ui.h)
 
+  // Passive piezo buzzer (buzzer.h). GPIO42 on the current board rev (model name
+  // printed on the PCB); the old rev used GPIO33, which octal PSRAM reserves.
+  #define BUZZER_PIN 42
+
 #elif defined(BOARD_ESP32S3_LCD_13)
   // Waveshare ESP32-S3-LCD-1.3 board pins (no touch, battery powered)
   #define DATA_PIN 14              // External LED matrix data pin (if used)
@@ -164,7 +168,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.7.0"
+#define FIRMWARE_VERSION "3.7.5"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -276,6 +280,13 @@
 // Persisted in NVS, overridable via the settings page (a curated list of zones).
 #define TZ_DEFAULT                  "EST5EDT,M3.2.0,M11.1.0"
 #define TZ_BUF_LEN                  48
+
+// ============================================================================
+// Sound output: CoreS3 speaker/MIDI, or the 1.69's piezo buzzer (bot_sounds.h)
+// ============================================================================
+#if defined(TARGET_CORES3) || defined(BUZZER_PIN)
+  #define HAS_SOUND
+#endif
 
 // ============================================================================
 // MIDI Synthesizer (SAM2695 via Grove Port C)

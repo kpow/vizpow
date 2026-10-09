@@ -1,21 +1,27 @@
 #ifndef BOT_SOUNDS_H
 #define BOT_SOUNDS_H
 
-#ifdef TARGET_CORES3
-
-#include <Arduino.h>
-#include <M5Unified.h>
 #include "config.h"
 
-#ifdef MIDI_SYNTH_ENABLED
-#include "midi_synth.h"
+#ifdef HAS_SOUND
+
+#include <Arduino.h>
+#ifdef TARGET_CORES3
+#include <M5Unified.h>
+#endif
+#include "midi_synth.h"   // GM constants always; SAM2695 driver when MIDI_SYNTH_ENABLED
+#ifdef BUZZER_PIN
+#include "buzzer.h"
 #endif
 
 // ============================================================================
-// Bot Sounds — MIDI Sequence Engine with M5.Speaker Fallback
+// Bot Sounds — MIDI Sequence Engine with M5.Speaker / Piezo Fallback
 // ============================================================================
 // Primary: drives SAM2695 MIDI synth via midi_synth.h (multi-voice, GM instruments)
 // Fallback: sine-wave tones via M5.Speaker when MIDI module not available
+// 1.69: square-wave tones on the passive piezo (buzzer.h). Monophonic, so only
+//   channel 0 plays (bass/percussion would chop the melody), the top note of a
+//   chord wins, and low sequences are lifted by octaves into the piezo's range.
 //
 // Timeline-based sequencer: events have offsetMs from sequence start, enabling
 // polyphony (multiple events at same offset = chord/layered instruments).
@@ -721,6 +727,7 @@ uint8_t cloudSequenceCount = 0;
 // ============================================================================
 // Sine-wave fallback (M5.Speaker) — used when MIDI synth not available
 // ============================================================================
+#ifdef TARGET_CORES3
 
 #define SINE_BUF_MAX 200
 
@@ -738,6 +745,19 @@ static void _playSine(uint16_t freq, uint16_t durationMs) {
   uint8_t repeats = constrain((uint32_t)freq * durationMs / 1000, 1, 255);
   M5.Speaker.playRaw(_sineBuf, samplesPerCycle, 48000, false, repeats);
 }
+#endif // TARGET_CORES3
+
+#ifdef BUZZER_PIN
+// A small piezo is faint below ~700 Hz; sequences whose lowest lead note is under
+// this get lifted by whole octaves (melody shape intact).
+#define BUZZER_MIN_NOTE 79   // G5, 784 Hz
+
+// Volume 0-255 -> PWM duty 0-512 (512 = 50% = loudest). Squared so the low end
+// of the slider still has usable steps.
+static uint16_t buzzerDuty(uint8_t vol) {
+  return vol ? max<uint16_t>(1, (uint32_t)vol * vol * 512 / (255 * 255)) : 0;
+}
+#endif
 
 // Convert MIDI note number to frequency (A4=440Hz)
 static uint16_t midiNoteToFreq(uint8_t note) {
@@ -764,7 +784,7 @@ struct ActiveNote {
 
 struct BotSounds {
   bool enabled;
-  bool useMidi;          // true = SAM2695, false = M5.Speaker fallback
+  bool useMidi;          // true = SAM2695, false = M5.Speaker / piezo fallback
   uint8_t volume;        // 0-255 (firmware scale)
   bool playing;          // true while sequence active (mic mutes on this)
 
@@ -781,6 +801,12 @@ struct BotSounds {
   // For fallback single-tone playback (web API freq+dur)
   bool singleTone;
   unsigned long singleToneEndMs;
+
+#ifdef BUZZER_PIN
+  int8_t   buzzTranspose;    // semitones added to every note of the current sequence
+  uint16_t buzzOffsetMs;     // offset of the note now sounding (chord detection)
+  uint8_t  buzzNote;
+#endif
 
   void init() {
     enabled = true;
@@ -810,6 +836,12 @@ struct BotSounds {
     }
 #endif
 
+#ifdef BUZZER_PIN
+    buzzTranspose = 0;
+    buzzOffsetMs = 0;
+    buzzNote = 0;
+    DBGLN("BotSounds: piezo buzzer mode");
+#else
     if (!useMidi) {
       auto cfg = M5.Speaker.config();
       cfg.sample_rate = 48000;
@@ -826,6 +858,7 @@ struct BotSounds {
       DBGLN("BotSounds: M5.Speaker fallback mode");
 #endif
     }
+#endif // BUZZER_PIN
   }
 
   void setVolume(uint8_t vol) {
@@ -835,7 +868,10 @@ struct BotSounds {
       midiSynth.setVolume(vol);  // setVolume maps 0-255 to 0-127 internally
 #endif
     } else {
+#ifdef TARGET_CORES3
       M5.Speaker.setVolume(vol);
+#endif
+      // Piezo: volume is read per note in fireEvent()/playTone()
     }
   }
 
@@ -875,6 +911,18 @@ struct BotSounds {
     }
     seqEndMs = seqStartMs + maxEnd + 50;  // 50ms grace
 
+#ifdef BUZZER_PIN
+    buzzTranspose = 0;
+    uint8_t lowest = 127;
+    for (uint8_t i = 0; i < def->eventCount; i++) {
+      MidiEvent ev;
+      memcpy_P(&ev, &def->events[i], sizeof(MidiEvent));
+      if (ev.channel == 0 && ev.note > 0 && ev.note < lowest) lowest = ev.note;
+    }
+    while (lowest + buzzTranspose < BUZZER_MIN_NOTE) buzzTranspose += 12;
+    buzzNote = 0;
+#endif
+
     // Set program for default channel
     if (useMidi) {
 #ifdef MIDI_SYNTH_ENABLED
@@ -904,7 +952,11 @@ struct BotSounds {
       addActiveNote(0, note, singleToneEndMs);
 #endif
     } else {
+#ifdef BUZZER_PIN
+      buzzer.tone(freq, durationMs, buzzerDuty(volume));
+#else
       _playSine(freq, durationMs);
+#endif
     }
   }
 
@@ -922,7 +974,11 @@ struct BotSounds {
       }
 #endif
     } else {
+#ifdef BUZZER_PIN
+      buzzer.off();
+#else
       M5.Speaker.stop();
+#endif
     }
 
     playing = false;
@@ -1024,12 +1080,22 @@ private:
       addActiveNote(ch, ev.note, now + ev.durationMs);
 #endif
     } else {
+#ifdef BUZZER_PIN
+      // One voice: lead channel only; within a chord (same offset) the top note wins
+      if (ev.channel != 0) return;
+      if (buzzer.sounding && ev.offsetMs == buzzOffsetMs && ev.note < buzzNote) return;
+      buzzOffsetMs = ev.offsetMs;
+      buzzNote = ev.note;
+      buzzer.tone(midiNoteToFreq(min(127, ev.note + buzzTranspose)), ev.durationMs,
+                  buzzerDuty(volume));
+#else
       // Fallback: play as sine-wave tone (ignore channel/program)
       if (ev.channel != MIDI_CH_PERCUSSION) {
         uint16_t freq = midiNoteToFreq(ev.note);
         _playSine(freq, ev.durationMs);
       }
       // Percussion events are skipped in fallback mode
+#endif
     }
   }
 
@@ -1077,5 +1143,5 @@ private:
 // Global instance
 BotSounds botSounds;
 
-#endif // TARGET_CORES3
+#endif // HAS_SOUND
 #endif // BOT_SOUNDS_H
