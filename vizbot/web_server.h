@@ -1076,8 +1076,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       const f = s.faces || s.ring;
       if (!f) return;
       document.getElementById('facesCard').style.display = '';
-      if (s.ring) {   // 1.69 interior ring reuses this card
-        document.getElementById('fcTitle').textContent = 'LED Ring';
+      if (s.ring) {   // 1.69 interior matrix reuses this card
+        document.getElementById('fcTitle').textContent = 'LED Matrix';
         document.getElementById('fcHint').style.display = 'none';
       }
       if (f.ledCount) {

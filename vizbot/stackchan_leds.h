@@ -19,7 +19,7 @@
 #endif
 
 // ============================================================================
-// Base LED Glow Library — animated effects for the 12-LED WS2812C ring
+// Base LED Glow Library — animated effects for the base LED strips/rings
 // ============================================================================
 // Call scLeds.update() once per frame (~30fps). Effects are self-contained
 // and use millis() for timing so they stay smooth regardless of frame rate.
@@ -36,7 +36,8 @@
 //   8 = Mood (solid color, set externally — used by mood ring)
 //   9 = Audio (spectrum-reactive; idle glow on boards without a mic)
 //  10 = Screen (follows the LCD's ambient background: its colours, and a motion
-//       picked per effect; mood colour when the background isn't ambient)
+//       picked per effect — or, on the 1.69 matrix, a 5x5 copy of the frame;
+//       mood colour when the background isn't ambient)
 
 #define SC_LED_MODE_OFF        0
 #define SC_LED_MODE_BREATHING  1
@@ -152,7 +153,7 @@ struct ScBaseLeds {
 
   void init() {
 #ifdef BOARD_HAS_RING_LEDS
-    mode = SC_LED_MODE_SCREEN;   // the 1.69 ring exists to echo the screen
+    mode = SC_LED_MODE_SCREEN;   // the 1.69 panel exists to echo the screen
 #else
     mode = SC_LED_MODE_RAINBOW;
 #endif
@@ -475,6 +476,10 @@ struct ScBaseLeds {
     extern uint8_t botBackgroundStyle;
     extern uint8_t effectIndex;
     if (botBackgroundStyle != 4) { effectMood(dt, spd); return; }
+#ifdef RING_MATRIX_W
+    mirrorScreen();   // the 1.69 panel is a grid: show the frame itself
+    return;
+#endif
 
     sampleScreenPalette();
     screenT += dt * spd;
@@ -562,6 +567,38 @@ struct ScBaseLeds {
     effectMood(dt, spd);
 #endif
   }
+
+#if defined(HIRES_ENABLED) && defined(RING_MATRIX_W)
+  // The matrix is a tiny screen: box-average each cell of the last ambient
+  // frame (post-kaleidoscope, pre-face) onto its LED. Averaging rather than
+  // point-sampling keeps fine patterns (stripes, checker) from strobing, and a
+  // light ease hides the remaining steps.
+  void mirrorScreen() {
+    extern bool hiResMode;
+    const CRGB* buf = hiResMode ? hiResCrgbBuf : pixelModeBuf;
+    const uint8_t w = hiResMode ? HIRES_COLS : PIXEL_MODE_COLS;
+    const uint8_t h = hiResMode ? HIRES_ROWS : PIXEL_MODE_ROWS;
+
+    for (uint8_t y = 0; y < RING_MATRIX_H; y++) {
+      const uint8_t y0 = y * h / RING_MATRIX_H, y1 = (y + 1) * h / RING_MATRIX_H;
+      for (uint8_t x = 0; x < RING_MATRIX_W; x++) {
+        const uint8_t x0 = x * w / RING_MATRIX_W, x1 = (x + 1) * w / RING_MATRIX_W;
+        uint32_t r = 0, g = 0, b = 0;
+        for (uint8_t py = y0; py < y1; py++) {
+          for (uint8_t px = x0; px < x1; px++) {
+            const CRGB& p = buf[py * w + px];
+            r += p.r; g += p.g; b += p.b;
+          }
+        }
+        const uint16_t n = (y1 - y0) * (x1 - x0);
+        const uint8_t i = scRingXY(x, y);
+        CRGB c(ledR[i], ledG[i], ledB[i]);
+        nblend(c, CRGB(r / n, g / n, b / n), 128);
+        setLed(i, c);
+      }
+    }
+  }
+#endif
 
 #ifdef HIRES_ENABLED
   // Point-sample a 4x4 grid of the last ambient frame (post-kaleidoscope, pre-

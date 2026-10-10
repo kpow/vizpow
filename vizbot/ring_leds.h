@@ -4,22 +4,27 @@
 #ifdef BOARD_HAS_RING_LEDS
 
 // ============================================================================
-// Interior LED ring on the 1.69 — a third backend for the base LED engine
+// Interior LED matrix on the 1.69 — a third backend for the base LED engine
 // ============================================================================
-// A small WS2812-style ring wired to RING_LED_PIN, lighting the inside of the
-// bot. Like the Faces strips it is driven directly over RMT, so it only has to
-// provide the entry points stackchan_leds.h calls; the effect engine, modes and
-// web/touch controls are shared with the stack-chan and Faces bases.
+// A RING_MATRIX_W x RING_MATRIX_H WS2812 panel wired to RING_LED_PIN, lighting
+// the inside of the bot. Like the Faces strips it is driven directly over RMT,
+// so it only has to provide the entry points stackchan_leds.h calls; the effect
+// engine, modes and web/touch controls are shared with the stack-chan and Faces
+// bases.
+//
+// LED indices are chain order. The ring-style effects (chase, rainbow...) walk
+// the chain, which on a serpentine panel is one continuous path. Screen mode
+// mirrors the LCD and addresses the panel by (x, y) through scRingXY().
 //
 // Hardware notes:
 //
 //  * Power it from 5V (VBUS), not the 3V3 rail. The 1.69's LDO already looks
-//    marginal under full WiFi TX (see WIFI_TX_POWER in config.h); a ring pulling
+//    marginal under full WiFi TX (see WIFI_TX_POWER in config.h); a panel pulling
 //    a few hundred mA from the same rail would make that worse. The 3.3V data
 //    line drives a 5V WS2812 fine over a short wire.
 //
 //  * bootStageLEDs() registers the 8x8 matrix array on DATA_PIN with FastLED on
-//    every target, so it owns FastLED[0] and the ring is FastLED[1]. Same trap
+//    every target, so it owns FastLED[0] and this panel is FastLED[1]. Same trap
 //    as faces_base.h: show through our own controller, never FastLED.show().
 // ============================================================================
 
@@ -38,7 +43,16 @@ inline void scInitBaseLeds() {
   for (int i = 0; i < SC_BASE_LED_COUNT; i++) scBaseLeds[i] = CRGB::Black;
   scBaseCtrl->showLeds(255);
   sysStatus.scBaseLedsReady = true;
-  Serial.printf("[ring] %d LEDs on GPIO%d\n", SC_BASE_LED_COUNT, RING_LED_PIN);
+  Serial.printf("[ring] %dx%d matrix on GPIO%d\n", RING_MATRIX_W, RING_MATRIX_H,
+                RING_LED_PIN);
+}
+
+// Chain index of panel cell (x, y); (0, 0) = top-left as seen from outside
+inline uint8_t scRingXY(uint8_t x, uint8_t y) {
+#if RING_SERPENTINE
+  if (y & 1) x = RING_MATRIX_W - 1 - x;
+#endif
+  return y * RING_MATRIX_W + x;
 }
 
 inline void scSetBaseLedColor(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {

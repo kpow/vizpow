@@ -168,7 +168,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.7.13"
+#define FIRMWARE_VERSION "3.7.15"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -214,15 +214,20 @@
 #endif
 
 // ============================================================================
-// Interior LED ring (1.69 build flag: -DBOARD_HAS_RING_LEDS)
+// Interior LED matrix (1.69 build flag: -DBOARD_HAS_RING_LEDS)
 // ============================================================================
-// A small addressable ring that lights the inside of the bot. It runs the same
-// base LED engine as the stack-chan ring and Faces strips (ring_leds.h).
+// A small addressable panel that lights the inside of the bot. It runs the same
+// base LED engine as the stack-chan ring and Faces strips (ring_leds.h). The
+// flag keeps its "ring" name (it began as an 8-LED ring) so NVS keys and the
+// /state "ring" object stay stable.
 #ifdef BOARD_HAS_RING_LEDS
   #ifndef BOARD_ESP32S3_LCD_169
     #error "BOARD_HAS_RING_LEDS is wired for the 1.69 only (GPIO17)"
   #endif
-  #define SC_BASE_LED_COUNT  8            // 8 x WS2812B, powered from 5V
+  #define RING_MATRIX_W      5            // 5x5 WS2812B, powered from 5V
+  #define RING_MATRIX_H      5
+  #define RING_SERPENTINE    1            // odd rows run right-to-left
+  #define SC_BASE_LED_COUNT  (RING_MATRIX_W * RING_MATRIX_H)
   #define RING_LED_PIN       17
   #define RING_LED_CHIPSET   WS2812B
   #define RING_LED_ORDER     GRB
