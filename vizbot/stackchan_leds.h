@@ -36,7 +36,7 @@
 //   8 = Mood (solid color, set externally — used by mood ring)
 //   9 = Audio (spectrum-reactive; idle glow on boards without a mic)
 //  10 = Screen (follows the LCD's ambient background: its colours, and a motion
-//       picked per effect — or, on the 1.69 matrix, a 4x4 copy of the frame;
+//       picked per effect — or, on the 1.69 matrix, a 5x5 copy of the frame;
 //       mood colour when the background isn't ambient)
 
 #define SC_LED_MODE_OFF        0
