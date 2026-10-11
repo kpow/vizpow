@@ -400,6 +400,10 @@ static void uiSetScene(uint8_t i) {
   markSettingsDirty();
 }
 
+#ifdef PWR_HOLD_PIN
+void pwrPowerOff();   // power_button.h (included later)
+#endif
+
 // UI sounds: CoreS3 speaker/MIDI, 1.69 piezo
 #ifdef HAS_SOUND
 #define uiSound(seq) botSounds.play(seq)
@@ -1041,7 +1045,7 @@ static void uiBuildRows(uint8_t cat) {
       uiAddRow("Games", ROW_HOLD, RK_GAMES, "Hold");
 #endif
       uiAddRow("Restart", ROW_HOLD, RK_RESTART, "Hold");
-#ifdef BOARD_HAS_STACKCHAN_BASE
+#if defined(BOARD_HAS_STACKCHAN_BASE) || defined(PWR_HOLD_PIN)
       uiAddRow("Power off", ROW_HOLD, RK_POWEROFF, "Hold");
 #endif
       break;
@@ -1876,6 +1880,9 @@ void handleTouch() {
         delay(200);
         M5.Power.powerOff();
       }
+#endif
+#ifdef PWR_HOLD_PIN
+      if (key == RK_POWEROFF) pwrPowerOff();  // restarts instead when on USB power
 #endif
     }
 

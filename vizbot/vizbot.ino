@@ -77,6 +77,7 @@
 #include "stackchan_idle.h"
 #endif
 #endif
+#include "power_button.h"   // 1.69 PWR button hold-to-power-off; no-op without PWR_HOLD_PIN
 #include "task_manager.h"
 #include "esp_now_mesh.h"
 #include "wifi_provisioning.h"
@@ -336,6 +337,11 @@ static void* tlsCalloc(size_t n, size_t size) {
 }
 
 void setup() {
+  #ifdef PWR_HOLD_PIN
+  pinMode(PWR_HOLD_PIN, OUTPUT);
+  digitalWrite(PWR_HOLD_PIN, HIGH);   // Latch battery power first — before the 500 ms serial delay
+  powerButton.init();
+  #endif
   mbedtls_platform_set_calloc_free(tlsCalloc, heap_caps_free);   // before any TLS
   Serial.begin(115200);
   delay(500);
@@ -610,6 +616,9 @@ void loop() {
   #endif
   #ifdef BUZZER_PIN
   buzzer.update();
+  #endif
+  #ifdef PWR_HOLD_PIN
+  powerButton.update();
   #endif
 
   // Apply queued commands from WiFi/touch before rendering

@@ -117,6 +117,11 @@
   // printed on the PCB); the old rev used GPIO33, which octal PSRAM reserves.
   #define BUZZER_PIN 42
 
+  // Battery power latch (new board rev; old rev is GPIO35). PWR button only powers
+  // the board while held — firmware must hold SYS_EN HIGH to stay on.
+  #define PWR_HOLD_PIN 41
+  #define PWR_KEY_PIN 40           // SYS_OUT: LOW while the PWR button is down (power_button.h)
+
 #elif defined(BOARD_ESP32S3_LCD_13)
   // Waveshare ESP32-S3-LCD-1.3 board pins (no touch, battery powered)
   #define DATA_PIN 14              // External LED matrix data pin (if used)
@@ -168,7 +173,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.7.15"
+#define FIRMWARE_VERSION "3.7.18"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
