@@ -525,6 +525,7 @@ static void uiDrawOutlineBtn(const UiRect& r, bool pressed, uint16_t hue) {
 static const char* uiHostLabel() {
   static char buf[40];
   if (sysStatus.staConnected) snprintf(buf, sizeof(buf), "%s.local", mdnsHostname);
+  else if (lowPowerMode && !wifiEnabled) snprintf(buf, sizeof(buf), "Low power");
   else snprintf(buf, sizeof(buf), "%s", apSSID);
   return buf;
 }
@@ -542,7 +543,7 @@ static void uiRenderTopPill() {
   const char* host = uiHostLabel();
   int16_t tw = uiTextW(host, &fonts::DejaVu12);
   int16_t x = UI_CX - (tw + 18) / 2;
-  uiIcon(sysStatus.staConnected ? IC_WIFI : IC_HOTSPOT, x, 11, 14,
+  uiIcon(sysStatus.staConnected ? IC_WIFI : (lowPowerMode && !wifiEnabled) ? IC_MOON : IC_HOTSPOT, x, 11, 14,
          pressed ? UI_C_BG : UI_C_CONNECT, UI_C_SURFACE, 2.4f);
   uiText(host, x + 18, 18, &fonts::DejaVu12, pressed ? UI_C_BG : UI_C_SYSTEM, UI_ML);
 }
@@ -904,7 +905,7 @@ enum UiRowKey : uint8_t {
   RK_FIRMWARE, RK_DEVICE, RK_UPTIME, RK_MEMORY, RK_RESTART,
   RK_BASE_LEDS, RK_LED_MODE, RK_SOUND, RK_VOLUME, RK_AUDIOFX, RK_REACT,
   RK_CHILL, RK_CHILL_TIME, RK_NOD, RK_SHAKE, RK_LOOKUP, RK_LOOKDOWN, RK_CENTER,
-  RK_BATTERY, RK_GAMES, RK_POWEROFF,
+  RK_BATTERY, RK_GAMES, RK_POWEROFF, RK_LOWPOWER,
 };
 struct UiRow {
   const char* label;
@@ -1043,6 +1044,10 @@ static void uiBuildRows(uint8_t cat) {
 #endif
 #ifdef BOARD_HAS_FACES_BASE
       uiAddRow("Games", ROW_HOLD, RK_GAMES, "Hold");
+#endif
+#ifdef HAS_LOW_POWER_MODE
+      // Named for what holding it does: enter low power, or go back to full
+      uiAddRow(lowPowerMode ? "Full power" : "Low power", ROW_HOLD, RK_LOWPOWER, "Hold");
 #endif
       uiAddRow("Restart", ROW_HOLD, RK_RESTART, "Hold");
 #if defined(BOARD_HAS_STACKCHAN_BASE) || defined(PWR_HOLD_PIN)
@@ -1865,6 +1870,17 @@ void handleTouch() {
         delay(300);
         ESP.restart();
       }
+#ifdef HAS_LOW_POWER_MODE
+      if (key == RK_LOWPOWER) {
+        // Radio, CPU clock and backlight are all set up at boot, so restart into it
+        lowPowerMode = !lowPowerMode;
+        saveSettings();
+        uiToast(lowPowerMode ? "Low power on" : "Full power", UI_C_OFF, 5000);
+        runBotMode();
+        delay(300);
+        ESP.restart();
+      }
+#endif
 #ifdef BOARD_HAS_FACES_BASE
       if (key == RK_GAMES) bootToChooser();  // does not return
 #endif

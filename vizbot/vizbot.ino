@@ -91,6 +91,7 @@ SensorQMI8658 imu;
 WebServer server(80);
 DNSServer dnsServer;
 bool wifiEnabled = false;
+bool lowPowerMode = false;   // System > Low power (HAS_LOW_POWER_MODE boards); applied at boot
 
 // State variables
 uint8_t effectIndex = 0;
@@ -302,6 +303,10 @@ void startWifiAP() {
   if (!sysStatus.mdnsReady) {
     sysStatus.mdnsReady = startMDNS();
   }
+
+  // Radio was off at boot (low power mode): the server task and mesh never started
+  if (!wifiTaskHandle) startWifiTask();
+  initMesh();
 }
 
 // Stop the WiFi AP hotspot
@@ -347,6 +352,13 @@ void setup() {
   delay(500);
 
   DBGLN("\n=== vizBot starting ===");
+  #ifdef HAS_LOW_POWER_MODE
+  loadLowPowerMode();   // before the boot sequence, which starts the radio
+  if (lowPowerMode) {
+    setCpuFrequencyMhz(LOW_POWER_CPU_MHZ);
+    DBGLN("Low power mode: radio off, CPU " + String(getCpuFrequencyMhz()) + " MHz");
+  }
+  #endif
   #ifdef BUZZER_PIN
   buzzer.init();    // Drive the piezo pin LOW first — floating, it draws current and heats the board
   #endif

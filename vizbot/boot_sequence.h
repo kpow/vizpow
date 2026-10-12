@@ -57,6 +57,7 @@ SystemStatus sysStatus = {};
 
 // External GFX pointer (initialized in display_lcd.h before boot runs)
 extern GfxDevice *gfx;
+extern bool lowPowerMode;
 
 // Global stage counter (for [n/total] labels across all columns)
 static uint8_t bootStageIndex = 0;
@@ -146,13 +147,13 @@ void bootDrawResult(bool success, const char* detail = nullptr) {
 }
 
 // Draw deferred/stub status — neutral color, does NOT increment failCount
-void bootDrawDeferred() {
+void bootDrawDeferred(const char* text = "DEFER") {
   int16_t y = BOOT_TOP_MARGIN + (bootRowInCol - 1) * bootLineH;
 
   gfx->setTextSize(bootTextSz);
   gfx->setCursor(bootStatusX, y);
   gfx->setTextColor(BOOT_COLOR_DEFER);
-  gfx->print("DEFER");
+  gfx->print(text);
 }
 
 // Switch to the right column (StackChan stages)
@@ -201,6 +202,10 @@ void bootDrawSummary() {
     gfx->setTextColor(BOOT_COLOR_DETAIL);
     gfx->print("AP: ");
     gfx->print(sysStatus.apIP);
+  } else if (lowPowerMode) {
+    gfx->setCursor(BOOT_LEFT_MARGIN, y + 34);
+    gfx->setTextColor(BOOT_COLOR_DETAIL);
+    gfx->print("Low power: radio off");
   }
 }
 
@@ -493,51 +498,60 @@ void runBootSequence() {
   }
   #endif
 
-  // --- WiFi STA ---
-  bootDrawStage("WiFi STA");
-  ok = bootAttemptSTA();
-  if (ok) {
-    char ipStr[20];
-    snprintf(ipStr, sizeof(ipStr), "%s", sysStatus.staIP.toString().c_str());
-    bootDrawResult(true, ipStr);
-  } else {
-    bootDrawResult(false, "Connect failed");
-  }
-  delay(80);
-
-  // --- WiFi AP ---
-  bootDrawStage("WiFi AP");
-  ok = bootStageWiFi();
-  if (ok) {
-    char ipStr[20];
-    snprintf(ipStr, sizeof(ipStr), "%s", sysStatus.apIP.toString().c_str());
-    bootDrawResult(true, ipStr);
-  } else {
-    bootDrawResult(false, "AP start failed");
-  }
-  delay(80);
-
-  // --- Web Server ---
-  bootDrawStage("Web Srv");
-  ok = bootStageWebServer();
-  bootDrawResult(ok, ok ? "Port 80" : "No WiFi");
-  delay(80);
-
-  // --- DNS + mDNS (Captive Portal) ---
-  bootDrawStage("Portal");
-  ok = bootStageDNS();
-  if (ok) {
-    char mdnsLabel[28];
-    if (sysStatus.mdnsReady) {
-      snprintf(mdnsLabel, sizeof(mdnsLabel), "DNS + %s.local", mdnsHostname);
-      bootDrawResult(true, mdnsLabel);
-    } else {
-      bootDrawResult(true, "DNS only");
+  if (lowPowerMode) {
+    // Low power mode: the radio never starts, so nothing network-side does either
+    for (const char* stage : {"WiFi STA", "WiFi AP", "Web Srv", "Portal"}) {
+      bootDrawStage(stage);
+      bootDrawDeferred("OFF");
+      delay(80);
     }
   } else {
-    bootDrawResult(false, "No WiFi");
+    // --- WiFi STA ---
+    bootDrawStage("WiFi STA");
+    ok = bootAttemptSTA();
+    if (ok) {
+      char ipStr[20];
+      snprintf(ipStr, sizeof(ipStr), "%s", sysStatus.staIP.toString().c_str());
+      bootDrawResult(true, ipStr);
+    } else {
+      bootDrawResult(false, "Connect failed");
+    }
+    delay(80);
+
+    // --- WiFi AP ---
+    bootDrawStage("WiFi AP");
+    ok = bootStageWiFi();
+    if (ok) {
+      char ipStr[20];
+      snprintf(ipStr, sizeof(ipStr), "%s", sysStatus.apIP.toString().c_str());
+      bootDrawResult(true, ipStr);
+    } else {
+      bootDrawResult(false, "AP start failed");
+    }
+    delay(80);
+
+    // --- Web Server ---
+    bootDrawStage("Web Srv");
+    ok = bootStageWebServer();
+    bootDrawResult(ok, ok ? "Port 80" : "No WiFi");
+    delay(80);
+
+    // --- DNS + mDNS (Captive Portal) ---
+    bootDrawStage("Portal");
+    ok = bootStageDNS();
+    if (ok) {
+      char mdnsLabel[28];
+      if (sysStatus.mdnsReady) {
+        snprintf(mdnsLabel, sizeof(mdnsLabel), "DNS + %s.local", mdnsHostname);
+        bootDrawResult(true, mdnsLabel);
+      } else {
+        bootDrawResult(true, "DNS only");
+      }
+    } else {
+      bootDrawResult(false, "No WiFi");
+    }
+    delay(80);
   }
-  delay(80);
 
 #ifdef CLOUD_ENABLED
   // --- LittleFS ---

@@ -173,7 +173,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.7.18"
+#define FIRMWARE_VERSION "3.7.19"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -236,6 +236,20 @@
   #define RING_LED_PIN       17
   #define RING_LED_CHIPSET   WS2812B
   #define RING_LED_ORDER     GRB
+#endif
+
+// ============================================================================
+// Low power mode (battery / pendant) — System > Low power in the touch UI
+// ============================================================================
+// A saved setting, applied at boot. When on, the radio is never started — no STA
+// join, hotspot, web server, mesh or cloud — the CPU clocks down and the
+// backlight is scaled back. The Hotspot toggle on the Connect screen still
+// brings the control page up for a session without leaving low power.
+// 1.69 only: it needs the touch UI to get back out.
+#ifdef BOARD_ESP32S3_LCD_169
+  #define HAS_LOW_POWER_MODE
+  #define LOW_POWER_CPU_MHZ     80   // 240 normally. 80 is the floor for USB serial and WiFi; 160 if animation drags
+  #define LOW_POWER_BL_PERCENT  60   // backlight runs at this % of the brightness setting
 #endif
 
 // Any target with an addressable strip the base LED engine (stackchan_leds.h) drives

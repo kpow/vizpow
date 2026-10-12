@@ -21,6 +21,7 @@ extern uint8_t paletteIndex;
 extern bool    autoCycle;
 extern uint8_t botBackgroundStyle;
 extern uint8_t lcdBrightness;
+extern bool    lowPowerMode;
 extern bool    hiResMode;
 extern uint8_t kaleidoscopeMode;
 extern uint8_t kaleidoscopeSpin;
@@ -50,6 +51,18 @@ void applyTimezone() {
   setenv("TZ", timezoneTZ, 1);
   tzset();
 }
+
+// ── Low power mode ────────────────────────────────────────────────────────────
+// Read on its own, ahead of loadSettings(): the boot sequence needs it before
+// it decides whether to start the radio.
+#ifdef HAS_LOW_POWER_MODE
+void loadLowPowerMode() {
+  Preferences prefs;
+  if (!prefs.begin("vizbot", true)) return;   // first boot: no namespace yet
+  lowPowerMode = prefs.getBool("lowPwr", false);
+  prefs.end();
+}
+#endif
 
 // ── Load ────────────────────────────────────────────────────────────────────
 void loadSettings() {
@@ -153,6 +166,9 @@ void saveSettings() {
   prefs.putString("wLat",   weatherLat);
   prefs.putString("wLon",   weatherLon);
   prefs.putString("tz",     timezoneTZ);
+  #ifdef HAS_LOW_POWER_MODE
+  prefs.putBool ("lowPwr",  lowPowerMode);
+  #endif
 
   #ifdef BOARD_HAS_RING_LEDS
   prefs.putUChar("ringMode", scLeds.mode);
