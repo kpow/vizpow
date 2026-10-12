@@ -77,6 +77,7 @@
 #include "stackchan_idle.h"
 #endif
 #endif
+#include "power_button.h"   // 1.69 PWR button hold-to-power-off; no-op without PWR_HOLD_PIN
 #include "task_manager.h"
 #include "esp_now_mesh.h"
 #include "wifi_provisioning.h"
@@ -90,6 +91,7 @@ SensorQMI8658 imu;
 WebServer server(80);
 DNSServer dnsServer;
 bool wifiEnabled = false;
+bool lowPowerMode = false;   // System > Low power (HAS_LOW_POWER_MODE boards); applied at boot
 
 // State variables
 uint8_t effectIndex = 0;
@@ -301,6 +303,10 @@ void startWifiAP() {
   if (!sysStatus.mdnsReady) {
     sysStatus.mdnsReady = startMDNS();
   }
+
+  // Radio was off at boot (low power mode): the server task and mesh never started
+  if (!wifiTaskHandle) startWifiTask();
+  initMesh();
 }
 
 // Stop the WiFi AP hotspot
@@ -336,11 +342,23 @@ static void* tlsCalloc(size_t n, size_t size) {
 }
 
 void setup() {
+  #ifdef PWR_HOLD_PIN
+  pinMode(PWR_HOLD_PIN, OUTPUT);
+  digitalWrite(PWR_HOLD_PIN, HIGH);   // Latch battery power first — before the 500 ms serial delay
+  powerButton.init();
+  #endif
   mbedtls_platform_set_calloc_free(tlsCalloc, heap_caps_free);   // before any TLS
   Serial.begin(115200);
   delay(500);
 
   DBGLN("\n=== vizBot starting ===");
+  #ifdef HAS_LOW_POWER_MODE
+  loadLowPowerMode();   // before the boot sequence, which starts the radio
+  if (lowPowerMode) {
+    setCpuFrequencyMhz(LOW_POWER_CPU_MHZ);
+    DBGLN("Low power mode: radio off, CPU " + String(getCpuFrequencyMhz()) + " MHz");
+  }
+  #endif
   #ifdef BUZZER_PIN
   buzzer.init();    // Drive the piezo pin LOW first — floating, it draws current and heats the board
   #endif
@@ -610,6 +628,9 @@ void loop() {
   #endif
   #ifdef BUZZER_PIN
   buzzer.update();
+  #endif
+  #ifdef PWR_HOLD_PIN
+  powerButton.update();
   #endif
 
   // Apply queued commands from WiFi/touch before rendering

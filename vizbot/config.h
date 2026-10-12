@@ -117,6 +117,11 @@
   // printed on the PCB); the old rev used GPIO33, which octal PSRAM reserves.
   #define BUZZER_PIN 42
 
+  // Battery power latch (new board rev; old rev is GPIO35). PWR button only powers
+  // the board while held — firmware must hold SYS_EN HIGH to stay on.
+  #define PWR_HOLD_PIN 41
+  #define PWR_KEY_PIN 40           // SYS_OUT: LOW while the PWR button is down (power_button.h)
+
 #elif defined(BOARD_ESP32S3_LCD_13)
   // Waveshare ESP32-S3-LCD-1.3 board pins (no touch, battery powered)
   #define DATA_PIN 14              // External LED matrix data pin (if used)
@@ -168,7 +173,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.7.15"
+#define FIRMWARE_VERSION "3.7.20"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -231,6 +236,20 @@
   #define RING_LED_PIN       17
   #define RING_LED_CHIPSET   WS2812B
   #define RING_LED_ORDER     GRB
+#endif
+
+// ============================================================================
+// Low power mode (battery / pendant) — System > Low power in the touch UI
+// ============================================================================
+// A saved setting, applied at boot. When on, the radio is never started — no STA
+// join, hotspot, web server, mesh or cloud — the CPU clocks down and the
+// backlight is scaled back. The Hotspot toggle on the Connect screen still
+// brings the control page up for a session without leaving low power.
+// 1.69 only: it needs the touch UI to get back out.
+#ifdef BOARD_ESP32S3_LCD_169
+  #define HAS_LOW_POWER_MODE
+  #define LOW_POWER_CPU_MHZ     80   // 240 normally. 80 is the floor for USB serial and WiFi; 160 if animation drags
+  #define LOW_POWER_BL_PERCENT  60   // backlight runs at this % of the brightness setting
 #endif
 
 // Any target with an addressable strip the base LED engine (stackchan_leds.h) drives

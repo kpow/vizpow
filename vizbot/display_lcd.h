@@ -26,6 +26,8 @@ bool hiResRenderedThisFrame = false;  // Set by hi-res effects to skip 8x8 rende
 // Forward declaration (defined in settings.h, included later)
 void markSettingsDirty();
 
+extern bool lowPowerMode;   // vizbot.ino
+
 // Toggle hi-res mode
 inline void toggleHiResMode() {
   hiResMode = !hiResMode;
@@ -464,6 +466,9 @@ void setLCDBacklight(uint8_t b) {
   #ifdef TARGET_CORES3
     M5.Display.setBrightness(b);
   #else
+    #ifdef HAS_LOW_POWER_MODE
+    if (lowPowerMode) b = (uint16_t)b * LOW_POWER_BL_PERCENT / 100;
+    #endif
     _lcd_display.setBrightness(b);
   #endif
 }
