@@ -25,7 +25,7 @@
 
 // CST816T Touch Controller (TARGET_LCD only)
 #ifndef TARGET_CORES3
-#define TOUCH_RST_PIN 21   // CST816T reset pin (NOT used on Core S3 — GPIO21 is touch IRQ there)
+#define TOUCH_RST_PIN 13   // CST816T reset, TP_RST on the Waveshare 1.69 (Core S3 uses M5Unified)
 #endif
 
 // CST816T Register addresses
@@ -35,6 +35,7 @@
 #define TOUCH_REG_XPOS_L 0x04
 #define TOUCH_REG_YPOS_H 0x05
 #define TOUCH_REG_YPOS_L 0x06
+#define TOUCH_REG_DIS_AUTOSLEEP 0xFE   // non-zero: stay awake
 
 // Touch timing
 #define TOUCH_COOLDOWN_MS 400
@@ -148,32 +149,18 @@ bool initTouch() {
     if (Wire.endTransmission() == 0) {
       touchI2CAddr = addresses[i];
       touchInitialized = true;
+      // Out of reset the CST816T drops into standby 2 s after the last touch and
+      // then NACKs its address until a finger wakes it. readTouch() polls, so
+      // every idle poll failed. Keep it awake instead.
+      Wire.beginTransmission(touchI2CAddr);
+      Wire.write(TOUCH_REG_DIS_AUTOSLEEP);
+      Wire.write(0x01);
+      Wire.endTransmission();
       DBG("Touch OK at 0x");
-      DBGLN(touchI2CAddr, HEX);
+      DBG(touchI2CAddr, HEX);
+      DBG(", chip id 0x");
+      DBGLN(touchReadRegister(0xA7), HEX);
       return true;
-    }
-  }
-
-  uint8_t rstPins[] = {16, 9, 13};
-  for (int p = 0; p < 3; p++) {
-    pinMode(rstPins[p], OUTPUT);
-    digitalWrite(rstPins[p], LOW);
-    delay(10);
-    digitalWrite(rstPins[p], HIGH);
-    delay(100);
-
-    for (int i = 0; i < 3; i++) {
-      Wire.beginTransmission(addresses[i]);
-      if (Wire.endTransmission() == 0) {
-        touchI2CAddr = addresses[i];
-        touchInitialized = true;
-        DBG("Touch OK at 0x");
-        DBG(touchI2CAddr, HEX);
-        DBG(" (RST pin ");
-        DBG(rstPins[p]);
-        DBGLN(")");
-        return true;
-      }
     }
   }
 
