@@ -17,8 +17,8 @@ extern bool lowPowerMode;   // vizbot.ino
 // VBAT reaches BAT_ADC_PIN through a 200k/100k divider, so the pin sits at a
 // third of the battery voltage (4.2 V -> 1.4 V). The pin is on ADC1, which
 // keeps working with the radio up. analogReadMilliVolts() applies the eFuse
-// calibration; 6 dB attenuation covers 0..1.6 V at the pin and is the range
-// the S3 measures best.
+// calibration. It reads at the core's default 11 dB attenuation, and the curve
+// below was measured that way: change one and the other has to be redone.
 //
 // The level is read off the voltage, so it is a rough gauge, not a fuel gauge.
 // The curve below is this board's own run-down, so it already includes the sag
@@ -129,7 +129,6 @@ struct BatteryAdc {
 #endif
 
   void init() {
-    analogSetPinAttenuation(BAT_ADC_PIN, ADC_6db);
     volts = readVolts();
     refresh(true);
   }
