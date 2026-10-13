@@ -2448,9 +2448,36 @@ void handleDebugWifiDrop() {
   WiFi.disconnect(false, false);
 }
 
+#ifdef BAT_RUNDOWN_LOG
+// GET /battery/log → the run-down log as CSV (uptime s, smoothed mV, raw mV, usb)
+// GET /battery/log?clear=1 → delete it
+// GET /battery/log?fake=3200 → pretend the battery reads 3200 mV on battery
+//                               power (exercises the cutoff); fake=0 ends it
+void handleBatteryLog() {
+  if (server.hasArg("fake")) {
+    batteryAdc.fakeMv = server.arg("fake").toInt();
+    server.send(200, "text/plain", batteryAdc.fakeMv ? "faking" : "real");
+    return;
+  }
+  if (server.hasArg("clear")) {
+    LittleFS.remove(BAT_RUNLOG_PATH);
+    batteryAdc.runLogMarked = false;
+    server.send(200, "text/plain", "cleared");
+    return;
+  }
+  File f = LittleFS.open(BAT_RUNLOG_PATH, "r");
+  if (!f) { server.send(404, "text/plain", "no log"); return; }
+  server.streamFile(f, "text/csv");
+  f.close();
+}
+#endif
+
 void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/state", handleState);
+  #ifdef BAT_RUNDOWN_LOG
+  server.on("/battery/log", handleBatteryLog);
+  #endif
   #ifdef TOUCH_UI_V2
   server.on("/debug/screen", handleDebugScreen);
   server.on("/debug/touch", handleDebugTouch);
