@@ -122,6 +122,19 @@
   #define PWR_HOLD_PIN 41
   #define PWR_KEY_PIN 40           // SYS_OUT: LOW while the PWR button is down (power_button.h)
 
+  // Battery sense (battery_adc.h): VBAT through the onboard 200k/100k divider.
+  // GPIO1 and the x3 ratio checked against a multimeter on this rev (4.146 V read, 4.1 V measured).
+  #define BAT_ADC_PIN 1
+  #define BAT_ADC_DIVIDER 3.0f
+  // Power off below this (power_button.h). 3.30 V was 12 minutes from dead on the
+  // measured run-down, and is where the voltage starts to fall away fast.
+  #define BAT_CUTOFF_MV       3300
+  #define BAT_CUTOFF_HOLD_MS  10000   // smoothed voltage must stay under it this long
+  #define BAT_CUTOFF_REARM_MV 100     // on a charger: recover this far before it can fire again
+  // Calibration aid: append the voltage to LittleFS once a minute and serve it at
+  // /battery/log, to measure a real run-down curve. Off in release builds.
+  // #define BAT_RUNDOWN_LOG
+
 #elif defined(BOARD_ESP32S3_LCD_13)
   // Waveshare ESP32-S3-LCD-1.3 board pins (no touch, battery powered)
   #define DATA_PIN 14              // External LED matrix data pin (if used)
@@ -173,7 +186,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.7.20"
+#define FIRMWARE_VERSION "3.7.27"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields

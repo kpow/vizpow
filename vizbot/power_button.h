@@ -17,6 +17,11 @@
 //
 // On USB the latch has no effect — the board stays powered — so we restart
 // instead of sitting there dark with the latch released.
+//
+// Low-battery cutoff (BAT_CUTOFF_MV): nothing on the board stops the cell being
+// drained flat — a measured run-down went to 2.6 V and rebooted there. Once
+// the smoothed battery voltage has sat under the cutoff for BAT_CUTOFF_HOLD_MS
+// the latch is dropped the same way.
 // ============================================================================
 
 #define PWR_OFF_HOLD_MS   2000
@@ -27,6 +32,10 @@ struct PowerButton {
   bool down = false;
   unsigned long changeMs = 0;
   unsigned long downMs = 0;
+#ifdef BAT_CUTOFF_MV
+  unsigned long lowSinceMs = 0;
+  bool cutoffSpent = false;   // latch drop left the board running: on a charger
+#endif
 
   void init() {
     pinMode(PWR_KEY_PIN, INPUT_PULLUP);
@@ -36,6 +45,9 @@ struct PowerButton {
   void update() {
     bool raw = digitalRead(PWR_KEY_PIN) == LOW;
     unsigned long now = millis();
+#ifdef BAT_CUTOFF_MV
+    checkBattery(now);
+#endif
     if (raw != down) {
       if (changeMs == 0) changeMs = now;
       if (now - changeMs < PWR_DEBOUNCE_MS) return;
@@ -50,11 +62,12 @@ struct PowerButton {
     if (armed && down && now - downMs >= PWR_OFF_HOLD_MS) powerOff();
   }
 
-  void powerOff() {
-    DBGLN("PWR button: held — powering off");
+  // Say goodbye, go dark and drop the latch. Returns only if the board is still
+  // powered afterwards, which means something external is feeding it.
+  void shutDown(const char* msg) {
     if (settingsDirty) saveSettings();
     #ifdef TOUCH_UI_V2
-    uiToast("Goodbye!", UI_C_OFF, 5000);
+    uiToast(msg, UI_C_OFF, 5000);
     uiSound(SEQ_POWER_DOWN);
     #endif
     // Let the toast and the power-down sound play out
@@ -79,8 +92,40 @@ struct PowerButton {
     digitalWrite(PWR_HOLD_PIN, LOW);
     while (digitalRead(PWR_KEY_PIN) == LOW) delay(10);   // button still feeds the board
     delay(500);
+  }
+
+  void powerOff() {
+    DBGLN("PWR button: held — powering off");
+    shutDown("Goodbye!");
     ESP.restart();   // still running = external power; come back up
   }
+
+#ifdef BAT_CUTOFF_MV
+  void checkBattery(unsigned long now) {
+    int mv = (int)(batteryAdc.volts * 1000.0f);
+    if (batteryAdc.usb || mv >= BAT_CUTOFF_MV) {
+      lowSinceMs = 0;
+      if (mv >= BAT_CUTOFF_MV + BAT_CUTOFF_REARM_MV) cutoffSpent = false;
+      return;
+    }
+    if (cutoffSpent) return;
+    if (lowSinceMs == 0) { lowSinceMs = now | 1; return; }
+    if (now - lowSinceMs < BAT_CUTOFF_HOLD_MS) return;
+
+    DBGLN("Battery empty — powering off");
+    #ifdef BAT_RUNDOWN_LOG
+    batteryAdc.runLogNote("cutoff");
+    #endif
+    shutDown("Battery empty");
+    // Still running: a charger that sends no USB frames is feeding the board, and
+    // losing to the load. Carry on, and leave the cutoff alone until it recovers.
+    DBGLN("Battery empty — still powered, staying on");
+    digitalWrite(PWR_HOLD_PIN, HIGH);
+    setLCDBacklight(lcdBrightness);
+    lowSinceMs = 0;
+    cutoffSpent = true;
+  }
+#endif
 };
 
 static PowerButton powerButton;

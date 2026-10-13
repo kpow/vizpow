@@ -39,6 +39,7 @@
 #include "palettes.h"
 #include "display_lcd.h"    // Must come before any file that calls gfx->methods() (defines DisplayProxy)
 #include "buzzer.h"         // 1.69 passive piezo (LEDC square wave); no-op without BUZZER_PIN
+#include "battery_adc.h"    // 1.69 battery level on ADC1 (must come before the touch UI); no-op without BAT_ADC_PIN
 #include "tween.h"          // Tween animation system (must come before bot_mode.h)
 #include "midi_synth.h"     // SAM2695 driver (CoreS3) + GM constants (must come before bot_sounds.h)
 #include "bot_sounds.h"     // Sequence engine: MIDI / M5.Speaker / piezo (must come before bot_mode.h)
@@ -347,6 +348,9 @@ void setup() {
   digitalWrite(PWR_HOLD_PIN, HIGH);   // Latch battery power first — before the 500 ms serial delay
   powerButton.init();
   #endif
+  #ifdef BAT_ADC_PIN
+  batteryAdc.init();
+  #endif
   mbedtls_platform_set_calloc_free(tlsCalloc, heap_caps_free);   // before any TLS
   Serial.begin(115200);
   delay(500);
@@ -631,6 +635,9 @@ void loop() {
   #endif
   #ifdef PWR_HOLD_PIN
   powerButton.update();
+  #endif
+  #ifdef BAT_ADC_PIN
+  batteryAdc.update();
   #endif
 
   // Apply queued commands from WiFi/touch before rendering

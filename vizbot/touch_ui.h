@@ -94,7 +94,11 @@ struct UiRect {
 };
 
 // ---- Layout (native px, from the comps) -----------------------------------
+#ifdef BAT_ADC_PIN
+static const UiRect UI_R_PILL     = {22, 6, 196, 24};  // wider: host name plus the battery glyph
+#else
 static const UiRect UI_R_PILL     = {38, 6, 164, 24};
+#endif
 static const int16_t UI_TILE_X[3] = {12, 86, 160};
 static const int16_t UI_TILE_Y[2] = {142, 200};
 static const UiRect UI_R_PREV     = {12, 132, 44, 44};
@@ -536,16 +540,43 @@ static const char* uiHostLabel() {
 #define UI_PILL_RECT UI_R_PILL
 #endif
 
+#ifdef BAT_ADC_PIN
+// Battery glyph for the top pill: 0-4 bars, or a bolt while a USB host is attached
+#define UI_BATT_W 22
+static void uiDrawBattery(int16_t x, int16_t y, bool pressed) {
+  uint8_t bars = batteryAdc.bars;
+  bool usb = batteryAdc.usb;
+  uint16_t frame = pressed ? UI_C_BG : (!usb && bars == 0) ? UI_C_OFF : UI_C_SYSTEM;
+  uint16_t fill = pressed ? UI_C_BG : (!usb && bars <= 1) ? UI_C_LIGHT : UI_C_CONNECT;
+  gfx->drawRoundRect(x, y, 20, 11, 2, frame);
+  gfx->fillRect(x + 20, y + 3, 2, 5, frame);
+  if (usb) {
+    gfx->fillTriangle(x + 12, y + 1, x + 6, y + 6, x + 10, y + 6, fill);
+    gfx->fillTriangle(x + 9, y + 4, x + 13, y + 4, x + 7, y + 9, fill);
+    return;
+  }
+  for (uint8_t i = 0; i < bars; i++) gfx->fillRect(x + 2 + i * 4, y + 2, 3, 7, fill);
+}
+#endif
+
 static void uiRenderTopPill() {
   if (uiToastActive()) { uiDrawToast(); return; }
   bool pressed = ui.pressedId == UI_ID_PILL;
   uiPill(UI_PILL_RECT, pressed ? UI_C_CONNECT : UI_C_SURFACE, pressed ? UI_C_CONNECT : UI_C_STROKE);
   const char* host = uiHostLabel();
   int16_t tw = uiTextW(host, &fonts::DejaVu12);
-  int16_t x = UI_CX - (tw + 18) / 2;
+#ifdef BAT_ADC_PIN
+  const int16_t battW = UI_BATT_W + 8;
+#else
+  const int16_t battW = 0;
+#endif
+  int16_t x = UI_CX - (tw + 18 + battW) / 2;
   uiIcon(sysStatus.staConnected ? IC_WIFI : (lowPowerMode && !wifiEnabled) ? IC_MOON : IC_HOTSPOT, x, 11, 14,
          pressed ? UI_C_BG : UI_C_CONNECT, UI_C_SURFACE, 2.4f);
   uiText(host, x + 18, 18, &fonts::DejaVu12, pressed ? UI_C_BG : UI_C_SYSTEM, UI_ML);
+#ifdef BAT_ADC_PIN
+  uiDrawBattery(x + 18 + tw + 8, 13, pressed);
+#endif
 }
 
 // Dock tiles: portrait is a 3x2 grid in a sheet, landscape two 4-tile rails.
@@ -1041,6 +1072,12 @@ static void uiBuildRows(uint8_t cat) {
         snprintf(buf, sizeof(buf), "%.2f V", scGetBatteryVoltage());
         uiAddRow("Battery", ROW_INFO, RK_BATTERY, buf);
       }
+#endif
+#ifdef BAT_ADC_PIN
+      // On a USB host the pin reads the cell under charge, so there is no level to show
+      if (batteryAdc.usb) snprintf(buf, sizeof(buf), "USB  %.2f V", batteryAdc.volts);
+      else snprintf(buf, sizeof(buf), "%u%%  %.2f V", batteryAdc.percent, batteryAdc.volts);
+      uiAddRow("Battery", ROW_INFO, RK_BATTERY, buf);
 #endif
 #ifdef BOARD_HAS_FACES_BASE
       uiAddRow("Games", ROW_HOLD, RK_GAMES, "Hold");
