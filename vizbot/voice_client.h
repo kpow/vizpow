@@ -45,6 +45,7 @@ extern char mdnsHostname[];
 #define VOICE_MAX_REC_MS      12000
 #define VOICE_MIN_SPEECH_MS   300
 #define VOICE_HANGOVER_MS     800      // silence that ends an utterance
+#define VOICE_FOLLOW_UP_HANGOVER_MS 1500  // ...when answering him: people pause to think mid-answer
 #define VOICE_END_RATIO       0.15f    // "silence" = below 15% of the speaker's level
 #define VOICE_WAIT_SPEECH_MS  6000     // give up if nothing is said
 #define VOICE_WARMUP_CHUNKS   4        // ~130 ms ignored after Mic.begin()
@@ -258,9 +259,9 @@ static void voiceRestoreAudio() {
 // ---- Recording with end-of-speech detection --------------------------------
 // Returns samples kept (0 = nothing usable). Adaptive thresholds: the quietest
 // of the first ~190 ms sets the noise floor; speech starts above 3x noise and
-// ends after VOICE_HANGOVER_MS below 2x noise.
+// ends after hangoverMs below 2x noise.
 
-static size_t voiceRecord(bool& cancelled, bool& garbage) {
+static size_t voiceRecord(bool& cancelled, bool& garbage, uint32_t hangoverMs = VOICE_HANGOVER_MS) {
   int16_t* buf = voice.recBuf + VOICE_WAV_HDR_SAMPLES;
   const size_t maxSamples = voice.recCapSamples - (voice.recCapSamples % VOICE_CHUNK);
   size_t n = 0, analyzed = 0;
@@ -321,7 +322,7 @@ static size_t voiceRecord(bool& cancelled, bool& garbage) {
         else speechLevel = speechLevel * 0.98f + rms * 0.02f;
         float thr = fmaxf(endThr, speechLevel * VOICE_END_RATIO);
         if (rms > thr) lastLoudMs = tMs;
-        if (tMs - lastLoudMs >= VOICE_HANGOVER_MS) done = true;
+        if (tMs - lastLoudMs >= hangoverMs) done = true;
       }
     }
   }
@@ -621,14 +622,14 @@ static void voiceRunTurn() {
   for (int i = 0; i < 60 && botSounds.playing; i++) vTaskDelay(pdMS_TO_TICKS(20));
   voiceTakeMic();
   bool cancelled = false, garbage = false;
-  size_t samples = voiceRecord(cancelled, garbage);
+  size_t samples = voiceRecord(cancelled, garbage, followUp ? VOICE_FOLLOW_UP_HANGOVER_MS : VOICE_HANGOVER_MS);
   for (int retry = 0; garbage && retry < 2; retry++) {
     voice.micRestarts++;
     Serial.println("[Voice] mic delivering stale data, restarting it");
     M5.Mic.end();
     vTaskDelay(pdMS_TO_TICKS(100));
     M5.Mic.begin();
-    samples = voiceRecord(cancelled, garbage);
+    samples = voiceRecord(cancelled, garbage, followUp ? VOICE_FOLLOW_UP_HANGOVER_MS : VOICE_HANGOVER_MS);
   }
   if (M5.Mic.isRunning()) M5.Mic.end();
 

@@ -136,6 +136,7 @@ class App:
         self.log: collections.deque = collections.deque(maxlen=50)
         self.busy = threading.Lock()
         self.follow_ups = 0             # follow-up answers in a row (see MAX_FOLLOW_UPS)
+        self.last_said = ""             # his last spoken reply: context for hearing the answer to it
         self._bonjour: subprocess.Popen | None = None
         self.wake = WakeDetector(self.on_wake, threshold=self.settings["wake_threshold"])
         self.wake.verbose = bool(self.settings["debug_log"])
@@ -261,6 +262,7 @@ class App:
             finally:
                 said = " ".join(mouth.spoken)
                 clip.listen = may_listen and asks_back(said)   # before close: the bot asks once the clip ends
+                self.last_said = said
                 mouth.close()
                 ready.set()
                 timing = {"first_sentence": int(((st["t_first"] or time.time()) - t0) * 1000),
@@ -650,7 +652,8 @@ def make_handler(app: App):
                 t0 = time.time()
                 samples, _ = speech.wav_to_float(wav)
                 samples = speech.normalize(samples)
-                heard = app.listener.transcribe(samples, app.stt_hints()) if samples.size > 1600 else ""
+                context = app.last_said if follow_up else ""   # the question this answers
+                heard = app.listener.transcribe(samples, app.stt_hints(), context) if samples.size > 1600 else ""
                 stt_ms = int((time.time() - t0) * 1000)
                 if follow_up and len(heard.split()) == 0:
                     # Noise where an answer was expected: end quietly rather

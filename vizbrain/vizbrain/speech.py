@@ -94,17 +94,35 @@ class Listener:
             self.error = f"{type(e).__name__}: {e}"[:200]
             print(f"[stt] warm-up failed: {e}")
 
-    def transcribe(self, samples: np.ndarray, hints: list[str] | None = None) -> str:
-        """hints: names and odd words he should expect (the user's name, gear)."""
+    def transcribe(self, samples: np.ndarray, hints: list[str] | None = None, context: str = "") -> str:
+        """hints: names and odd words he should expect (the user's name, gear).
+        context: what was just said to the speaker, when this is their answer."""
         import mlx_whisper  # heavy import, deferred
 
         with self._lock:
             out = mlx_whisper.transcribe(
                 samples, path_or_hf_repo=self.model, language="en",
                 condition_on_previous_text=False, fp16=True,
-                initial_prompt=", ".join(["vizBot", *(hints or []), "Stackchan"]) + ".",
+                initial_prompt=whisper_prompt(hints, context),
             )
         return (out.get("text") or "").strip()
+
+
+QUESTION_CONTEXT_CHARS = 200
+
+
+def whisper_prompt(hints: list[str] | None, context: str = "") -> str:
+    """Whisper's initial prompt: the words to expect and, for an answer, the
+    question it answers. The question goes last because Whisper reads the
+    prompt as the text just before the audio (and drops the start of a long
+    one), so "reggae, Phish, or something else?" makes "Reggae." likely."""
+    prompt = ", ".join(["vizBot", *(hints or []), "Stackchan"]) + "."
+    context = " ".join(context.split())
+    if context:
+        if len(context) > QUESTION_CONTEXT_CHARS:
+            context = context[-QUESTION_CONTEXT_CHARS:].split(" ", 1)[-1]   # the end: that's the question
+        prompt += " " + context
+    return prompt
 
 
 def wav_to_float(data: bytes) -> tuple[np.ndarray, int]:

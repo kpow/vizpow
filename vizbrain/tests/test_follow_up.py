@@ -26,6 +26,21 @@ class AsksBack(unittest.TestCase):
             self.assertFalse(server.asks_back(said), said)
 
 
+class WhisperPrompt(unittest.TestCase):
+    def test_hints_only(self):
+        self.assertEqual(speech.whisper_prompt(["Kevin", "Maeby"]), "vizBot, Kevin, Maeby, Stackchan.")
+
+    def test_the_question_being_answered_goes_last(self):
+        self.assertEqual(speech.whisper_prompt(["Kevin"], "What are you in the mood for:\n reggae, Phish, or something else?"),
+                         "vizBot, Kevin, Stackchan. What are you in the mood for: reggae, Phish, or something else?")
+
+    def test_a_long_reply_keeps_its_end(self):
+        reply = "Here is a long answer about many things. " * 10 + "Want me to put on some reggae?"
+        prompt = speech.whisper_prompt([], reply)
+        self.assertTrue(prompt.endswith("Want me to put on some reggae?"))
+        self.assertLessEqual(len(prompt) - len("vizBot, Stackchan. "), speech.QUESTION_CONTEXT_CHARS)
+
+
 class FakeMouth:
     def __init__(self, clip, voice, rate):
         self.clip, self.spoken = clip, []
@@ -68,6 +83,7 @@ class StartTurn(unittest.TestCase):
         app, clip = self.run_turn("I can look that up. Want me to?", may_listen=True)
         self.assertTrue(clip.done and clip.listen)
         self.assertTrue(app.log[0]["listen"])
+        self.assertEqual(app.last_said, "I can look that up. Want me to?")
 
     def test_a_statement_does_not(self):
         _, clip = self.run_turn("It's sunny.", may_listen=True)
@@ -90,9 +106,13 @@ class OverHttp(unittest.TestCase):
     """The /v1/voice and /v1/listen routes with a stand-in App."""
 
     def setUp(self):
-        self.turns, self.heard = [], ["what's up"]
+        self.turns, self.heard, self.contexts = [], ["what's up"], []
+
+        def transcribe(samples, hints, context=""):
+            self.contexts.append(context)
+            return self.heard[0]
         app = SimpleNamespace(
-            listener=SimpleNamespace(state="ready", error="", transcribe=lambda s, hints: self.heard[0]),
+            listener=SimpleNamespace(state="ready", error="", transcribe=transcribe), last_said="Reggae, Phish, or something else?",
             adopt_bot=lambda ip, trusted=False: None, bot_token=None, busy=threading.Lock(),
             stt_hints=lambda: [], clips=speech.ClipStore(), follow_ups=0)
 
@@ -127,6 +147,11 @@ class OverHttp(unittest.TestCase):
             self.voice(follow_up=True)
         self.voice()
         self.assertEqual([m for _, m in self.turns], [True, True, True, False, True])
+
+    def test_only_a_follow_up_is_heard_with_the_question_as_context(self):
+        self.voice()
+        self.voice(follow_up=True)
+        self.assertEqual(self.contexts, ["", "Reggae, Phish, or something else?"])
 
     def test_silence_where_an_answer_was_expected_ends_quietly(self):
         self.heard[0] = ""
