@@ -2,6 +2,7 @@
 
   POST /v1/voice       16 kHz mono s16 WAV from the bot -> reply JSON
   GET  /v1/audio/<id>  reply clip, raw s16le mono PCM @ 24 kHz
+  GET  /v1/listen/<id> after playing a clip: {"listen": true} when the reply asked a question
   POST /v1/text        {"text": ...} typed turn; the bot speaks the reply
   POST /v1/event       presence events (Stage 3; logged for now)
   POST /v1/say         {"text": ..., "voice"?: ...} speak exact text, no model call
@@ -55,6 +56,9 @@ EVENTS = {
 # reached over the LAN, and once a bot is paired they need its token.
 LOCAL_ROUTES = ("/", "/index.html", "/v1/text", "/v1/say", "/v1/log", "/v1/health")
 MAX_JSON_BODY = 64 * 1024
+# Answers in a row the bot listens for without a tap. A follow-up recording
+# says so with the X-Viz-Follow-Up header.
+MAX_FOLLOW_UPS = 3
 MAX_TEXT_CHARS = 2000
 
 
@@ -131,6 +135,7 @@ class App:
         self.brain = Brain(self.settings, self.toolbox, config.api_key())
         self.log: collections.deque = collections.deque(maxlen=50)
         self.busy = threading.Lock()
+        self.follow_ups = 0             # follow-up answers in a row (see MAX_FOLLOW_UPS)
         self._bonjour: subprocess.Popen | None = None
         self.wake = WakeDetector(self.on_wake, threshold=self.settings["wake_threshold"])
         self.wake.verbose = bool(self.settings["debug_log"])
@@ -204,7 +209,7 @@ class App:
 
     # ---- turns -----------------------------------------------------------
 
-    def start_turn(self, heard: str, source: str, on_done=None) -> dict:
+    def start_turn(self, heard: str, source: str, on_done=None, may_listen: bool = False) -> dict:
         """Start a turn and return as soon as the first sentence is ready.
 
         Claude's reply streams in; each finished sentence is synthesized and
@@ -212,6 +217,8 @@ class App:
         talking after the first sentence instead of the whole answer. Later
         sentences and any tool calls keep flowing into the same clip. on_done
         runs when the whole turn (including speech synthesis) is finished.
+        may_listen: if the reply ends in a question, mark the clip so the bot
+        listens for the answer without a tap.
         """
         t0 = time.time()
         personality = self.personality()
@@ -252,15 +259,16 @@ class App:
                     on_sentence("Something went wrong in my brain.")
                 result["tools"] = result.get("tools", []) + [f"error: {e}"]
             finally:
+                said = " ".join(mouth.spoken)
+                clip.listen = may_listen and asks_back(said)   # before close: the bot asks once the clip ends
                 mouth.close()
                 ready.set()
-                said = " ".join(mouth.spoken)
                 timing = {"first_sentence": int(((st["t_first"] or time.time()) - t0) * 1000),
                           "turn": int((time.time() - t0) * 1000)}
                 self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source,
                                      "personality": personality, "tools": result.get("tools", []),
                                      "online": self.brain.online, "heard": heard, "text": said,
-                                     "timing_ms": timing})
+                                     "timing_ms": timing, "listen": clip.listen})
                 if self.settings["debug_log"]:
                     print(f"[turn] {source}: {heard!r} -> {said!r} tools={result.get('tools')} {timing}")
                 else:   # the log file keeps no words, only how the turn went
@@ -475,13 +483,18 @@ class App:
             self.connectors.stop()
 
 
+def asks_back(said: str) -> bool:
+    """Whether a reply ends by asking something, so an answer is expected."""
+    return said.rstrip(" \"'”’)").endswith("?")
+
+
 def make_handler(app: App):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"vizbrain/{__version__}"
 
         def log_message(self, fmt, *args):  # quieter default logging
             # Clip fetches, and the typing page polling every 4 s, would bury everything else.
-            if not self.path.startswith(("/v1/audio/", "/v1/health", "/v1/log")):
+            if not self.path.startswith(("/v1/audio/", "/v1/listen/", "/v1/health", "/v1/log")):
                 print(f"[http] {self.client_address[0]} {fmt % args}")
 
         # -- helpers --
@@ -545,6 +558,9 @@ def make_handler(app: App):
                 })
             if path == "/v1/log":
                 return self._json(200, list(app.log))
+            if path.startswith("/v1/listen/"):
+                clip = app.clips.get(path.rsplit("/", 1)[-1])
+                return self._json(200, {"listen": bool(clip and clip.done and clip.listen)})
             if path.startswith("/v1/audio/"):
                 clip = app.clips.get(path.rsplit("/", 1)[-1])
                 if clip is None:
@@ -627,6 +643,8 @@ def make_handler(app: App):
                                         "say": "My hearing isn't working. On the Mac, run vizbrain doctor."})
             if not app.busy.acquire(blocking=False):
                 return self._json(503, {"error": "busy"})
+            follow_up = self.headers.get("X-Viz-Follow-Up") == "1"
+            app.follow_ups = app.follow_ups + 1 if follow_up else 0
             started = False
             try:
                 t0 = time.time()
@@ -634,7 +652,13 @@ def make_handler(app: App):
                 samples = speech.normalize(samples)
                 heard = app.listener.transcribe(samples, app.stt_hints()) if samples.size > 1600 else ""
                 stt_ms = int((time.time() - t0) * 1000)
-                reply = app.start_turn(heard, "voice", on_done=app.busy.release)
+                if follow_up and len(heard.split()) == 0:
+                    # Noise where an answer was expected: end quietly rather
+                    # than have him ask "say that again?" into an empty room.
+                    return self._json(200, {"heard": "", "text": "", "bubble": "", "expression": -1,
+                                            "audio_id": "", "audio_ms": 0, "timing_ms": {"stt": stt_ms}})
+                reply = app.start_turn(heard, "voice", on_done=app.busy.release,
+                                       may_listen=app.follow_ups < MAX_FOLLOW_UPS)
                 started = True
                 reply["timing_ms"]["stt"] = stt_ms
                 reply["timing_ms"]["audio_in_ms"] = int(samples.size / 16)

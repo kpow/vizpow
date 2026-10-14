@@ -56,6 +56,8 @@ extern char mdnsHostname[];
 #define VOICE_BRAIN_PORT      4050
 #define VOICE_CONNECT_MS      2500
 #define VOICE_HTTP_TIMEOUT_MS 45000   // a web search can pause a reply ~20 s
+#define VOICE_MAX_FOLLOW_UPS  3       // answers in a row he listens for without a tap
+#define VOICE_LISTEN_ASK_MS   2000    // GET /v1/listen/<id> after a reply
 #define VOICE_ENV_FRAME_MS    33       // lip-sync envelope resolution
 
 #define VOICE_WAV_HDR_SAMPLES 22       // 44-byte WAV header, in int16 slots
@@ -81,6 +83,8 @@ struct VoiceClient {
   volatile bool listenRequested = false;
   volatile bool cancelRequested = false;
   volatile bool playRequested = false;
+  bool     followUp = false;       // the next listen is for an answer to his question
+  uint8_t  followUps = 0;          // follow-up listens in a row
   char     playId[24] = "";
   char     playText[MAX_SAY_LEN] = "";
   int8_t   playExpr = -1;
@@ -385,7 +389,7 @@ static void voiceSetBotHeaders(esp_http_client_handle_t c) {
 static uint8_t voiceIoBuf[8192];
 
 // POST the WAV; returns HTTP status (or -1) and fills resp (NUL-terminated).
-static int voicePostWav(const uint8_t* data, size_t len, char* resp, size_t respCap) {
+static int voicePostWav(const uint8_t* data, size_t len, char* resp, size_t respCap, bool followUp) {
   char url[128];
   snprintf(url, sizeof(url), "http://%s/v1/voice", voice.resolved);
   esp_http_client_config_t cfg = {};
@@ -397,6 +401,7 @@ static int voicePostWav(const uint8_t* data, size_t len, char* resp, size_t resp
   esp_http_client_handle_t c = esp_http_client_init(&cfg);
   if (!c) return -1;
   esp_http_client_set_header(c, "Content-Type", "audio/wav");
+  if (followUp) esp_http_client_set_header(c, "X-Viz-Follow-Up", "1");
   voiceSetBotHeaders(c);
   int status = -1;
   if (esp_http_client_open(c, len) == ESP_OK) {
@@ -421,6 +426,34 @@ static int voicePostWav(const uint8_t* data, size_t len, char* resp, size_t resp
   esp_http_client_close(c);
   esp_http_client_cleanup(c);
   return status;
+}
+
+// After a reply has played: did it ask a question? The brain only knows once
+// the whole reply is written, which is after it answered the POST, so ask.
+static bool voiceAskListen(const char* id) {
+  char url[128];
+  snprintf(url, sizeof(url), "http://%s/v1/listen/%s", voice.resolved, id);
+  esp_http_client_config_t cfg = {};
+  cfg.url = url;
+  cfg.method = HTTP_METHOD_GET;
+  cfg.timeout_ms = VOICE_LISTEN_ASK_MS;
+  esp_http_client_handle_t c = esp_http_client_init(&cfg);
+  if (!c) return false;
+  voiceSetBotHeaders(c);
+  bool listen = false;
+  if (esp_http_client_open(c, 0) == ESP_OK) {
+    esp_http_client_fetch_headers(c);
+    char body[64] = "";
+    int r = esp_http_client_read(c, body, sizeof(body) - 1);
+    if (esp_http_client_get_status_code(c) == 200 && r > 0) {
+      body[r] = '\0';
+      JsonDocument doc;
+      if (!deserializeJson(doc, body)) listen = doc["listen"] | false;
+    }
+  }
+  esp_http_client_close(c);
+  esp_http_client_cleanup(c);
+  return listen;
 }
 
 // ---- Speaking: stream the reply clip and play it as it arrives -------------
@@ -572,6 +605,11 @@ static void voiceRunTurn() {
   voice.lastError[0] = '\0';
   voiceHoldsFace = true;
   voice.cancelRequested = false;
+  // A follow-up listens for the answer to a question he just asked; anything
+  // else (tap, wake word) starts a fresh run of follow-ups.
+  const bool followUp = voice.followUp;
+  voice.followUp = false;
+  if (!followUp) voice.followUps = 0;
 
   // 1. Listen — a synth cue first, and wait for it so the mic doesn't hear it
   voice.state = VOICE_LISTENING;
@@ -601,6 +639,12 @@ static void voiceRunTurn() {
     voiceFinish(VOICE_IDLE);
     return;
   }
+  if (samples == 0 && followUp) {   // no answer: that's fine, stop listening quietly
+    cmdSetExpression(EXPR_NEUTRAL);
+    voiceShowBubble("Okay.", 1000);    // replaces "Listening..."
+    voiceFinish(VOICE_IDLE);
+    return;
+  }
   if (samples == 0) {
     voiceShowBubble("I didn't hear anything.", 2500);
     voiceSetError("no speech detected");
@@ -624,7 +668,7 @@ static void voiceRunTurn() {
   resp[0] = '\0';
   uint32_t t0 = millis();
   int status = voicePostWav((const uint8_t*)voice.recBuf,
-                            (samples + VOICE_WAV_HDR_SAMPLES) * sizeof(int16_t), resp, sizeof(resp));
+                            (samples + VOICE_WAV_HDR_SAMPLES) * sizeof(int16_t), resp, sizeof(resp), followUp);
   voice.lastBrainMs = millis() - t0;
   voiceNoteBrainStatus(status);
   if (status != 200) {
@@ -656,6 +700,12 @@ static void voiceRunTurn() {
   const char* clip = doc["audio_id"] | "";
   int8_t expr = doc["expression"] | -1;
   uint32_t hintMs = doc["audio_ms"] | 0;
+  if (!clip[0] && followUp) {        // the brain heard no words in the answer: stop quietly
+    cmdSetExpression(EXPR_NEUTRAL);
+    voiceShowBubble("Okay.", 1000);    // replaces "Listening..."
+    voiceFinish(VOICE_IDLE);
+    return;
+  }
 
   // 3. Speak (streamed: he starts talking while the clip downloads)
   size_t n = clip[0] ? voiceStreamSpeak(clip, voice.lastReply, expr, hintMs) : 0;
@@ -666,7 +716,14 @@ static void voiceRunTurn() {
     return;
   }
   voice.turns++;
+  // 4. If he asked a question, listen for the answer without a tap.
+  bool again = !voice.cancelRequested && voice.followUps < VOICE_MAX_FOLLOW_UPS && voiceAskListen(clip);
   voiceFinish(VOICE_IDLE);
+  if (again) {
+    voice.followUp = true;
+    voice.followUps++;
+    voice.listenRequested = true;
+  }
 }
 
 // Brain-initiated speech (/brain/play): typed turns, greetings, events.

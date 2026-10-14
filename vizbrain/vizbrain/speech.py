@@ -171,6 +171,9 @@ class LiveClip:
         self.buf = bytearray(pcm or b"")
         self.done = pcm is not None
         self.created = time.time()
+        # The reply asked a question: the bot should listen for the answer
+        # without a tap (it asks GET /v1/listen/<id> once it has finished speaking).
+        self.listen = False
         self._cv = threading.Condition()
 
     def append(self, pcm: bytes) -> None:
