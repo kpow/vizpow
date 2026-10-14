@@ -317,7 +317,7 @@ Most write endpoints take query args and return `text/plain` `"OK"`; read endpoi
 | `/schedule` | GET | `enabled`, `intervalMin` 1-120 | JSON schedule state |
 | `/update` | GET/POST | OTA upload form / firmware POST | HTML / result |
 | `/brain/status` | GET | `trace=1` adds per-chunk mic RMS | JSON voice state, timings (Stackchan voice builds) |
-| `/brain/config` | GET | `host` (ip:port, empty = auto), `enabled` 0/1 | JSON voice state |
+| `/brain/config` | GET | `host` (ip:port, empty = auto), `token` (vizbrain's pairing token), `enabled` 0/1, `wake` 0/1 | JSON voice state |
 | `/brain/listen` | GET | — | JSON; same as a front head tap |
 | `/brain/play` | GET | `id` clip, `text` bubble, `expr`, `ms` bubble hint | JSON; vizbrain asks the bot to speak a clip |
 | `/brain/lastwav` | GET | — | WAV of the last raw recording (debug) |
