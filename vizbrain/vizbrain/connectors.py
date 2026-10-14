@@ -238,13 +238,14 @@ class Hub:
         tool = self._tools.get(name)
         return tool.reads if tool else None
 
-    def run(self, name: str, args: dict | None) -> tuple[str, bool]:
-        """Call a connector tool from the brain thread. Returns (text, is_error)."""
+    def run(self, name: str, args: dict | None, timeout: float | None = None) -> tuple[str, bool]:
+        """Call a connector tool from the brain thread. Returns (text, is_error).
+        timeout can only shorten the connector's own timeout_s."""
         tool = self._tools.get(name)
         if tool is None or self._loop is None:
             return f"error: unknown tool {name}", True
         live = self.live[tool.connector]
-        timeout = live.conf["timeout_s"]
+        timeout = min(live.conf["timeout_s"], timeout) if timeout else live.conf["timeout_s"]
         fut = asyncio.run_coroutine_threadsafe(self._call(live, tool, args or {}, timeout), self._loop)
         try:
             return fut.result(timeout + 1.5)
@@ -363,7 +364,8 @@ class Hub:
             live.last_ms = int((time.monotonic() - started) * 1000)
         text, is_error = to_tool_result(result, live.conf["max_result_chars"])
         live.errors += is_error
-        return text, is_error
+        # Say where it came from: to Claude this is data from outside, not instructions.
+        return (text if is_error else f"[data from the {live.name} connector] {text}"), is_error
 
     # ---- helpers -----------------------------------------------------------
 

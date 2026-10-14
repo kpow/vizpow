@@ -36,6 +36,7 @@ class Tool:
     schema: dict
     fn: Callable[..., str]
     info: bool = False   # looks something up: the model must read the result before it can answer
+    keeps: bool = False  # changes what he remembers or does later (memory, routines)
 
     def to_api(self) -> dict:
         return {"name": self.name, "description": self.description, "input_schema": self.schema}
@@ -130,12 +131,12 @@ class Toolbox:
             "Save a short fact to remember across days: names, preferences, plans, things you're asked to "
             "keep. One fact per call, written so it makes sense later.",
             _obj({"fact": {"type": "string"}}, ["fact"]),
-            lambda fact: self.memory.remember(fact))
+            lambda fact: self.memory.remember(fact), keeps=True)
 
         add("forget",
             "Forget remembered facts that contain the given words.",
             _obj({"about": {"type": "string"}}, ["about"]),
-            lambda about: self.memory.forget(about))
+            lambda about: self.memory.forget(about), keeps=True)
 
         add("add_routine",
             "Schedule something you'll do every day or on certain days at a set time, e.g. a morning greeting "
@@ -143,12 +144,12 @@ class Toolbox:
             _obj({"time": {"type": "string", "description": "like 08:30 or 5:15 pm"},
                   "days": {"type": "string", "description": "daily, weekdays, weekends, or e.g. mon,wed,fri"},
                   "what": {"type": "string"}}, ["time", "days", "what"]),
-            lambda time, days, what: self.routines.add(time, days, what))
+            lambda time, days, what: self.routines.add(time, days, what), keeps=True)
 
         add("remove_routine",
             "Remove a scheduled routine by its id (like r2) or words from its description.",
             _obj({"which": {"type": "string"}}, ["which"]),
-            lambda which: self.routines.remove(which))
+            lambda which: self.routines.remove(which), keeps=True)
 
         add("music_status",
             "What's playing in Spotify or Apple Music right now (title, artist, playing or paused).",
@@ -183,8 +184,14 @@ class Toolbox:
             _obj({"color": {"type": "string"}, "ms": {"type": "integer"}}, ["color"]),
             lambda color, ms=2000: self.vizmac.flash(color, ms))
 
-    def _add(self, name, description, schema, fn, info: bool = False) -> None:
-        self.tools[name] = Tool(name, description, schema, fn, info)
+    def _add(self, name, description, schema, fn, info: bool = False, keeps: bool = False) -> None:
+        self.tools[name] = Tool(name, description, schema, fn, info, keeps)
+
+    def keeps(self, name: str) -> bool:
+        """Whether this tool's effect outlives the turn (memory and routines
+        are fed back into every prompt; routines run unattended)."""
+        tool = self.tools.get(name)
+        return bool(tool and tool.keeps)
 
     def reads(self, name: str) -> bool:
         """Whether the model has to read this tool's result before it can answer.
@@ -279,12 +286,12 @@ class Toolbox:
         built_in = [t.to_api() for t in self.tools.values() if t.name not in hidden]
         return built_in + (self.connectors.api_list() if self.connectors else [])
 
-    def run(self, name: str, args: dict) -> tuple[str | list, bool]:
+    def run(self, name: str, args: dict, timeout: float | None = None) -> tuple[str | list, bool]:
         """Returns (result, is_error). Result is text, or content blocks (look's photo)."""
         tool = self.tools.get(name)
         if tool is None:
             if self.connectors and self.connectors.owns(name):
-                return self.connectors.run(name, args)
+                return self.connectors.run(name, args, timeout)
             return f"unknown tool {name}", True
         try:
             out = tool.fn(**(args or {}))

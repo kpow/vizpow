@@ -34,7 +34,7 @@ class FakeHub:
     def reads(self, name):
         return {"kpow__books": True, "kpow__lights": False}.get(name)
 
-    def run(self, name, args):
+    def run(self, name, args, timeout=None):
         self.calls.append((name, args))
         return f"{name} ran", False
 
@@ -121,7 +121,8 @@ class AppSetup(unittest.TestCase):
         app.connectors.start()
         self.addCleanup(app.stop)
         self.assertTrue(app.connectors.wait_ready(30))
-        self.assertEqual(app.toolbox.run("fake__echo", {"text": "via app"}), ("echo: via app", False))
+        self.assertEqual(app.toolbox.run("fake__echo", {"text": "via app"}),
+                         ("[data from the fake connector] echo: via app", False))
         self.assertTrue(app.toolbox.reads("fake__echo"))
 
 

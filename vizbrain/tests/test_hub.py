@@ -32,6 +32,20 @@ def alive(pid: int) -> bool:
     return True
 
 
+LABEL = "[data from the fake connector] "
+
+
+def data(text: str) -> tuple[str, bool]:
+    """A successful result as the hub returns it: labelled with where it came from."""
+    return LABEL + text, False
+
+
+def pid_of(hub) -> int:
+    text, is_error = hub.run("fake__pid", {})
+    assert not is_error, text
+    return int(text.removeprefix(LABEL))
+
+
 def until(check, timeout=15.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -66,8 +80,8 @@ class HubTest(unittest.TestCase):
 
     def test_a_call_returns_the_text(self):
         hub = self.hub(conn())
-        self.assertEqual(hub.run("fake__echo", {"text": "yo"}), ("echo: yo", False))
-        self.assertEqual(hub.run("fake__dotted_name", {}), ("dotted ok", False))
+        self.assertEqual(hub.run("fake__echo", {"text": "yo"}), data("echo: yo"))
+        self.assertEqual(hub.run("fake__dotted_name", {}), data("dotted ok"))
         self.assertEqual(hub.status()[0]["calls"], 2)
 
     def test_a_server_side_failure_comes_back_as_an_error_with_its_reason(self):
@@ -81,25 +95,27 @@ class HubTest(unittest.TestCase):
         self.assertEqual(hub.run("fake__slow", {"seconds": 5}),
                          ("error: the fake connector didn't answer within 1 seconds", True))
         self.assertLess(time.monotonic() - started, 3)
-        self.assertEqual(hub.run("fake__echo", {}), ("echo: hi", False))
+        self.assertEqual(hub.run("fake__slow", {"seconds": 5}, timeout=0.5)[0],
+                         "error: the fake connector didn't answer within 0.5 seconds")   # a caller can only shorten it
+        self.assertEqual(hub.run("fake__echo", {}), data("echo: hi"))
 
     def test_a_crashed_server_is_restarted_and_its_tools_stay_listed(self):
         hub = self.hub(conn())
-        first = int(hub.run("fake__pid", {})[0])
+        first = pid_of(hub)
         os.kill(first, signal.SIGKILL)
         until(lambda: not alive(first), 5)
         self.assertEqual(hub.run("fake__echo", {}), ("error: the fake connector isn't running right now", True))
         self.assertEqual(hub.status()[0]["state"], "restarting")
         self.assertIn("fake__echo", [t["name"] for t in hub.api_list()])   # still offered while it restarts
         self.assertTrue(until(lambda: hub.status()[0]["state"] == "ready"), hub.status())
-        second = int(hub.run("fake__pid", {})[0])
+        second = pid_of(hub)
         self.assertNotEqual(first, second)
         self.assertTrue(alive(second))
-        self.assertEqual(hub.run("fake__echo", {}), ("echo: hi", False))
+        self.assertEqual(hub.run("fake__echo", {}), data("echo: hi"))
 
     def test_stop_leaves_no_server_running(self):
         hub = self.hub(conn())
-        pid = int(hub.run("fake__pid", {})[0])
+        pid = pid_of(hub)
         hub.stop()
         self.assertTrue(until(lambda: not alive(pid), 6), f"server {pid} still running after stop")
         self.assertEqual(hub.status()[0]["state"], "stopped")
@@ -114,7 +130,7 @@ class HubTest(unittest.TestCase):
 
     def test_one_broken_connector_does_not_hold_up_the_other(self):
         hub = self.hub(conn("nope", command="no-such-mcp-server-anywhere"), conn("fake"))
-        self.assertEqual(hub.run("fake__echo", {}), ("echo: hi", False))
+        self.assertEqual(hub.run("fake__echo", {}), data("echo: hi"))
 
     def test_allowlist_and_actions_apply(self):
         hub = self.hub(conn(tools=["echo", "pid"], actions=["pid"]))
