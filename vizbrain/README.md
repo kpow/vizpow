@@ -12,7 +12,7 @@ You need all five:
 - **A Stackchan vizBot**, switched on and joined to your home Wi-Fi. ([How to join him to Wi-Fi](../README.md#connecting).)
 - **The same Wi-Fi for both.** The Mac and the bot must be on the same network, and not on a guest network.
 - **Your install link.** Email Kevin for it. The link is yours, so don't pass it on.
-- **A Claude API key.** Kevin sends this too. You'll paste it once during install.
+- **A Claude API key.** Kevin sends this too. You'll paste it once during install. Sometimes it comes with a **workspace ID** (it starts with `wrkspc_`); keep that handy too.
 
 ## Step 1: Update the bot
 
@@ -37,13 +37,14 @@ The installer downloads about 1.2 GB in total, so the time depends on your conne
 
 If it says the link isn't active, email Kevin for a new one.
 
-## Step 3: Answer three things
+## Step 3: Answer a few things
 
 The installer stops and asks:
 
 1. **What should vizBot call you?** Press Return to accept the name it suggests.
 2. **What city are you in?** This is for the weather and local answers. Type the city and pick it from the list.
 3. **The Claude API key.** Paste the key Kevin sent and press Return. Nothing appears as you paste; that's normal.
+4. **The workspace ID**, only if it asks. Paste the one Kevin sent (it starts with `wrkspc_`) and press Return.
 
 The key is stored in your Mac's Keychain. Don't post it or share it: anyone who has it can spend Kevin's money.
 
