@@ -34,10 +34,33 @@ def set_key(clipboard: bool) -> int:
     subprocess.run(["security", "add-generic-password", "-U", "-s", "vizbrain",
                     "-a", "anthropic", "-w", key], check=True)
     print(f"Saved {key[:13]}… ({len(key)} chars) to the Keychain (service vizbrain).")
-    from . import install
+    from . import config, install
+    if key.startswith("sk-ant-usr") and not ask_workspace(config):
+        return 1
     if install.service_loaded():     # the key is read at startup
         install.restart()
     return 0
+
+
+def ask_workspace(config) -> bool:
+    """A personal key (sk-ant-usr...) isn't tied to one workspace, so every
+    request must name one. Ask for it once and keep it in settings."""
+    settings = config.load()
+    if settings.get("workspace_id"):
+        return True
+    print("This is a personal key, so Claude needs to know which workspace to bill.\n"
+          "Paste the workspace ID (it starts with wrkspc_; whoever gave you the key can send it).")
+    try:
+        ws = input("Workspace ID: ").strip()
+    except EOFError:
+        ws = ""
+    if not ws.startswith("wrkspc_"):
+        print("No workspace ID saved, so Claude will refuse this key. Run vizbrain set-key again to add it.")
+        return False
+    settings["workspace_id"] = ws
+    config.save(settings)
+    print("Saved the workspace ID.")
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:

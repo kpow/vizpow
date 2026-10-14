@@ -463,7 +463,8 @@ def make_handler(app: App):
         server_version = f"vizbrain/{__version__}"
 
         def log_message(self, fmt, *args):  # quieter default logging
-            if "/v1/audio/" not in self.path:
+            # Clip fetches, and the typing page polling every 4 s, would bury everything else.
+            if not self.path.startswith(("/v1/audio/", "/v1/health", "/v1/log")):
                 print(f"[http] {self.client_address[0]} {fmt % args}")
 
         # -- helpers --
@@ -657,6 +658,10 @@ def make_handler(app: App):
 def port_holder(port: int) -> str | None:
     """Why this port can't be served (someone else has it), or None when it's free."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Same option the HTTP server binds with. Without it, connections the
+        # previous copy closed a moment ago (TIME_WAIT, about 30 s) look like a
+        # running copy, and a restart quietly exits instead of starting.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("0.0.0.0", port))
             return None

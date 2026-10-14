@@ -83,6 +83,12 @@ Known limits, on purpose for a small trusted group:
 - Bot-to-brain traffic is plain HTTP on the LAN.
 - With firmware older than 3.7.31 the bot can't hold a token, so the bot routes stay open to the LAN until a newer bot pairs.
 
+## Local Network permission
+
+macOS blocks a login agent from devices on the LAN until the user allows it (Apple TN3179); calls fail with `[Errno 65] No route to host`. Terminal, SSH and launchd daemons are exempt, which is why everything works from Terminal and fails in the background.
+
+A bare Python agent is filed under "Python", and with several Pythons installed that switch can be on and still not apply. So `install-service` writes a small `~/Applications/vizbrain.app` (bundle id `com.kpow.vizbrain`, with `NSLocalNetworkUsageDescription` and `NSBonjourServices`), signs it ad hoc, registers it, and names it in the agent's `AssociatedBundleIdentifiers`. macOS then asks once for "vizbrain" and keeps the answer. Opening the app shows the typing page. `doctor` warns when the agent isn't linked to the app, and fails when the background copy can't reach a bot that Terminal can.
+
 ## Turn lifecycle
 
 1. The bot records until you stop talking (12 s at most) and POSTs the WAV.

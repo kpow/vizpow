@@ -26,6 +26,17 @@ from .speech import KOKORO_DIR
 
 LABEL = "com.kpow.vizbrain"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+# A login agent needs Local Network permission to reach the bot, and macOS
+# records that permission against an app. Run as a bare Python it gets filed
+# under "Python", where the switch can silently fail to apply (several
+# Pythons installed is a known macOS bug). So vizbrain gets a small app of its
+# own, and the agent names it in AssociatedBundleIdentifiers (Apple TN3179):
+# macOS then asks "vizbrain would like to find devices on your local network".
+# Opening the app shows vizBot's page.
+APP_PATH = Path.home() / "Applications" / "vizbrain.app"
+BUNDLE_ID = "com.kpow.vizbrain"
+LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+              "LaunchServices.framework/Support/lsregister")
 LOG_DIR = Path.home() / "Library" / "Logs" / "vizbrain"
 # The personal install link this copy came from (install.sh saves it).
 LINK_PATH = config.SETTINGS_DIR / "install-link"
@@ -198,6 +209,37 @@ def setup(interactive: bool = True) -> int:
 
 # ---- the login agent ------------------------------------------------------------
 
+def app_info_plist() -> bytes:
+    return plistlib.dumps({
+        "CFBundleIdentifier": BUNDLE_ID,
+        "CFBundleName": "vizbrain",
+        "CFBundleDisplayName": "vizbrain",
+        "CFBundleExecutable": "vizbrain",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "LSUIElement": True,
+        "NSLocalNetworkUsageDescription": "vizbrain talks to your vizBot over your home network.",
+        "NSBonjourServices": ["_http._tcp", "_vizbrain._tcp", "_wled._tcp"],
+    })
+
+
+def make_app(port: int = 4050) -> bool:
+    """Write and register vizbrain.app (see APP_PATH). True if it is in place."""
+    macos = APP_PATH / "Contents" / "MacOS"
+    try:
+        macos.mkdir(parents=True, exist_ok=True)
+        (APP_PATH / "Contents" / "Info.plist").write_bytes(app_info_plist())
+        launcher = macos / "vizbrain"
+        launcher.write_text(f"#!/bin/sh\nopen http://localhost:{port}\n")
+        launcher.chmod(0o755)
+    except OSError as e:
+        print(f"Couldn't create {APP_PATH} ({e}); vizbrain may not be able to reach the bot.")
+        return False
+    subprocess.run(["codesign", "-s", "-", "--force", str(APP_PATH)], capture_output=True)
+    subprocess.run([LSREGISTER, "-f", str(APP_PATH)], capture_output=True)
+    return True
+
+
 def plist_bytes(python: str = sys.executable, log_dir: Path = LOG_DIR) -> bytes:
     """The LaunchAgent that runs `vizbrain serve` at login, for this install
     and this user. It runs the installed interpreter directly, so it doesn't
@@ -211,6 +253,7 @@ def plist_bytes(python: str = sys.executable, log_dir: Path = LOG_DIR) -> bytes:
         # Back up after a crash, but not after a clean exit (port taken, `vizbrain stop`).
         "KeepAlive": {"SuccessfulExit": False},
         "ProcessType": "Interactive",
+        "AssociatedBundleIdentifiers": [BUNDLE_ID],
         "StandardOutPath": log,
         "StandardErrorPath": log,
     })
@@ -228,7 +271,7 @@ def service_loaded() -> bool:
     return _launchctl("print", _target()).returncode == 0
 
 
-def health(port: int | None = None, timeout: float = 2.0) -> dict | None:
+def health(port: int | None = None, timeout: float = 5.0) -> dict | None:
     port = port or config.load()["port"]
     try:
         with urllib.request.urlopen(f"http://localhost:{port}/v1/health", timeout=timeout) as r:
@@ -257,6 +300,7 @@ def install_service() -> int:
             if not service_loaded():
                 break
             time.sleep(0.25)
+    make_app(config.load()["port"])
     PLIST_PATH.write_bytes(plist_bytes())
     r = _launchctl("bootstrap", f"gui/{os.getuid()}", str(PLIST_PATH))
     if r.returncode != 0:
@@ -269,6 +313,7 @@ def install_service() -> int:
         return 1
     print(f"vizbrain is running and will start at login. Claude: {'online' if h.get('claude') else 'no API key yet'}."
           f" Bot: {h.get('bot') or 'not found yet'}.")
+    print("If macOS asks whether vizbrain may find devices on your local network, click Allow.")
     return 0
 
 
@@ -340,6 +385,8 @@ def uninstall(purge: bool = False, assume_yes: bool = False) -> int:
     if service_loaded():
         _launchctl("bootout", _target())
     PLIST_PATH.unlink(missing_ok=True)
+    subprocess.run([LSREGISTER, "-u", str(APP_PATH)], capture_output=True)
+    shutil.rmtree(APP_PATH, ignore_errors=True)
     print("Removed the login agent.")
     if purge:
         subprocess.run(["security", "delete-generic-password", "-s", "vizbrain", "-a", "anthropic"],

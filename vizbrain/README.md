@@ -47,7 +47,7 @@ The installer stops and asks:
 
 The key is stored in your Mac's Keychain. Don't post it or share it: anyone who has it can spend Kevin's money.
 
-macOS may ask whether vizbrain (it may be listed as Python) can find devices on your local network. Choose **Allow**. Without it the brain can't reach the bot.
+Near the end, macOS asks whether **vizbrain** may find devices on your local network. Choose **Allow**. Without it the brain can't reach the bot.
 
 ## Step 4: Read the checkup
 
@@ -91,4 +91,5 @@ Then look up what he said or did in [Troubleshooting](docs/troubleshooting.md).
 
 | vizbrain | Needs bot firmware |
 |---|---|
+| 1.1.1 | 3.7.31 or newer |
 | 1.1.0 | 3.7.31 or newer |
