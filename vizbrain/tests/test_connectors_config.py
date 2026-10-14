@@ -45,7 +45,8 @@ class Load(unittest.TestCase):
         self.assertEqual(problems, [])
         self.assertEqual(conns["kpow"], {
             "name": "kpow", "command": "kpow-mcp", "url": None, "args": [], "env": {}, "cwd": None,
-            "tools": None, "actions": [], "timeout_s": 8.0, "start_timeout_s": 30.0, "max_result_chars": 6000})
+            "tools": None, "actions": [], "replaces": [], "timeout_s": 8.0, "start_timeout_s": 30.0,
+            "max_result_chars": 6000})
 
     def test_a_url_entry_is_accepted(self):
         conns, _ = self.servers(remote={"url": "http://127.0.0.1:8765/mcp"})

@@ -160,7 +160,13 @@ class HubTest(unittest.TestCase):
         words = Path(self.tmp.name) / "vocab.txt"
         words.write_text("maeby\nPhish\n")
         hub = self.hub(conn("one"), conn("two", env={"FAKE_VOCAB_FILE": str(words)}))
-        self.assertEqual(hub.vocabulary(), ["Soul Siblings", "Maeby", "Noodle 2K", "Phish"])
+        # They take turns, so a long list can't crowd out a short one.
+        self.assertEqual(hub.vocabulary(), ["Soul Siblings", "maeby", "Phish", "Noodle 2K"])
+
+    def test_replaced_built_ins_are_hidden_only_while_the_connector_offers_tools(self):
+        hub = self.hub(conn("fake", replaces=["music_play"]), conn("nope", command="no-such-mcp-server-anywhere",
+                                                                     replaces=["music_status"]))
+        self.assertEqual(hub.replaced(), {"music_play"})
 
     def test_an_empty_hub_is_ready_at_once_and_stops_cleanly(self):
         hub = Hub({})

@@ -278,6 +278,8 @@ class Toolbox:
             out |= VIZMAC_TOOLS
         if not self.vizmac.spotify_installed():
             out |= SPOTIFY_TOOLS
+        if self.connectors:
+            out |= self.connectors.replaced()   # e.g. music_play while a Spotify connector is up
         return out
 
     def api_list(self) -> list[dict]:

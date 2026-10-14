@@ -34,6 +34,9 @@ class FakeHub:
     def reads(self, name):
         return {"kpow__books": True, "kpow__lights": False}.get(name)
 
+    def replaced(self):
+        return {"music_play"}
+
     def run(self, name, args, timeout=None):
         self.calls.append((name, args))
         return f"{name} ran", False
@@ -58,6 +61,10 @@ class ToolboxWithConnectors(unittest.TestCase):
         self.assertEqual(hub.calls, [("kpow__books", {"query": "dune"})])
         self.assertEqual(box.run("nope__x", {}), ("unknown tool nope__x", True))
         self.assertEqual(hub.calls, [("kpow__books", {"query": "dune"})])
+
+    def test_built_ins_a_connector_replaces_are_hidden(self):
+        names = [t["name"] for t in box_with(FakeHub()).api_list()]
+        self.assertNotIn("music_play", names)
 
     def test_reads_follows_the_connector_actions_list(self):
         box = box_with(FakeHub())

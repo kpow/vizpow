@@ -11,6 +11,11 @@ save() keeps only the keys in DEFAULTS. Its shape is the one Claude Desktop
 and Claude Code use:
 
     {"mcpServers": {"kpow": {"command": "kpow-mcp", "args": [], "timeout_s": 8}}}
+
+Optional per connector: "enabled", "tools" (an allowlist), "actions" (tools
+that change things, so a spoken confirmation is enough), "replaces" (built-in
+tools it supersedes, e.g. a Spotify connector replacing music_play), "env",
+"timeout_s", "start_timeout_s", "max_result_chars".
 """
 
 from __future__ import annotations
@@ -220,7 +225,7 @@ def _connector(name: str, e: dict) -> dict:
     if not (isinstance(env, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in env.items())):
         raise ValueError('"env" should map names to strings')
     lists = {}
-    for key in ("tools", "actions"):
+    for key in ("tools", "actions", "replaces"):
         v = e.get(key)
         if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
             raise ValueError(f'"{key}" should be a list of tool names')
@@ -228,7 +233,8 @@ def _connector(name: str, e: dict) -> dict:
     conn = {"name": name, "command": command, "url": url, "args": args, "env": env,
             "cwd": e.get("cwd") if isinstance(e.get("cwd"), str) else None,
             "tools": lists["tools"],              # None = every tool the server offers
-            "actions": lists["actions"] or []}    # tools that change things rather than look them up
+            "actions": lists["actions"] or [],    # tools that change things rather than look them up
+            "replaces": lists["replaces"] or []}  # built-in tools to hide while this connector offers its own
     for key, default in CONNECTOR_DEFAULTS.items():
         lo, hi = _CONNECTOR_LIMITS[key]
         try:

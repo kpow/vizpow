@@ -259,15 +259,25 @@ class Hub:
             return f"error: the {live.name} connector didn't answer within {timeout:g} seconds", True
 
     def vocabulary(self) -> list[str]:
-        """Every connector's names to expect in speech, in connectors.json order, without repeats."""
+        """Every connector's names to expect in speech, without repeats. They take
+        turns (each one's first name, then each one's second...), so a connector
+        with a long list can't crowd the others out of Whisper's short prompt."""
         seen: set[str] = set()
         out: list[str] = []
-        for live in self.live.values():
-            for word in live.vocabulary:
-                if word.lower() not in seen:
-                    seen.add(word.lower())
-                    out.append(word)
+        lists = [live.vocabulary for live in self.live.values()]
+        for i in range(max((len(v) for v in lists), default=0)):
+            for words in lists:
+                if i < len(words) and words[i].lower() not in seen:
+                    seen.add(words[i].lower())
+                    out.append(words[i])
         return out
+
+    def replaced(self) -> set[str]:
+        """Built-in tools to hide: those a connector replaces while its tools are on offer."""
+        with self._lock:
+            offering = {t.connector for t in self._tools.values()}
+        return {name for live in self.live.values() if live.name in offering
+                for name in live.conf.get("replaces") or []}
 
     def status(self) -> list[dict]:
         return [{"name": l.name, "state": l.state, "tools": len(l.tools), "vocabulary": len(l.vocabulary),

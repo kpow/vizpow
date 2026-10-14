@@ -29,6 +29,9 @@ class Hub:
     def reads(self, name):
         return True if name == "kpow__books" else None
 
+    def replaced(self):
+        return set()
+
     def run(self, name, args, timeout=None):
         self.calls.append({"said_by_then": list(self.spoken), "timeout": timeout})
         if self.clock:
