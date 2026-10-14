@@ -1,6 +1,6 @@
 # Developing vizbrain
 
-How vizbrain works inside, how to run it from source, and how to release it. The pages for people who just use it start at the [README](README.md).
+How vizbrain works inside, how to run it from source, and how to release it. The pages for people who just use it start at the [README](README.md). Owner tasks (install links, inviting a friend, testing a release, taking access away) are step by step in the [RUNBOOK](RUNBOOK.md).
 
 ## Layout
 
