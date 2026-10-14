@@ -125,6 +125,7 @@ class AppSetup(unittest.TestCase):
         self.assertIs(app.toolbox.connectors, app.connectors)
         self.assertEqual(app.connector_problems, [])
         self.assertIn("double underscore", app.brain.system_prompt)
+        self.assertIsNotNone(app.brain.on_picture)   # covers from music connectors go on his screen
         app.connectors.start()
         self.addCleanup(app.stop)
         self.assertTrue(app.connectors.wait_ready(30))

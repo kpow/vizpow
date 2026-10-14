@@ -2502,6 +2502,10 @@ void setupWebServer() {
   // Bot mode endpoints
   server.on("/bot/expression", handleBotExpression);
   server.on("/bot/say", handleBotSay);
+  #ifdef VOICE_ENABLED
+  server.on("/bot/art", HTTP_POST, handleArtDone, handleArtUpload);   // album art from vizbrain (album_art.h)
+  server.on("/bot/art/hide", handleArtHide);
+  #endif
   server.on("/bot/time", handleBotTime);
   server.on("/settings/timezone", handleSetTimezone);
   server.on("/bot/hires", handleBotHiRes);

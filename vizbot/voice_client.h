@@ -606,6 +606,7 @@ static void voiceRunTurn() {
   voice.lastError[0] = '\0';
   voiceHoldsFace = true;
   voice.cancelRequested = false;
+  artHide();   // he's being talked to: show his face, not a cover
   // A follow-up listens for the answer to a question he just asked; anything
   // else (tap, wake word) starts a fresh run of follow-ups.
   const bool followUp = voice.followUp;

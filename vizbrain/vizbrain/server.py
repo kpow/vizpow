@@ -134,6 +134,11 @@ class App:
                                config.location(self.settings), connectors=self.connectors)
         self._event_last: dict[str, float] = {}
         self.brain = Brain(self.settings, self.toolbox, config.api_key())
+        # Album covers from music connectors go on his screen (fw 3.7.34+).
+        from .pictures import Shower
+        self.pictures = Shower(self.get_bot, lambda: self.bot_info.get("firmware"))
+        self.brain.on_picture = lambda url: threading.Thread(target=self.pictures.show, args=(url,),
+                                                              daemon=True).start()
         self.log: collections.deque = collections.deque(maxlen=50)
         self.busy = threading.Lock()
         self.follow_ups = 0             # follow-up answers in a row (see MAX_FOLLOW_UPS)

@@ -773,6 +773,13 @@ void renderBotMode() {
   }
   #endif
 
+  // Album art from vizbrain covers the face for a few seconds (album_art.h)
+  if (artRender()) {
+    gfx->flushCanvas();
+    botFrameInProgress = false;
+    return;
+  }
+
   // ---- Clear canvas with background ----
   uint16_t bgColor = BOT_COLOR_BG;
 

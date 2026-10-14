@@ -130,6 +130,8 @@ class Brain:
         # "none", "present" (not tried yet), "valid", "rejected" or "no_credit".
         self.key_state = "present" if api_key else "none"
         self.last_error: dict | None = None      # {"at", "what"} of the last failed call
+        # Called with a cover URL when a connector's answer points at one (pictures.py).
+        self.on_picture = None
         if api_key:
             self.client = make_client(settings, api_key)
 
@@ -213,9 +215,15 @@ class Brain:
         turn["fed"] = True
         started = time.monotonic()
         try:
-            return self.toolbox.run(call.name, call.input, timeout=left)
+            out, is_err = self.toolbox.run(call.name, call.input, timeout=left)
         finally:
             turn["lookup_s"] += time.monotonic() - started
+        if not is_err and self.on_picture and isinstance(out, str):
+            from .pictures import cover_url
+            url = cover_url(out)
+            if url:
+                self.on_picture(url)   # shown on his screen while he answers; never blocks the turn
+        return out, is_err
 
     def _failed(self, e: Exception) -> str:
         """Note a failed Claude call; returns what to say about it."""
