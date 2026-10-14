@@ -37,6 +37,7 @@ Two fixes solve a lot:
 | What he says or does | Why | Fix |
 |---|---|---|
 | "I don't have a Claude key yet..." | No key is saved on this Mac. | Run `vizbrain set-key` and paste the key Kevin sent. |
+| "My Claude key needs a workspace ID." | The key Kevin sent is a personal key, and no workspace ID was entered. | Run `vizbrain set-key`, paste the key, then paste the workspace ID Kevin sent (it starts with `wrkspc_`). |
 | "My Claude key isn't working. On the Mac, run vizbrain set-key." | The key was mistyped or has been switched off. | Run `vizbrain set-key` and paste it again. If it still fails, email Kevin for a new key. |
 | "My Claude account is out of credit." | Kevin's account needs topping up. | Email Kevin. |
 | "I've hit today's spending limit. I'll be back tomorrow." | He reached the daily limit. | Wait until tomorrow. The limit is in [Settings](settings.md). |
