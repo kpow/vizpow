@@ -4,20 +4,30 @@ Settings live in ~/Library/Application Support/vizbrain/settings.json. The
 Anthropic API key is never stored there: it comes from the ANTHROPIC_API_KEY
 environment variable or the macOS Keychain (service "vizbrain", account
 "anthropic").
+
+Connectors (MCP servers whose tools vizBot can use) are listed in their own
+file, connectors.json, next to settings.json. It is a separate file because
+save() keeps only the keys in DEFAULTS. Its shape is the one Claude Desktop
+and Claude Code use:
+
+    {"mcpServers": {"kpow": {"command": "kpow-mcp", "args": [], "timeout_s": 8}}}
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
 SETTINGS_DIR = Path.home() / "Library" / "Application Support" / "vizbrain"
 SETTINGS_PATH = SETTINGS_DIR / "settings.json"
 PAIRING_PATH = SETTINGS_DIR / "pairing.json"
+CONNECTORS_PATH = SETTINGS_DIR / "connectors.json"
 
 DEFAULTS: dict = {
     "port": 4050,
@@ -138,9 +148,14 @@ def api_key() -> str | None:
     key = os.environ.get("ANTHROPIC_API_KEY")
     if key:
         return key.strip()
+    return keychain_get("anthropic")
+
+
+def keychain_get(account: str) -> str | None:
+    """A secret from the macOS Keychain, service "vizbrain"."""
     try:
         out = subprocess.run(
-            ["security", "find-generic-password", "-s", "vizbrain", "-a", "anthropic", "-w"],
+            ["security", "find-generic-password", "-s", "vizbrain", "-a", account, "-w"],
             capture_output=True, text=True, timeout=5,
         )
         if out.returncode == 0 and out.stdout.strip():
@@ -148,3 +163,104 @@ def api_key() -> str | None:
     except (OSError, subprocess.TimeoutExpired):
         pass
     return None
+
+
+# ---- Connectors -----------------------------------------------------------
+
+# Lowercase, short, and no underscores: tools are offered to Claude as
+# "<connector>__<tool>", and the double underscore must stay unambiguous.
+CONNECTOR_NAME = re.compile(r"^[a-z][a-z0-9-]{0,15}$")
+CONNECTOR_DEFAULTS = {"timeout_s": 8.0, "start_timeout_s": 30.0, "max_result_chars": 6000}
+_CONNECTOR_LIMITS = {"timeout_s": (1.0, 20.0), "start_timeout_s": (5.0, 120.0), "max_result_chars": (500, 20000)}
+
+
+def connectors() -> tuple[dict[str, dict], list[str]]:
+    """The enabled connectors in connectors.json, checked and filled in with
+    defaults, plus a line for each problem found. A missing file is no
+    connectors and no problems; a broken entry is skipped, never fatal."""
+    try:
+        raw = json.loads(CONNECTORS_PATH.read_text())
+    except FileNotFoundError:
+        return {}, []
+    except (OSError, json.JSONDecodeError) as e:
+        return {}, [f"connectors.json is unreadable: {e}"]
+    servers = raw.get("mcpServers") if isinstance(raw, dict) else None
+    if not isinstance(servers, dict):
+        return {}, ['connectors.json needs an "mcpServers" object']
+    out: dict[str, dict] = {}
+    problems: list[str] = []
+    for name, entry in servers.items():
+        if not CONNECTOR_NAME.match(name):
+            problems.append(f"connector {name!r}: names are lowercase letters, digits and dashes, up to 16")
+            continue
+        if not isinstance(entry, dict):
+            problems.append(f"connector {name}: should be an object")
+            continue
+        if entry.get("enabled") is False or entry.get("disabled") is True:
+            continue
+        try:
+            out[name] = _connector(name, entry)
+        except ValueError as e:
+            problems.append(f"connector {name}: {e}")
+    return out, problems
+
+
+def _connector(name: str, e: dict) -> dict:
+    command, url = e.get("command"), e.get("url")
+    if bool(command) == bool(url):
+        raise ValueError('needs a "command" (or, for an HTTP server, a "url"), not both')
+    if command is not None and not isinstance(command, str):
+        raise ValueError('"command" should be a string')
+    if url is not None and not (isinstance(url, str) and re.match(r"^https?://", url)):
+        raise ValueError('"url" should start with http:// or https://')
+    args = e.get("args", [])
+    if not (isinstance(args, list) and all(isinstance(a, str) for a in args)):
+        raise ValueError('"args" should be a list of strings')
+    env = e.get("env", {})
+    if not (isinstance(env, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in env.items())):
+        raise ValueError('"env" should map names to strings')
+    lists = {}
+    for key in ("tools", "actions"):
+        v = e.get(key)
+        if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            raise ValueError(f'"{key}" should be a list of tool names')
+        lists[key] = v
+    conn = {"name": name, "command": command, "url": url, "args": args, "env": env,
+            "cwd": e.get("cwd") if isinstance(e.get("cwd"), str) else None,
+            "tools": lists["tools"],              # None = every tool the server offers
+            "actions": lists["actions"] or []}    # tools that change things rather than look them up
+    for key, default in CONNECTOR_DEFAULTS.items():
+        lo, hi = _CONNECTOR_LIMITS[key]
+        try:
+            v = float(e.get(key, default))
+        except (TypeError, ValueError):
+            raise ValueError(f'"{key}" should be a number') from None
+        v = min(max(v, lo), hi)
+        conn[key] = int(v) if isinstance(default, int) else v
+    return conn
+
+
+# launchd starts vizbrain with PATH=/usr/bin:/bin:/usr/sbin:/sbin, where uv,
+# npx, Homebrew tools and `uv tool install`ed servers are all missing.
+def connector_path() -> str:
+    dirs = [str(Path(sys.executable).parent), str(Path.home() / ".local" / "bin"),
+            "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    return os.pathsep.join(dict.fromkeys(dirs))
+
+
+def connector_env(conn: dict) -> tuple[dict[str, str], list[str]]:
+    """The extra environment a connector starts with, plus problems. PATH is
+    widened (unless the connector sets its own) and "keychain:<id>" values are
+    read from the Keychain account "connector/<id>"."""
+    env = {"PATH": connector_path()}
+    problems: list[str] = []
+    for key, value in conn["env"].items():
+        if value.startswith("keychain:"):
+            secret = keychain_get(f"connector/{value.removeprefix('keychain:')}")
+            if secret is None:
+                problems.append(f"connector {conn['name']}: no Keychain item for {key} "
+                                f"(run vizbrain connectors set-secret {value.removeprefix('keychain:')})")
+                continue
+            value = secret
+        env[key] = value
+    return env, problems

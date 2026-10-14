@@ -27,7 +27,7 @@ How vizbrain works inside, how to run it from source, and how to release it. The
 
 ```bash
 cd vizbrain
-python3.14 -m venv .venv && .venv/bin/pip install -c constraints.txt -e ".[mcp]"
+python3.14 -m venv .venv && .venv/bin/pip install -c constraints.txt -e .
 .venv/bin/vizbrain setup        # name, city, models
 .venv/bin/vizbrain set-key
 .venv/bin/vizbrain serve

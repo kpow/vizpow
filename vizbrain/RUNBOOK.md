@@ -169,7 +169,7 @@ Your own vizbrain still runs the 1.0 code from your main checkout. When you want
 
 1. In `~/projects/vizpow`, throw away the uncommitted `vizbot/name_firmware.py` edit; that fix is already on `main`. Look at the `vizbot/config.h` edit before deciding about it.
 2. `git switch main && git pull`
-3. `cd vizbrain && .venv/bin/pip install -e ".[mcp]"`
+3. `cd vizbrain && .venv/bin/pip install -e .`
 4. `launchctl kickstart -k gui/$(id -u)/com.kpow.vizbrain`
 5. `.venv/bin/vizbrain setup` to give him your city, then `.venv/bin/vizbrain doctor`.
 

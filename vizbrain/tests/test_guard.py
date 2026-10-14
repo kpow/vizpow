@@ -95,6 +95,7 @@ class OverHttp(unittest.TestCase):
                                  receiver=SimpleNamespace(packets=0)),
             busy=threading.Lock(), get_bot=lambda: None, bot_token=None,
             pairing={"token": "ab12cd34.secret", "paired": False},
+            connectors=None, connector_problems=[],
             handle_event=lambda evt: "ignored (test)")
 
         def start_turn(heard, source, on_done=None):

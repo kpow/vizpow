@@ -35,6 +35,7 @@ class Tool:
     description: str
     schema: dict
     fn: Callable[..., str]
+    info: bool = False   # looks something up: the model must read the result before it can answer
 
     def to_api(self) -> dict:
         return {"name": self.name, "description": self.description, "input_schema": self.schema}
@@ -48,8 +49,9 @@ def _obj(props: dict, required: list[str] | None = None) -> dict:
 class Toolbox:
     def __init__(self, get_bot: Callable[[], Bot | None], wled: Wled, vizmac: VizMac,
                  memory: Memory | None = None, routines: Routines | None = None,
-                 location: dict | None = None):
+                 location: dict | None = None, connectors=None):
         self.get_bot = get_bot
+        self.connectors = connectors      # a connectors.Hub, or None when connectors.json lists none
         self.wled = wled
         self.vizmac = vizmac
         self.location = location or {}
@@ -95,7 +97,8 @@ class Toolbox:
             "List the lab devices you can control: WLED light names and whether the vizMac keyboard is online.",
             _obj({}),
             lambda: (f"WLED lights: {', '.join(self.wled.names()) or 'none found'}. "
-                     f"Keyboard (vizMac): {'online' if self.vizmac.available() else 'offline'}."))
+                     f"Keyboard (vizMac): {'online' if self.vizmac.available() else 'offline'}."),
+            info=True)
 
         add("wled_set",
             "Control a WLED light by name (or 'all'). Any combination of on/off, brightness 1-255, "
@@ -109,13 +112,13 @@ class Toolbox:
         add("get_weather",
             "Get the local weather: current conditions plus today's and tomorrow's forecast.",
             _obj({}),
-            self._weather)
+            self._weather, info=True)
 
         add("look",
             "Take a photo with your head camera and see it. Use it when asked what you see, what someone is "
             "holding or wearing, or who is there. Point your head first with move_head if needed.",
             _obj({}),
-            self._look)
+            self._look, info=True)
 
         add("play_sound",
             "Play a sound effect on your synth, for fun or emphasis (a laugh at a joke, a fanfare for good news). "
@@ -150,7 +153,7 @@ class Toolbox:
         add("music_status",
             "What's playing in Spotify or Apple Music right now (title, artist, playing or paused).",
             _obj({}),
-            lambda: self.vizmac.now_playing())
+            lambda: self.vizmac.now_playing(), info=True)
 
         add("music_control",
             "Control the music on the Mac: play, pause, next, previous, or restart the song. "
@@ -180,8 +183,18 @@ class Toolbox:
             _obj({"color": {"type": "string"}, "ms": {"type": "integer"}}, ["color"]),
             lambda color, ms=2000: self.vizmac.flash(color, ms))
 
-    def _add(self, name, description, schema, fn) -> None:
-        self.tools[name] = Tool(name, description, schema, fn)
+    def _add(self, name, description, schema, fn, info: bool = False) -> None:
+        self.tools[name] = Tool(name, description, schema, fn, info)
+
+    def reads(self, name: str) -> bool:
+        """Whether the model has to read this tool's result before it can answer.
+        True for look-up tools, and for any name that isn't a built-in, since a
+        tool we know nothing about may well be answering a question."""
+        tool = self.tools.get(name)
+        if tool:
+            return tool.info
+        reads = self.connectors.reads(name) if self.connectors else None
+        return True if reads is None else reads
 
     def cached_weather(self) -> str:
         """Weather for the prompt, refreshed in the background every 15 min."""
@@ -261,13 +274,17 @@ class Toolbox:
         return out
 
     def api_list(self) -> list[dict]:
+        """Built-in tools for the gear that's here, then every connector's tools."""
         hidden = self.unavailable()
-        return [t.to_api() for t in self.tools.values() if t.name not in hidden]
+        built_in = [t.to_api() for t in self.tools.values() if t.name not in hidden]
+        return built_in + (self.connectors.api_list() if self.connectors else [])
 
     def run(self, name: str, args: dict) -> tuple[str | list, bool]:
         """Returns (result, is_error). Result is text, or content blocks (look's photo)."""
         tool = self.tools.get(name)
         if tool is None:
+            if self.connectors and self.connectors.owns(name):
+                return self.connectors.run(name, args)
             return f"unknown tool {name}", True
         try:
             out = tool.fn(**(args or {}))

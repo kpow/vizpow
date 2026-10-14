@@ -115,8 +115,18 @@ class App:
         self.started = time.time()
         # What the announce loop last learned about the bot, for /v1/health.
         self.bot_info: dict = {"firmware": None, "seen": 0.0, "error": "", "brain_addr": ""}
+        # Connectors: MCP servers from connectors.json. With none listed there is
+        # no hub at all, and the MCP library is never loaded.
+        conns, self.connector_problems = config.connectors()
+        for problem in self.connector_problems:
+            print(f"[connectors] {problem}")
+        self.connectors = None
+        if conns:
+            from .connectors import Hub
+            from .install import LOG_DIR
+            self.connectors = Hub(conns, log_dir=LOG_DIR)
         self.toolbox = Toolbox(self.get_bot, self.wled, self.vizmac, Memory(), Routines(),
-                               config.location(self.settings))
+                               config.location(self.settings), connectors=self.connectors)
         self._event_last: dict[str, float] = {}
         self.brain = Brain(self.settings, self.toolbox, config.api_key())
         self.log: collections.deque = collections.deque(maxlen=50)
@@ -456,6 +466,8 @@ class App:
     def stop(self) -> None:
         if self._bonjour:
             self._bonjour.terminate()
+        if self.connectors:
+            self.connectors.stop()
 
 
 def make_handler(app: App):
@@ -523,6 +535,8 @@ def make_handler(app: App):
                     "capped": app.brain.capped(), "paired": app.pairing["paired"],
                     "wake": {"model": app.wake.available, "threshold": app.wake.threshold,
                              "wakes": app.wake.wakes, "packets": app.wake.receiver.packets},
+                    "connectors": app.connectors.status() if app.connectors else [],
+                    "connector_problems": app.connector_problems,
                 })
             if path == "/v1/log":
                 return self._json(200, list(app.log))
@@ -732,6 +746,9 @@ def serve(port: int | None = None) -> None:
     threading.Thread(target=app.run_announce, args=(port,), daemon=True).start()
     threading.Thread(target=app.wled.refresh, daemon=True).start()
     app.toolbox.cached_weather()  # warm the prompt's weather so the first question is one call
+    if app.connectors:
+        app.connectors.start()    # in the background; their tools appear as each one is ready
+        print(f"[connectors] starting {', '.join(app.connectors.live)}")
     threading.Thread(target=app.run_scheduler, daemon=True).start()
     if app.settings["wake_enabled"] and app.wake.available:
         app.wake.start()
