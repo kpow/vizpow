@@ -63,6 +63,10 @@ class Bot:
             raise BotError("bad /state")
         return s
 
+    def set_location(self, lat: float, lon: float):
+        """Where the bot's own weather display looks."""
+        return self._get("/info/location", {"lat": f"{lat:.4f}", "lon": f"{lon:.4f}"})
+
     def say(self, text: str, ms: int = 4000):
         return self._get("/bot/say", {"text": text[:95], "dur": max(1000, min(10000, ms))})
 
@@ -158,16 +162,41 @@ def browse(service: str, seconds: float = 2.5) -> list[str]:
     return names
 
 
-def discover_stackchan() -> str | None:
-    """Host of the first vizBot on the LAN whose board is a Stackchan."""
-    for name in browse("_http._tcp"):
-        if not name.lower().startswith("vizbot"):
-            continue
+# Oldest bot firmware this brain works with (pairing token, error bubbles).
+MIN_FIRMWARE = (3, 7, 31)
+
+
+def firmware_ok(version: str | None) -> bool:
+    try:
+        return tuple(int(x) for x in str(version).split(".")[:3]) >= MIN_FIRMWARE
+    except ValueError:
+        return False
+
+
+def discover_stackchans(first_only: bool = False) -> list[dict]:
+    """Stackchan vizBots on the LAN: [{"name", "host", "firmware"}].
+
+    A bot can be renamed, so the board type in /state decides, not the name;
+    names that still start with "vizbot" are just asked first.
+    """
+    found = []
+    names = sorted(browse("_http._tcp"), key=lambda n: not n.lower().startswith("vizbot"))
+    for name in names:
         try:
             # Resolve once, IPv4: urllib's own .local lookup can stall ~5 s.
             host = socket.getaddrinfo(f"{name}.local", 80, socket.AF_INET)[0][4][0]
-            if Bot(host).state().get("boardType") == "stackchan":
-                return host
+            state = Bot(host)._get("/state", timeout=2.0)
         except (BotError, OSError):
             continue
-    return None
+        if isinstance(state, dict) and state.get("boardType") == "stackchan":
+            found.append({"name": state.get("deviceName") or name, "host": host,
+                          "firmware": state.get("firmwareVersion")})
+            if first_only:
+                break
+    return found
+
+
+def discover_stackchan() -> str | None:
+    """Host of the first vizBot on the LAN whose board is a Stackchan."""
+    bots = discover_stackchans(first_only=True)
+    return bots[0]["host"] if bots else None

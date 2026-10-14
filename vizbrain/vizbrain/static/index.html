@@ -21,6 +21,7 @@
   .turn { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; }
   .heard { color:var(--quiet); font-size:13px; }
   .tools { color:var(--quiet); font-size:12px; margin-top:4px; word-break:break-word; }
+  .note { color:#c2410c; font-size:13px; margin-top:8px; min-height:1em; }
 </style>
 </head>
 <body>
@@ -31,6 +32,7 @@
     <input id="q" placeholder="Say something to vizBot…" autocomplete="off" autofocus>
     <button id="go">Send</button>
   </form>
+  <div class="note" id="note"></div>
   <div id="log"></div>
 </main>
 <script>
@@ -39,8 +41,16 @@ async function health() {
   try {
     const h = await (await fetch('/v1/health')).json();
     const sp = h.spend || {};
-    $('status').textContent = `Claude: ${h.claude ? 'online · ' + h.model : 'offline (no API key)'} · bot: ${h.bot || 'not found'} · spend today $${(sp.today_usd || 0).toFixed(3)} (${sp.today_calls || 0} calls) · this month $${(sp.month_usd || 0).toFixed(2)}`;
-  } catch { $('status').textContent = 'brain unreachable'; }
+    // Each part says what's wrong and what to do about it, when something is.
+    const claude = { none: 'no key yet (in Terminal: vizbrain set-key)', rejected: 'key rejected (email Kevin for a new one)',
+                     no_credit: 'account out of credit (email Kevin)' }[h.key] || `online · ${h.model}`;
+    const ears = { loading: ' · ears: still loading, give it a few minutes',
+                   failed: ' · ears: not working (in Terminal: vizbrain doctor)' }[h.ears] || '';
+    let bot = h.bot || 'not found (is he switched on, and on this Wi-Fi?)';
+    if (h.bot && h.bot_firmware && !h.bot_firmware_ok) bot += ` · firmware ${h.bot_firmware} is too old, update him`;
+    const capped = h.capped ? ` · spend limit reached for the ${h.capped}` : '';
+    $('status').textContent = `Claude: ${claude}${ears} · bot: ${bot} · spend today $${(sp.today_usd || 0).toFixed(3)} (${sp.today_calls || 0} calls) · this month $${(sp.month_usd || 0).toFixed(2)}${capped} · vizbrain ${h.version || ''}`;
+  } catch { $('status').textContent = 'vizbrain isn\'t answering (in Terminal: vizbrain doctor)'; }
 }
 function card(t) {
   const d = document.createElement('div');
@@ -61,10 +71,18 @@ $('f').onsubmit = async (e) => {
   const text = $('q').value.trim();
   if (!text) return;
   $('go').disabled = true;
+  $('note').textContent = '';
   try {
-    await fetch('/v1/text', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text}) });
-    $('q').value = '';
-  } finally { $('go').disabled = false; loadLog(); }
+    const r = await fetch('/v1/text', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text}) });
+    const reply = await r.json().catch(() => ({}));
+    if (r.status === 503) $('note').textContent = 'He\'s still on the last one. Try again in a moment.';
+    else if (!r.ok) $('note').textContent = `That didn't go through: ${reply.error || r.status}`;
+    else {
+      $('q').value = '';
+      if (reply.spoke === false) $('note').textContent = 'He answered here, but couldn\'t say it out loud' + (reply.bot_error ? `: ${reply.bot_error}` : ' (no bot found).');
+    }
+  } catch { $('note').textContent = 'vizbrain isn\'t answering (in Terminal: vizbrain doctor)'; }
+  finally { $('go').disabled = false; loadLog(); }
 };
 health(); loadLog(); setInterval(() => { loadLog(); health(); }, 4000);
 </script>

@@ -1,6 +1,6 @@
 """Long-term memory and routines, each a small JSON file next to settings.json.
 
-Memory: short facts vizBot was asked to keep ("Kevin's dog is Biscuit"). They
+Memory: short facts vizBot was asked to keep ("the dog is Biscuit"). They
 go into the prompt every turn, so keep them few and short.
 
 Routines: things to do at a time of day ("08:30 weekdays: good morning with

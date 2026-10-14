@@ -4,14 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vizbrain"
-version = "1.0.0"
+dynamic = ["version"]
 description = "The brain for vizBot: speech to text, Claude, text to speech, and lab tools"
 requires-python = ">=3.11"
+# install.sh installs these at the exact versions in constraints.txt (the set
+# that has actually been run); the bounds here are for installs by hand.
 dependencies = [
-  "anthropic>=0.70",
+  "anthropic>=1.11",
   "mlx-whisper>=0.4",
   "numpy>=1.26",
   "kokoro-onnx>=0.4",
+  "onnxruntime>=1.20",
+  "huggingface_hub>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +23,9 @@ mcp = ["mcp>=2.0"]
 
 [project.scripts]
 vizbrain = "vizbrain.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "vizbrain.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["vizbrain*"]

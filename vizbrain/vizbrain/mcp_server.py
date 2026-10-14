@@ -3,7 +3,7 @@
 Same Toolbox the brain uses, so the safety allow-list (plan D7) holds here
 too. Register with Claude Code:
 
-    claude mcp add vizlab -- /Users/kpow/projects/vizpow/vizbrain/.venv/bin/vizbrain mcp
+    claude mcp add vizlab -- "$(which vizbrain)" mcp
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ def build() -> MCPServer:
         return out
 
     server = MCPServer("vizlab", instructions=(
-        "Controls Kevin's office lab: the vizBot Stackchan robot (face, head, base LEDs, "
-        "speech bubble), WLED lights, and the vizMac keyboard lighting."))
+        "Controls the vizBot Stackchan robot (face, head, base LEDs, speech bubble), "
+        "WLED lights, and the vizMac keyboard lighting."))
 
     @server.tool()
     def list_lab_devices() -> str:
