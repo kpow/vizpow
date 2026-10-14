@@ -21,8 +21,16 @@ class AsksBack(unittest.TestCase):
         self.assertTrue(server.asks_back("I found two. Want me to read them?"))
         self.assertTrue(server.asks_back('Should I call it "done?" '))
 
+    def test_a_question_just_before_the_last_sentence_counts(self):
+        # From the live test: the suggestion was a question, then one more sentence.
+        self.assertTrue(server.asks_back("Let me check. It's hot out, so how about some old rocksteady? "
+                                         "Or a replay of the Phish shows could hit the spot."))
+
+    def test_a_question_earlier_on_does_not(self):
+        self.assertFalse(server.asks_back("Want the weather? It's sunny. High of 70. Low of 55."))
+
     def test_anything_else_does_not(self):
-        for said in ("Done.", "Is it? It is.", "", "Going red!"):
+        for said in ("Done.", "", "Going red!", "It's sunny and 70."):
             self.assertFalse(server.asks_back(said), said)
 
 

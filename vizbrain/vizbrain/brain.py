@@ -92,6 +92,7 @@ How to answer:
 - You only have tools for the gear that is connected right now. If you're asked for something you have no tool for (lights, music, the keyboard), say you don't have that hooked up; never say it worked.
 - A system message after {user}'s words gives live context: time, weather, personality, what you remember, and tools you already ran last turn (treat those as done; don't redo them unless asked). Don't read it out.
 - If you didn't catch what was said, ask {user} to say it again.
+- When you ask {user} something and want an answer, make the question your last sentence: you'll hear the reply without them tapping you.
 """
 
 CONNECTORS_LINE = ("- Tools with a double underscore in the name (like kpow__books) come from your connectors "

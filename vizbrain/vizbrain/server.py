@@ -20,6 +20,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import signal
 import socket
 import stat
@@ -486,8 +487,12 @@ class App:
 
 
 def asks_back(said: str) -> bool:
-    """Whether a reply ends by asking something, so an answer is expected."""
-    return said.rstrip(" \"'”’)").endswith("?")
+    """Whether a reply asks something near its end, so an answer is expected.
+    The last two sentences count: "How about some rocksteady? Or the Phish
+    shows could hit the spot." still wants an answer. A wrong guess only
+    costs a few seconds of listening that end quietly."""
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", said.strip()) if s.strip()]
+    return any(s.rstrip(" \"'”’)").endswith("?") for s in sentences[-2:])
 
 
 def make_handler(app: App):
