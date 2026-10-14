@@ -38,12 +38,15 @@ def post_build(source, target, env):
     # Flash-size comes from the env's board config so the bootloader header byte 0x3
     # always matches the target hardware — preventing the broken-4MB-on-16MB-Core-S3
     # bug that bricked a device.
+    # Flash-mode is left as PlatformIO wrote it. For a qio board the bootloader
+    # header is already dio (the ROM loads it in dio and the bootloader switches
+    # to qio itself); stamping qio over it boot-loops boards whose flash chip the
+    # ROM can't read in qio (mode:QIO ... ets_loader.c 78).
     bootloader = os.path.join(build_dir, "bootloader.bin")
     partitions = os.path.join(build_dir, "partitions.bin")
     if os.path.isfile(bootloader) and os.path.isfile(partitions):
         board = env.BoardConfig()
         flash_size = board.get("upload.flash_size", "4MB")
-        flash_mode = board.get("build.flash_mode", "dio")
         mcu = board.get("build.mcu", "esp32s3")
         factory_name = f"vizbot-{board_type}-v{version}-factory.bin"
         factory_dst = os.path.join(builds_dir, factory_name)
@@ -51,7 +54,7 @@ def post_build(source, target, env):
             sys.executable, "-m", "esptool",
             "--chip", mcu,
             "merge-bin", "-o", factory_dst,
-            "--flash-mode", flash_mode,
+            "--flash-mode", "keep",
             "--flash-size", flash_size,
             "0x0",     bootloader,
             "0x8000",  partitions,
