@@ -463,7 +463,8 @@ def make_handler(app: App):
         server_version = f"vizbrain/{__version__}"
 
         def log_message(self, fmt, *args):  # quieter default logging
-            if "/v1/audio/" not in self.path:
+            # Clip fetches, and the typing page polling every 4 s, would bury everything else.
+            if not self.path.startswith(("/v1/audio/", "/v1/health", "/v1/log")):
                 print(f"[http] {self.client_address[0]} {fmt % args}")
 
         # -- helpers --

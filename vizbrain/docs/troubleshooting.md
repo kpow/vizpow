@@ -23,6 +23,7 @@ Two fixes solve a lot:
 |---|---|---|
 | Tapping does nothing: no "Listening..." | You tapped the back or the middle. Or voice is switched off on the bot. | Tap the **front** of his head. If that doesn't work, open his web page and turn on **Voice** in the Brain card. |
 | "Can't find my brain. Is vizbrain running on the Mac?" | vizbrain isn't running, or the bot has never been told where it is. | Run `vizbrain doctor`. If it says vizbrain isn't running, run `vizbrain install-service`. |
+| The checkup says "Terminal can reach vizBot, but the running vizbrain can't" | macOS is blocking vizbrain from your local network. | Open **System Settings › Privacy & Security › Local Network** and turn on **vizbrain**, then run `vizbrain restart`. No vizbrain in that list? Run `vizbrain install-service`; it asks again. |
 | "Can't reach my brain. Is the Mac awake and on this Wi-Fi?" | The Mac is asleep, off, or on a different network. Or the Mac's address changed. | Wake the Mac and check it's on the same Wi-Fi. He finds the new address within a minute; `vizbrain restart` makes it immediate. |
 | "I'm not paired with this Mac yet. Try me again in a minute." | vizbrain was reinstalled, or just started. | Wait a minute and try again. If it stays, run `vizbrain restart`. |
 | "I'm still getting my ears ready. Try me again in a minute." | vizbrain just started and is loading speech recognition. | Wait a minute. Right after installing, it may still be downloading. |

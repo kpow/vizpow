@@ -29,6 +29,28 @@ class Plist(unittest.TestCase):
         self.assertNotIn("kpow", json.dumps(d).replace(install.LABEL, ""))
         self.assertNotIn("WorkingDirectory", d)
 
+    def test_agent_names_its_app_so_macos_can_grant_it_the_network(self):
+        d = plistlib.loads(install.plist_bytes("/x/python", Path("/x/logs")))
+        self.assertEqual(d["AssociatedBundleIdentifiers"], ["com.kpow.vizbrain"])
+
+    def test_app_bundle_is_written_signed_and_registered(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(install, "APP_PATH", Path(d) / "vizbrain.app"), \
+                mock.patch.object(install.subprocess, "run") as run:
+            self.assertTrue(install.make_app(4050))
+            info = plistlib.loads((Path(d) / "vizbrain.app/Contents/Info.plist").read_bytes())
+            launcher = Path(d) / "vizbrain.app/Contents/MacOS/vizbrain"
+            self.assertEqual(info["CFBundleIdentifier"], "com.kpow.vizbrain")
+            self.assertEqual(info["CFBundleExecutable"], "vizbrain")
+            self.assertIn("vizBot", info["NSLocalNetworkUsageDescription"])
+            self.assertIn("_http._tcp", info["NSBonjourServices"])
+            self.assertTrue(info["LSUIElement"])
+            self.assertIn("open http://localhost:4050", launcher.read_text())
+            self.assertTrue(launcher.stat().st_mode & 0o111)
+        commands = [c.args[0][:2] for c in run.call_args_list]
+        self.assertIn(["codesign", "-s"], commands)
+        self.assertIn([install.LSREGISTER, "-f"], commands)
+
     def test_default_agent_runs_the_interpreter_that_is_installed(self):
         import sys
         self.assertEqual(plistlib.loads(install.plist_bytes())["ProgramArguments"][0], sys.executable)
@@ -257,6 +279,7 @@ class Cli(unittest.TestCase):
     def test_uninstall_without_purge_keeps_data_and_asks_nothing(self):
         with tempfile.TemporaryDirectory() as d, \
                 mock.patch.object(install, "PLIST_PATH", Path(d) / "agent.plist"), \
+                mock.patch.object(install, "APP_PATH", Path(d) / "vizbrain.app"), \
                 mock.patch.object(install, "service_loaded", return_value=False), \
                 mock.patch.object(install.shutil, "rmtree") as rmtree, \
                 mock.patch.object(install.subprocess, "run") as run, \
@@ -265,8 +288,9 @@ class Cli(unittest.TestCase):
             (Path(d) / "agent.plist").write_text("x")
             self.assertEqual(install.uninstall(purge=False), 0)
             self.assertFalse((Path(d) / "agent.plist").exists())
-        rmtree.assert_not_called()
-        run.assert_not_called()
+        # Only the app goes: settings, memory, logs and models stay, and the key isn't touched.
+        rmtree.assert_called_once_with(Path(d) / "vizbrain.app", ignore_errors=True)
+        self.assertNotIn("security", [c.args[0][0] for c in run.call_args_list])
         self.assertIn("Kept your settings", out.getvalue())
 
     def set_key(self, key, typed_workspace, settings=None):

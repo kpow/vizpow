@@ -137,4 +137,5 @@ Two things are left behind either way:
 | Log | `~/Library/Logs/vizbrain/vizbrain.log` |
 | The Claude API key | Keychain Access, under the name `vizbrain` |
 | Start-at-login entry | `~/Library/LaunchAgents/com.kpow.vizbrain.plist` |
+| The vizbrain app (opens his page; macOS grants it network access) | `~/Applications/vizbrain.app` |
 | The program | `~/.local/share/uv/tools/vizbrain/` |

@@ -12,6 +12,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import plistlib
 import re
 import socket
 import subprocess
@@ -228,13 +229,17 @@ def check_agent(r: Report) -> None:
     if not install.PLIST_PATH.exists():
         return r.add(WARN, "Not set to start at login", "Run: vizbrain install-service")
     try:
-        import plistlib
         program = plistlib.loads(install.PLIST_PATH.read_bytes())["ProgramArguments"][0]
     except Exception:  # noqa: BLE001
         return r.add(FAIL, "The login agent file is damaged", "Run: vizbrain install-service")
     if not os.path.exists(program):
         return r.add(FAIL, f"The login agent points at a program that's gone ({program})",
                      "Run: vizbrain install-service")
+    agent = plistlib.loads(install.PLIST_PATH.read_bytes())
+    if (install.BUNDLE_ID not in agent.get("AssociatedBundleIdentifiers", [])
+            or not (install.APP_PATH / "Contents" / "Info.plist").exists()):
+        r.add(WARN, "The login agent isn't linked to vizbrain.app, so macOS may block it from the local network",
+              "Run: vizbrain install-service")
     out = install._launchctl("print", install._target())
     if out.returncode != 0:
         return r.add(WARN, "Set to start at login, but not loaded right now", "Run: vizbrain install-service")
@@ -338,8 +343,8 @@ def check_bot(r: Report, settings: dict, h: dict | None, my_ip: str | None) -> N
         elif h.get("uptime_s", 0) > 120:
             r.add(FAIL, "Terminal can reach vizBot, but the running vizbrain can't"
                         + (f" ({h['bot_error']})" if h.get("bot_error") else ""),
-                  "System Settings > Privacy & Security > Local Network: turn on the entry for vizbrain "
-                  "(it may be listed as python), then run: vizbrain restart")
+                  "System Settings > Privacy & Security > Local Network: turn on vizbrain, then run: "
+                  "vizbrain restart. No vizbrain entry there? Run: vizbrain install-service")
 
 
 def check_log(r: Report) -> None:
