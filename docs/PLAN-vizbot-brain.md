@@ -1,5 +1,7 @@
 # vizBot Brain — LLM Voice, Lab Control and Senses
 
+> **This is the original plan and build log for vizbrain 1.0, kept for history.** Some of it no longer matches the code. For how vizbrain works now see [`vizbrain/DEVELOPING.md`](../vizbrain/DEVELOPING.md); to set one up see [`vizbrain/README.md`](../vizbrain/README.md); for what leaves the house see [`vizbrain/docs/privacy-and-cost.md`](../vizbrain/docs/privacy-and-cost.md).
+
 **Status:** **1.0 shipped** (October 1, 2026): Stages 0–2, a camera/proximity version of Stage 3, memory and routines, in firmware `v3.6.0` + vizbrain `1.0.0`. The LD2412 radar (full Stage 3) is the next sprint.
 **Started:** October 1, 2026
 **Released in:** `v3.6.0` (all boards; voice on Stackchan) with vizbrain `1.0.0`
@@ -417,7 +419,7 @@ Sources:
 | PSRAM or heap pressure from audio plus camera | Buffers allocated once in PSRAM and reused. Static task stacks. Camera waits for Stage 3. |
 | Model drives something it shouldn't | Allow-list (D7). WLED devices addressed only by allow-listed name. |
 | Cost creep | Console spend limit, prompt caching, Haiku for events, event cooldowns. |
-| Privacy of audio and photos | Speech never leaves the LAN (D3). Photos are taken only by the `look` tool, never streamed. |
+| Privacy of audio and photos | Speech audio never leaves the LAN (D3); the transcript goes to Claude. Photos are taken by the `look` tool and, since the arrival check was added, automatically when someone walks in. Never streamed. |
 
 ---
 

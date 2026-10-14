@@ -146,7 +146,7 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Resolution-Independent Effects**: Hi-res ambient effects adapt to any LCD size (240x280 or 320x240)
 - **Audio-Reactive Effects**: 512-point FFT spectrum analysis (bass/mid/treble/RMS/beat envelope) via Core S3 dual MEMS mic drives **all 16 ambient effects**, each with a distinct audio personality (e.g. Distorsion's RGB channels driven by bass/mid/treble, Galaxy spawns stars on beats, Snakes accelerate with bass, Puzzle palette shifts on beats). Includes a global **Audio Reactivity** slider (0=Off / 100=Tasteful / 200=Dramatic) that uniformly scales the depth across every effect. Persisted in NVS.
 - **Kaleidoscope Mode**: Post-processing symmetry for ambient effects — 5 modes: vertical mirror, horizontal mirror, H+V, 6-slice radial, 8-slice radial (web UI dropdown, NVS persisted)
-- **Voice (StackChan, 3.5+)**: Tap the front of the head, ask anything, and the bot answers out loud with a moving mouth. The thinking happens in **vizbrain** ([`vizbrain/`](vizbrain/)), a small Python service on a Mac: local speech recognition (whisper), Claude for the reply and tools, macOS voices per personality. It can also run the lab: WLED lights, the vizMac keyboard, the weather, and the same tools are exposed to Claude Code as the `vizlab` MCP server. With the head camera it can look ("what am I holding?") and greet you when you arrive; it remembers facts across days and runs routines on a schedule. Plan and build log: [`docs/PLAN-vizbot-brain.md`](docs/PLAN-vizbot-brain.md)
+- **Voice (StackChan, firmware 3.7.31+)**: Tap the front of the head, ask anything, and the bot answers out loud with a moving mouth. The thinking happens in **vizbrain** ([`vizbrain/`](vizbrain/)), a small program on a Mac: local speech recognition (whisper), Claude for the reply and tools, and a local neural voice (Kokoro). It can search the web, tell the weather, control WLED lights and Spotify when they're present, and the same tools are exposed to Claude Code as the `vizlab` MCP server. With the head camera it can look ("what am I holding?") and greet you when you arrive; it remembers facts across days and runs routines on a schedule. To set one up, start at [`vizbrain/README.md`](vizbrain/README.md); how it works inside is in [`vizbrain/DEVELOPING.md`](vizbrain/DEVELOPING.md)
 - **StackChan Robot Base**: Full K151-R robot base support — dual SCS0009 servos (yaw/pitch), 12x WS2812C LED ring, Si12T capacitive head touch, INA226 battery monitor, PY32 IO expander. Idle behaviors, touch reactions, mood-ring LEDs. **Audio overlay** layers brightness modulation + beat flash onto every base LED mode (breathing/rainbow/chase/fire/twinkle/pulse/aurora/mood) when AudioFX is enabled — honors the same global reactivity slider
 
 ### vizPow (ESP32-S3)
@@ -240,7 +240,7 @@ When connected to a home network via WiFi provisioning, vizBot enables internet 
 - **Base LEDs**: 12x WS2812C ring (driven via IO expander IO pin 13)
 - **Head Touch**: Si12T 3-zone capacitive touch panel (I2C 0x68) — front tap talks (voice builds; nods otherwise), back tap shakes, 2 s hold chills
 - **Battery Monitor**: INA226 voltage/current sensor (I2C 0x41)
-- **Camera**: OV2640 (deferred to future release)
+- **Camera**: GC0308, used by vizbrain to look when asked and to check who walked in
 
 | Peripheral | Interface | Address/Pins |
 |------------|-----------|-------------|
@@ -294,6 +294,8 @@ Board selection is handled by PlatformIO build environments — each environment
 A `layout.h` abstraction derives all UI positions from `LCD_WIDTH` and `LCD_HEIGHT` at compile time, so effects, overlays, and UI elements automatically scale to any screen size.
 
 ## Installation
+
+Just want to use a vizBot, not build the firmware? Download a ready-made file from [kpow.xyz/vizbot](https://kpow.xyz/vizbot) and flash it from the bot's web page (Update). To give a Stackchan vizBot a voice, see [`vizbrain/README.md`](vizbrain/README.md). The rest of this section is for building from source.
 
 ### Prerequisites
 
@@ -827,7 +829,7 @@ The boot sequence populates a `SystemStatus` struct. If a subsystem fails (IMU, 
 - [ ] Custom effect creator
 - [ ] Enclosure design for wearable medallion
 - [ ] Battery level indicator
-- [ ] OTA firmware updates
+- [x] OTA firmware updates (the Update button on the web page, `/update`)
 
 ## Contributing
 

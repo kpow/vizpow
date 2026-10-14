@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import subprocess
@@ -58,8 +59,8 @@ class Wled:
         self._last_scan = 0.0
 
     def refresh(self, force: bool = False) -> None:
-        if not force and time.time() - self._last_scan < self.REFRESH_S and self.devices:
-            return
+        if not force and time.time() - self._last_scan < self.REFRESH_S:
+            return   # an empty result is kept too: a home with no lights shouldn't rescan every call
         found: dict[str, dict] = {}
         for inst in browse("_wled._tcp", seconds=2.0):
             host = f"{inst}.local"
@@ -96,6 +97,8 @@ class Wled:
         self.refresh()
         with self._lock:
             if device.strip().lower() in ("all", "*", "everything"):
+                if not self.devices:
+                    raise ValueError("no WLED lights found on this network")
                 return list(self.devices.values())
             d = self.devices.get(device.strip().lower())
         if not d:
@@ -161,6 +164,18 @@ class VizMac:
 
     def __init__(self, base_url: str):
         self.base = base_url.rstrip("/")
+        self._up, self._up_at = False, 0.0
+
+    def cached_available(self, ttl_s: float = 300) -> bool:
+        """available(), asked at most every ttl_s (it's on localhost, so quick)."""
+        if time.time() - self._up_at > ttl_s:
+            self._up, self._up_at = self.available(), time.time()
+        return self._up
+
+    @staticmethod
+    def spotify_installed() -> bool:
+        return any(os.path.isdir(os.path.join(d, "Spotify.app"))
+                   for d in ("/Applications", os.path.expanduser("~/Applications")))
 
     def available(self) -> bool:
         try:
@@ -243,17 +258,19 @@ _WMO = {
 }
 
 
-def weather(lat: str, lon: str) -> str:
-    """Current conditions plus today and tomorrow, in °F and mph."""
+def weather(lat: str, lon: str, metric: bool = False) -> str:
+    """Current conditions plus today and tomorrow, in °F and mph (or °C and km/h)."""
+    deg, speed = ("°C", "km/h") if metric else ("°F", "mph")
     url = ("https://api.open-meteo.com/v1/forecast"
            f"?latitude={lat}&longitude={lon}"
            "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m"
            "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
-           "&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=2")
+           + ("" if metric else "&temperature_unit=fahrenheit&wind_speed_unit=mph")
+           + "&timezone=auto&forecast_days=2")
     d = _http_json("GET", url, timeout=5.0)
     c, day = d["current"], d["daily"]
-    parts = [f"Now: {round(c['temperature_2m'])}°F (feels like {round(c['apparent_temperature'])}), "
-             f"{_WMO.get(c['weather_code'], 'unknown sky')}, wind {round(c['wind_speed_10m'])} mph."]
+    parts = [f"Now: {round(c['temperature_2m'])}{deg} (feels like {round(c['apparent_temperature'])}), "
+             f"{_WMO.get(c['weather_code'], 'unknown sky')}, wind {round(c['wind_speed_10m'])} {speed}."]
     for i, label in enumerate(("Today", "Tomorrow")):
         parts.append(f"{label}: high {round(day['temperature_2m_max'][i])}, low {round(day['temperature_2m_min'][i])}, "
                      f"{_WMO.get(day['weather_code'][i], 'unknown sky')}, "

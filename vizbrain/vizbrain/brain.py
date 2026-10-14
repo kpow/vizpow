@@ -13,11 +13,48 @@ import re
 import threading
 import time
 
-from . import usage
+from . import config, usage
 from .bot import EXPRESSIONS, GESTURES
 from .tools import Toolbox
 
 MAX_TOOL_ROUNDS = 6
+
+def make_client(settings: dict, api_key: str):
+    """The Anthropic client for this key (also used by `vizbrain doctor`)."""
+    import anthropic
+    headers = {}
+    if settings.get("workspace_id"):
+        # Required for identity-linked keys that aren't scoped to one workspace.
+        headers["anthropic-workspace-id"] = settings["workspace_id"]
+    if api_key.startswith("sk-ant-usr"):
+        # Personal (identity-linked) keys: send as Authorization: Bearer.
+        return anthropic.Anthropic(auth_token=api_key, default_headers=headers, max_retries=1, timeout=30.0)
+    return anthropic.Anthropic(api_key=api_key, default_headers=headers, max_retries=1, timeout=30.0)
+
+
+def explain(e: Exception) -> tuple[str, str | None]:
+    """What he says when a Claude call fails, and what it shows about the key
+    ("rejected", "no_credit", or None when the key isn't the problem)."""
+    import anthropic
+    if "credit balance" in str(e).lower():
+        return "My Claude account is out of credit. It needs topping up in the Claude Console.", "no_credit"
+    if isinstance(e, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return "My Claude key isn't working. On the Mac, run vizbrain set-key.", "rejected"
+    if isinstance(e, anthropic.NotFoundError):
+        return "My Claude key can't use this model. On the Mac, run vizbrain doctor.", None
+    if isinstance(e, anthropic.RateLimitError):
+        return "I'm being asked to slow down. Try me again in a minute.", None
+    if isinstance(e, anthropic.APIConnectionError):     # includes timeouts
+        return "The Mac can't reach Claude right now. Check its internet connection.", None
+    if isinstance(e, anthropic.APIStatusError) and e.status_code >= 500:
+        return "Claude is busy right now. Try me again in a moment.", None
+    return "Something went wrong in my brain. On the Mac, run vizbrain doctor.", None
+
+
+CAP_TEXT = {
+    "day": "I've hit today's spending limit. I'll be back tomorrow.",
+    "month": "I've hit this month's spending limit.",
+}
 
 PERSONALITY_STYLE = {
     "chill": "laid-back, warm and unhurried; dry humor; never in a rush",
@@ -25,25 +62,26 @@ PERSONALITY_STYLE = {
     "grumpy": "a lovable grump; sarcastic and reluctant, but always helps in the end",
 }
 
-SYSTEM_PROMPT = """You are vizBot, a small desk robot (an M5Stack Stackchan) who lives in Kevin's office lab. \
+SYSTEM_PROMPT = """You are vizBot, a small desk robot (an M5Stack Stackchan) who lives on {user}'s desk. \
 You have a face on a screen, a head that can pan and tilt, a ring of LEDs in your base, a microphone and a speaker. \
-Kevin talks to you by patting your head and speaking.
+{user} talks to you by patting your head and speaking.
 
 How to answer:
-- Everything you write is spoken aloud by a text-to-speech voice. Keep replies to one or two short, natural sentences (about 30 words at most) unless Kevin asks for more.
+- Everything you write is spoken aloud by a text-to-speech voice. Keep replies to one or two short, natural sentences (about 30 words at most) unless {user} asks for more.
 - No markdown, lists, emoji, URLs or code. Spell out symbols and units the way a person would say them.
 - Start every reply with a face tag for how you feel, like [face:happy]. Faces: {faces}.
 - When a head gesture fits, add one gesture tag right after the face, like [gesture:nod]. Gestures: nod, shake, lookup, lookdown, left, right. Most replies need none.
 - Tags are silent: they set your face and head, and are never spoken. Don't use tools for faces or gestures.
-- Use tools only to change things: lab lights, the keyboard, your base LEDs, or pointing your head at a specific angle. For those, write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
+- Use tools only to change things: lights, the keyboard, music, your base LEDs, or pointing your head at a specific angle. For those, write your short spoken confirmation in the same reply as the tool call, as if it already worked; you'll hear back only if a tool fails.
 - For weather, answer from the weather in your context; call get_weather only if it's missing.
 - You can search the web for anything current or that you don't know: events and show dates, scores, news, opening hours, facts. Say a quick "let me check" first, then answer in a sentence or two. Don't narrate the search or comment on the results; after searching, just give the answer. Never read out URLs or list sources unless asked.
 - You have a camera in your head: use look when asked what you see, or to see who's there.
-- When Kevin tells you something worth keeping (names, preferences, plans), save it with remember. Your memories are in your context.
-- Messages in brackets that start with Event or Routine come from your sensors or your schedule, not from Kevin talking. Respond to them naturally and briefly, as yourself.
+- When {user} tells you something worth keeping (names, preferences, plans), save it with remember. Your memories are in your context.
+- Messages in brackets that start with Event or Routine come from your sensors or your schedule, not from {user} talking. Respond to them naturally and briefly, as yourself.
 - If a tool fails, say so plainly in a few words.
-- A system message after Kevin's words gives live context: time, weather, personality, what you remember, and tools you already ran last turn (treat those as done; don't redo them unless asked). Don't read it out.
-- If you didn't catch what was said, ask Kevin to say it again.
+- You only have tools for the gear that is connected right now. If you're asked for something you have no tool for (lights, music, the keyboard), say you don't have that hooked up; never say it worked.
+- A system message after {user}'s words gives live context: time, weather, personality, what you remember, and tools you already ran last turn (treat those as done; don't redo them unless asked). Don't read it out.
+- If you didn't catch what was said, ask {user} to say it again.
 """
 
 
@@ -65,40 +103,43 @@ class Brain:
         self.last_turn = 0.0
         self.lock = threading.Lock()
         self.client = None
+        self.user = config.user_name(settings)
+        self.system_prompt = (SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS))
+                              .replace("{user}", self.user))
+        # "none", "present" (not tried yet), "valid", "rejected" or "no_credit".
+        self.key_state = "present" if api_key else "none"
+        self.last_error: dict | None = None      # {"at", "what"} of the last failed call
         if api_key:
-            import anthropic
-            headers = {}
-            if settings.get("workspace_id"):
-                # Required for identity-linked keys that aren't scoped to one workspace.
-                headers["anthropic-workspace-id"] = settings["workspace_id"]
-            if api_key.startswith("sk-ant-usr"):
-                # Personal (identity-linked) keys: send as Authorization: Bearer.
-                self.client = anthropic.Anthropic(auth_token=api_key, default_headers=headers,
-                                                  max_retries=1, timeout=30.0)
-            else:
-                self.client = anthropic.Anthropic(api_key=api_key, default_headers=headers,
-                                                  max_retries=1, timeout=30.0)
+            self.client = make_client(settings, api_key)
 
     @property
     def online(self) -> bool:
         return self.client is not None
 
+    def capped(self) -> str | None:
+        """"day" or "month" when a spend cap is reached (see usage.over_cap)."""
+        return usage.over_cap(self.settings) if self.client else None
+
     def _context(self, personality: str) -> str:
         style = PERSONALITY_STYLE.get(personality.lower(), "friendly and curious")
         now = dt.datetime.now().strftime("%A %B %-d, %-I:%M %p")
-        lights = ", ".join(self.toolbox.wled.cached_names()) or "none found yet"
+        lights = ", ".join(self.toolbox.wled.cached_names())
         mem = self.toolbox.memory.prompt_text() or "(nothing yet)"
         routines = self.toolbox.routines.prompt_text() or "(none)"
+        lights = (f"Lights (WLED names for wled_set): {lights}. "
+                  f"{self.user} may call them by a nickname; pick the closest name.\n") if lights else ""
         return (f"Current personality: {personality} — {style}.\nLocal time: {now}.\n"
-                f"Things you remember:\n{mem}\nYour routines:\n{routines}\n"
-                f"Lab lights (WLED names for wled_set): {lights}. "
-                f"Kevin may call them by a nickname; pick the closest name.\n"
+                f"Things you remember:\n{mem}\nYour routines:\n{routines}\n{lights}"
                 f"Weather (refreshed every 15 minutes): {self.toolbox.cached_weather() or 'not loaded yet; use get_weather'}")
 
     def turn(self, heard: str, personality: str = "Chill", on_text=None,
              images: list[bytes] | None = None) -> dict:
         """Run one conversational turn. Returns {text, tools, expression, gesture}.
         images: JPEGs attached to this message only (not kept in history)."""
+        capped = self.capped()
+        if capped:   # said by local speech, so it costs nothing
+            return {"text": CAP_TEXT[capped], "tools": [f"capped ({capped})"],
+                    "expression": EXPRESSIONS.index("sad")}
         with self.lock:
             if time.time() - self.last_turn > self.settings["session_idle_s"]:
                 self.history = []
@@ -111,15 +152,7 @@ class Brain:
                 try:
                     result = self._claude_turn(user_msg, personality, on_text, images)
                 except Exception as e:  # noqa: BLE001 - say it out loud rather than go silent
-                    print(f"[brain] Claude call failed: {e}")
-                    msg = str(e).lower()
-                    if "credit balance" in msg:
-                        text = "My Claude brain is out of credits. Add some in the Claude Console."
-                    elif "authentication" in msg or "api key" in msg:
-                        text = "My Claude API key isn't working."
-                    else:
-                        text = "I couldn't reach my Claude brain just now."
-                    result = {"text": text, "tools": [f"error: {e}"[:200]]}
+                    result = {"text": self._failed(e), "tools": [f"error: {e}"[:200]]}
             actions = [t for t in result.get("tools", []) if "(" in t]   # real tool calls, not face= tags
             self.history += [{"role": "user", "content": user_msg},
                              {"role": "assistant", "content": result["text"] or "(no reply)"}]
@@ -131,6 +164,15 @@ class Brain:
                                  + "; ".join(a[:140] for a in actions)) if actions else ""
             self._trim_history()
             return result
+
+    def _failed(self, e: Exception) -> str:
+        """Note a failed Claude call; returns what to say about it."""
+        print(f"[brain] Claude call failed: {type(e).__name__}: {e}")
+        text, key_state = explain(e)
+        if key_state:
+            self.key_state = key_state
+        self.last_error = {"at": time.time(), "what": f"{type(e).__name__}: {e}"[:160]}
+        return text
 
     def _trim_history(self) -> None:
         """Trim in chunks, not one turn at a time: every trim changes the start
@@ -145,6 +187,8 @@ class Brain:
         jobs: is anyone in this photo, react to a lean-in. Not streamed. A real
         reply is added to the conversation so later turns know it happened."""
         import base64
+        if self.capped():
+            return {"text": "", "tools": ["capped"], "expression": -1}
         with self.lock:
             if self.client is None:
                 return {"text": "Oh, hi!", "tools": [], "expression": -1}
@@ -152,10 +196,15 @@ class Brain:
                                                     "data": base64.b64encode(j).decode()}} for j in images or []]
             content.append({"type": "text", "text": f"{self._context(personality)}\n\n{prompt}"})
             model = self.settings["event_model"]
-            resp = self.client.messages.create(
-                model=model, max_tokens=max_tokens,
-                system=SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS)),
-                messages=[{"role": "user", "content": content}])
+            try:
+                resp = self.client.messages.create(
+                    model=model, max_tokens=max_tokens,
+                    system=self.system_prompt,
+                    messages=[{"role": "user", "content": content}])
+            except Exception as e:  # noqa: BLE001 - an event nobody asked for stays quiet
+                self._failed(e)
+                return {"text": "", "tools": [f"error: {e}"[:200]], "expression": -1}
+            self.key_state = "valid"
             try:
                 usage.record(model, resp.usage)
             except Exception as e:  # noqa: BLE001
@@ -182,8 +231,8 @@ class Brain:
         # Prompt caching: the fixed instructions (+ tools, which render first)
         # and the conversation so far are cached; the parts that change every
         # turn (time, weather, personality, notes) ride in a system message
-        # after Kevin's words, so they never break the cached prefix.
-        system = [{"type": "text", "text": SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS)),
+        # after the user's words, so they never break the cached prefix.
+        system = [{"type": "text", "text": self.system_prompt,
                    "cache_control": {"type": "ephemeral"}}]
         history = [dict(m) for m in self.history]
         if history:
@@ -202,9 +251,11 @@ class Brain:
         tools = [t for t in self.toolbox.api_list() if t["name"] not in CLAUDE_SKIP_TOOLS]
         if self.settings.get("web_search"):
             # Server tool: Anthropic runs the search; results come back in the same response.
+            loc = config.location(self.settings)
             tools.append({"type": "web_search_20260209", "name": "web_search",
                           "max_uses": self.settings.get("web_search_max_uses", 2),
-                          "user_location": self.settings["location"]})
+                          "user_location": {"type": "approximate", **{
+                              k: loc[k] for k in ("city", "region", "country", "timezone") if loc.get(k)}}})
         used: list[str] = []
         text_parts: list[str] = []
 
@@ -214,7 +265,7 @@ class Brain:
                 return {"text": "Hmm, I'd better not answer that one.", "tools": used}
             # Keep text from every round: words before a tool call are part of the
             # reply. With web search, keep what came before the first search and
-            # after the last one (the notes in between aren't for Kevin).
+            # after the last one (the notes in between aren't meant to be heard).
             text_parts += _answer_text(resp.content)
             searches = sum(1 for b in resp.content if getattr(b, "type", "") == "server_tool_use")
             if searches:
@@ -261,6 +312,7 @@ class Brain:
 
     def _create(self, system, messages, tools, on_text=None):
         resp = self._create_raw(system, messages, tools, on_text)
+        self.key_state = "valid"
         try:
             u = resp.usage
             cost = usage.record(getattr(resp, "model", None) or self.settings["model"], u)
@@ -344,10 +396,10 @@ class Brain:
         if any(w in h for w in ("hello", "hi ", "hey", "good morning")):
             run("set_expression", name="happy")
             run("head_gesture", name="nod")
-            return {"text": "Hey Kevin! Good to see you.", "tools": used}
+            return {"text": f"Hey {self.user}! Good to see you.", "tools": used}
         run("set_expression", name="thinking")
-        return {"text": f"I heard: {heard.strip()[:80]}. My Claude brain needs an API key before I can really think.",
-                "tools": used}
+        return {"text": f"I heard: {heard.strip()[:80]}. I don't have a Claude key yet, so I can't really think. "
+                        "On the Mac, run vizbrain set-key.", "tools": used}
 
 
 _COLOR_WORDS = ["red", "orange", "yellow", "green", "teal", "cyan", "blue", "purple",
@@ -355,7 +407,7 @@ _COLOR_WORDS = ["red", "orange", "yellow", "green", "teal", "cyan", "blue", "pur
 
 
 def _answer_text(content) -> list[str]:
-    """Text Kevin should hear: everything, or with web search only what came
+    """Text to speak: everything, or with web search only what came
     before the first search and after the last one."""
     blocks = list(content)
     kinds = [getattr(b, "type", "") for b in blocks]

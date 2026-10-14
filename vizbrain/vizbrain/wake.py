@@ -182,6 +182,7 @@ class WakeDetector:
         self.last_wake: dict[str, float] = {}
         self.peak = 0.0                 # highest score in the current burst (diagnostics)
         self.wakes = 0
+        self.verbose = False            # log every burst (settings: debug_log)
         self.receiver = WakeReceiver(on_chunk=self._chunk, on_burst=self._burst_end)
 
     @property
@@ -205,7 +206,8 @@ class WakeDetector:
 
     def _burst_end(self, b: Burst) -> None:
         # Each burst starts after a quiet gap: begin from a clean slate.
-        print(f"[wake] burst {len(b.audio()) / RATE:.1f} s from {b.host}, peak score {self.peak:.2f}", flush=True)
+        if self.verbose:
+            print(f"[wake] burst {len(b.audio()) / RATE:.1f} s from {b.host}, peak score {self.peak:.2f}", flush=True)
         self.peak = 0.0
         m = self.models.get(b.host)
         if m:

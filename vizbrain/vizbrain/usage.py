@@ -50,7 +50,9 @@ def record(model: str, usage) -> float:
         d["output"] += out
         d["cache_read"] += cr
         SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-        PATH.write_text(json.dumps(data, indent=1))
+        tmp = PATH.with_suffix(".tmp")   # a torn write would zero the totals the cap relies on
+        tmp.write_text(json.dumps(data, indent=1))
+        tmp.replace(PATH)
     return cost
 
 
@@ -62,3 +64,13 @@ def summary() -> dict:
     m = sum(v["usd"] for k, v in data.items() if k.startswith(month))
     return {"today_usd": round(t.get("usd", 0.0), 4), "today_calls": t.get("calls", 0),
             "month_usd": round(m, 4)}
+
+
+def over_cap(settings: dict) -> str | None:
+    """"day" or "month" once that spend cap is reached, else None. A cap of 0 is off."""
+    s = summary()
+    if 0 < settings.get("daily_cap_usd", 0) <= s["today_usd"]:
+        return "day"
+    if 0 < settings.get("monthly_cap_usd", 0) <= s["month_usd"]:
+        return "month"
+    return None

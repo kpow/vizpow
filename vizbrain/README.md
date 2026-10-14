@@ -1,75 +1,94 @@
 # vizbrain
 
-The brain for vizBot. A small Python service on the Mac that listens to what you say to the Stackchan, thinks with Claude, answers in a spoken voice, and drives the lab (WLED lights, vizMac keyboard). Plan and interfaces: [`docs/PLAN-vizbot-brain.md`](../docs/PLAN-vizbot-brain.md).
+vizBot is the body: a face, a head that moves, a microphone and a speaker. vizbrain is his brain: a small program on your Mac that hears what you say to him, thinks with Claude, and answers out loud in his own voice.
 
-## Run it
+This page takes you from a bot on your desk to your first conversation. Plan on about 20 minutes, most of it waiting on downloads.
 
-```bash
-cd ~/projects/vizpow/vizbrain
-python3 -m venv .venv && .venv/bin/pip install -e ".[mcp]"
-.venv/bin/vizbrain serve
-```
+## Before you start
 
-Open http://localhost:4050 to type to vizBot. Tap the **front** of his head to talk, and tap again to cancel (firmware v3.5.7 and later).
+You need all five:
 
-The first start downloads the whisper model (~930 MB) from Hugging Face.
+- **A Mac with Apple silicon** (M1 or newer) running macOS 14 or newer, with about 4 GB of free space.
+- **A Stackchan vizBot**, switched on and joined to your home Wi-Fi. ([How to join him to Wi-Fi](../README.md#connecting).)
+- **The same Wi-Fi for both.** The Mac and the bot must be on the same network, and not on a guest network.
+- **Your install link.** Email Kevin for it. The link is yours, so don't pass it on.
+- **A Claude API key.** Kevin sends this too. You'll paste it once during install.
 
-## Turn on Claude
+## Step 1: Update the bot
 
-Without an API key, vizbrain runs a tiny rule-based stand-in: it can tell the time, set light colors and say hello, so the voice pipeline is testable. To use Claude:
+vizbrain needs bot firmware **3.7.31 or newer**.
 
-```bash
-.venv/bin/vizbrain set-key
-```
+1. Open vizBot's web page. On your home Wi-Fi it is at `http://vizbot-xxxx.local`, where `xxxx` is the code in his name (vizBot-XXXX).
+2. Find the **Firmware** line. If it shows 3.7.31 or newer, skip to Step 2.
+3. Download the newest **Stackchan** file from [kpow.xyz/vizbot](https://kpow.xyz/vizbot).
+4. On his web page, press **Update** and choose that file.
+5. When it finishes, switch him fully off and on: hold the bottom button for about 6 seconds, then turn him back on. Skip this and his head won't move.
 
-That stores the key in the macOS Keychain (service `vizbrain`). Then restart vizbrain. `ANTHROPIC_API_KEY` in the environment also works. The key is never written to a file.
+## Step 2: Install the brain
 
-## Run it at login (launchd)
-
-```bash
-mkdir -p ~/Library/Logs/vizbrain
-cp launchd/com.kpow.vizbrain.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.kpow.vizbrain.plist
-```
-
-Logs: `~/Library/Logs/vizbrain/vizbrain.log`.
-
-## Lab tools in Claude Code (MCP)
+1. Open **Terminal** (press Cmd+Space, type `Terminal`, press Return).
+2. Paste this line, with your own link in place of `<your install link>`, and press Return:
 
 ```bash
-claude mcp add vizlab -- ~/projects/vizpow/vizbrain/.venv/bin/vizbrain mcp
+bash -c "$(curl -sSL <your install link>)"
 ```
 
-Tools: `list_lab_devices`, `wled_set`, `keyboard_effect`, `keyboard_flash`, `bot_expression`, `bot_head`, `bot_gesture`, `bot_base_leds`, `bot_say`. Nothing can power off, reflash or re-network the bot.
+The installer downloads about 1.2 GB in total, so the time depends on your connection. It never asks for your Mac password.
 
-## What he can do (vizbrain 1.0)
+If it says the link isn't active, email Kevin for a new one.
 
-- **Talk:** tap the front of his head; replies start ~3.5 s after you stop talking and stream sentence by sentence.
-- **Lab:** WLED lights (all or by name), vizMac keyboard effects and flashes, his base LEDs, head moves, weather.
-- **Look:** "what am I holding?" takes a photo with his head camera.
-- **Notice you:** the bot reports arrivals (camera motion) and lean-ins (proximity). Arrivals are checked with a photo first, so he only greets a real person.
-- **Remember:** "remember that the pugs are Roosevelt and Maybe" lasts across days (`memory.json`).
-- **Routines:** "every weekday at 9, say good morning with the weather" (`routines.json`, checked every 20 s).
-- **Sounds:** synth cues while listening and thinking, chimes after light changes, a `play_sound` tool.
+## Step 3: Answer three things
 
-Models: Claude Sonnet 5.5 for conversation (prompt caching keeps it ~0.2¢ a reply), Claude Haiku 4.5 for arrival checks and lean-ins. Room scanning runs on the bot and costs nothing. Spend shows on the typing page.
+The installer stops and asks:
 
-## How it fits together
+1. **What should vizBot call you?** Press Return to accept the name it suggests.
+2. **What city are you in?** This is for the weather and local answers. Type the city and pick it from the list.
+3. **The Claude API key.** Paste the key Kevin sent and press Return. Nothing appears as you paste; that's normal.
 
-| Piece | What it does |
+The key is stored in your Mac's Keychain. Don't post it or share it: anyone who has it can spend Kevin's money.
+
+macOS may ask whether vizbrain (it may be listed as Python) can find devices on your local network. Choose **Allow**. Without it the brain can't reach the bot.
+
+## Step 4: Read the checkup
+
+The installer finishes by checking everything and printing a report. Every line should start with `[ OK ]`. A line that starts with `[FAIL]` has a `Fix:` line under it that says what to do.
+
+It then opens vizBot's page on your Mac, [http://localhost:4050](http://localhost:4050). The top line should read "Claude: online" and show the bot's address.
+
+## Step 5: Say hello
+
+1. Tap the **front** of his head.
+2. Wait for "Listening..." on his screen.
+3. Say something. Try one of these:
+   - "What's the weather like?"
+   - "Remember that my dog's name is Biscuit."
+   - "Look up and make your ring purple."
+4. To stop him, tap the front of his head again.
+
+He starts answering a second or two after you stop talking.
+
+vizbrain now starts by itself every time you log in to your Mac. There is nothing to launch.
+
+## If something's off
+
+Run the checkup again any time. Open Terminal and type:
+
+```bash
+vizbrain doctor
+```
+
+Then look up what he said or did in [Troubleshooting](docs/troubleshooting.md).
+
+## More
+
+- [Things to say](docs/things-to-say.md): everything he can do, with an example for each.
+- [Troubleshooting](docs/troubleshooting.md): find the symptom, get the fix.
+- [Settings and upkeep](docs/settings.md): change his voice or location, update, uninstall.
+- [Privacy and cost](docs/privacy-and-cost.md): what leaves your house, and who pays.
+- [Developing](DEVELOPING.md): how it works inside, for people changing the code.
+
+## Versions
+
+| vizbrain | Needs bot firmware |
 |---|---|
-| `server.py` | HTTP API on :4050 (`/v1/voice`, `/v1/audio/<id>`, `/v1/text`, `/v1/event`, `/v1/health`, `/v1/log`), event handling, routine scheduler, Bonjour `_vizbrain._tcp` |
-| `brain.py` | Claude conversation (Sonnet 5.5, tool loop), or the offline stand-in |
-| `speech.py` | whisper (mlx) to hear, macOS `say` to speak (24 kHz PCM), one voice per personality |
-| `tools.py` | The tool registry shared by the brain and MCP |
-| `memory.py` | Remembered facts and scheduled routines (JSON next to settings.json, reloaded when edited) |
-| `usage.py` | Daily Claude spend (`usage.json`) |
-| `bot.py`, `lab.py` | Clients for the vizBot, WLED and vizMac APIs |
-| `mcp_server.py` | `vizlab` MCP server over stdio |
-
-Settings: `~/Library/Application Support/vizbrain/settings.json` (only changed values are stored). Useful keys: `bot_host` (pin a bot IP), `model`, `wled_allow` (list of light names, or null for all), `tts_rate`.
-
-## Debugging
-
-- Brain: `curl localhost:4050/v1/health`, `curl localhost:4050/v1/log`
-- Bot: `curl http://<bot>/brain/status` (add `?trace=1` for per-chunk mic levels), `curl -o last.wav http://<bot>/brain/lastwav` for the last raw recording, `curl http://<bot>/brain/listen` to start listening without touching him
+| 1.1.0 | 3.7.31 or newer |

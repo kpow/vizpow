@@ -23,7 +23,7 @@ import numpy as np
 
 PLAY_RATE = 24000  # Hz, s16le mono — what the bot's speaker plays
 
-# One voice everywhere (Kevin: the voice doesn't change with the mood).
+# One voice everywhere: the voice doesn't change with the mood.
 # "kokoro:<voice>[@speed]" uses Kokoro (local neural TTS); anything else is a macOS `say` voice.
 KOKORO_VOICE = "kokoro:am_puck@1.12"
 SAY_VOICE = "Junior"   # macOS fallback when Kokoro isn't installed
@@ -77,24 +77,32 @@ class Listener:
         self.model = model
         self._lock = threading.Lock()
         self._ready = False
+        self.error = ""          # why the model didn't load, if it didn't
+
+    @property
+    def state(self) -> str:
+        """"ready", "loading" (still loading or downloading) or "failed"."""
+        return "ready" if self._ready else "failed" if self.error else "loading"
 
     def warm(self) -> None:
         """Load the model once (first call downloads it from Hugging Face)."""
         try:
             self.transcribe(np.zeros(8000, dtype=np.float32))
-            self._ready = True
+            self._ready, self.error = True, ""
             print(f"[stt] {self.model} ready")
         except Exception as e:  # noqa: BLE001 - report and keep serving
+            self.error = f"{type(e).__name__}: {e}"[:200]
             print(f"[stt] warm-up failed: {e}")
 
-    def transcribe(self, samples: np.ndarray) -> str:
+    def transcribe(self, samples: np.ndarray, hints: list[str] | None = None) -> str:
+        """hints: names and odd words he should expect (the user's name, gear)."""
         import mlx_whisper  # heavy import, deferred
 
         with self._lock:
             out = mlx_whisper.transcribe(
                 samples, path_or_hf_repo=self.model, language="en",
                 condition_on_previous_text=False, fp16=True,
-                initial_prompt="vizBot, Kevin, WLED, vizMac, Stackchan.",
+                initial_prompt=", ".join(["vizBot", *(hints or []), "Stackchan"]) + ".",
             )
         return (out.get("text") or "").strip()
 

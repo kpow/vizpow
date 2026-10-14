@@ -90,6 +90,8 @@ struct VoiceClient {
   bool     enabled = true;
   char     brainHost[64] = "";     // configured; empty = find _vizbrain._tcp
   char     resolved[64] = "";      // host:port in use
+  char     pairToken[52] = "";     // "<id>.<secret>" from vizbrain; sent with every call
+  uint8_t  connectFails = 0;       // calls in a row that never reached the brain
 
   // PSRAM buffers
   int16_t* recBuf = nullptr;       // WAV header + samples
@@ -154,6 +156,8 @@ void loadVoiceSettings() {
   if (!prefs.begin("vizbot", true)) return;
   String h = prefs.getString("brainHost", "");
   strncpy(voice.brainHost, h.c_str(), sizeof(voice.brainHost) - 1);
+  String t = prefs.getString("brainTok", "");
+  strncpy(voice.pairToken, t.c_str(), sizeof(voice.pairToken) - 1);
   voice.enabled = prefs.getBool("voiceOn", true);
   wake.enabled = prefs.getBool("wakeOn", true);
   prefs.end();
@@ -163,6 +167,7 @@ void saveVoiceSettings() {
   Preferences prefs;
   if (!prefs.begin("vizbot", false)) return;
   prefs.putString("brainHost", voice.brainHost);
+  prefs.putString("brainTok", voice.pairToken);
   prefs.putBool("voiceOn", voice.enabled);
   prefs.putBool("wakeOn", wake.enabled);
   prefs.end();
@@ -334,19 +339,46 @@ static size_t voiceRecord(bool& cancelled, bool& garbage) {
 
 // ---- HTTP (plain, LAN only) -----------------------------------------------
 
+static void voiceUsePinnedBrain() {
+  if (strchr(voice.brainHost, ':')) strncpy(voice.resolved, voice.brainHost, sizeof(voice.resolved) - 1);
+  else snprintf(voice.resolved, sizeof(voice.resolved), "%s:%d", voice.brainHost, VOICE_BRAIN_PORT);
+}
+
+// A pinned address goes stale when the Mac's IP changes, so after two calls
+// that never connected, mDNS gets a turn. What it finds is used until
+// vizbrain pins its address again (it re-sends it every minute).
 static bool voiceResolveBrain() {
-  if (voice.brainHost[0]) {
-    if (strchr(voice.brainHost, ':')) strncpy(voice.resolved, voice.brainHost, sizeof(voice.resolved) - 1);
-    else snprintf(voice.resolved, sizeof(voice.resolved), "%s:%d", voice.brainHost, VOICE_BRAIN_PORT);
+  bool pinned = voice.brainHost[0];
+  if (pinned && voice.connectFails < 2) {
+    voiceUsePinnedBrain();
     return true;
   }
-  if (voice.resolved[0]) return true;
-  int n = MDNS.queryService("vizbrain", "tcp");
-  if (n <= 0) return false;
-  IPAddress ip = MDNS.address(0);
-  snprintf(voice.resolved, sizeof(voice.resolved), "%s:%u", ip.toString().c_str(), MDNS.port(0));
-  Serial.printf("[Voice] brain at %s\n", voice.resolved);
+  if (!pinned && voice.resolved[0]) return true;
+  if (MDNS.queryService("vizbrain", "tcp") > 0) {
+    snprintf(voice.resolved, sizeof(voice.resolved), "%s:%u", MDNS.address(0).toString().c_str(), MDNS.port(0));
+    Serial.printf("[Voice] brain at %s\n", voice.resolved);
+    if (pinned) {   // in RAM only: NVS keeps the address vizbrain gave us
+      strncpy(voice.brainHost, voice.resolved, sizeof(voice.brainHost) - 1);
+      voice.connectFails = 0;
+    }
+    return true;
+  }
+  if (!pinned) return false;
+  voiceUsePinnedBrain();
   return true;
+}
+
+// status: an HTTP status, or -1 when the brain was never reached.
+static void voiceNoteBrainStatus(int status) {
+  if (status > 0) voice.connectFails = 0;
+  else if (voice.connectFails < 255) voice.connectFails++;
+}
+
+// Who we are, and the pairing token vizbrain gave us (it refuses its bot
+// routes without it once paired).
+static void voiceSetBotHeaders(esp_http_client_handle_t c) {
+  esp_http_client_set_header(c, "X-Bot-Id", mdnsHostname);
+  if (voice.pairToken[0]) esp_http_client_set_header(c, "X-Viz-Token", voice.pairToken);
 }
 
 // Bytes are staged through internal RAM; lwIP shouldn't DMA from PSRAM.
@@ -365,7 +397,7 @@ static int voicePostWav(const uint8_t* data, size_t len, char* resp, size_t resp
   esp_http_client_handle_t c = esp_http_client_init(&cfg);
   if (!c) return -1;
   esp_http_client_set_header(c, "Content-Type", "audio/wav");
-  esp_http_client_set_header(c, "X-Bot-Id", mdnsHostname);
+  voiceSetBotHeaders(c);
   int status = -1;
   if (esp_http_client_open(c, len) == ESP_OK) {
     size_t sent = 0;
@@ -416,6 +448,7 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
   cfg.buffer_size = 4096;
   esp_http_client_handle_t c = esp_http_client_init(&cfg);
   if (!c) return 0;
+  voiceSetBotHeaders(c);
   uint32_t tReq = millis();
   int64_t contentLen = -1;
   voice.lastFirstDataMs = 0;
@@ -582,22 +615,32 @@ static void voiceRunTurn() {
   voiceShowBubble("Hmm...", 20000);
   if (!voiceResolveBrain()) {
     voiceSetError("vizbrain not found (mDNS _vizbrain._tcp)");
-    voiceShowBubble("My brain is offline.", 3000);
+    voiceShowBubble("Can't find my brain. Is vizbrain running on the Mac?", 5000);
     voiceFinish(VOICE_ERROR);
     return;
   }
   voiceWriteWavHeader((uint8_t*)voice.recBuf, samples);
   static char resp[1536];
+  resp[0] = '\0';
   uint32_t t0 = millis();
   int status = voicePostWav((const uint8_t*)voice.recBuf,
                             (samples + VOICE_WAV_HDR_SAMPLES) * sizeof(int16_t), resp, sizeof(resp));
   voice.lastBrainMs = millis() - t0;
+  voiceNoteBrainStatus(status);
   if (status != 200) {
     char msg[80];
     snprintf(msg, sizeof(msg), "brain POST failed (status %d)", status);
     voiceSetError(msg);
     if (!voice.brainHost[0]) voice.resolved[0] = '\0';   // re-discover next time
-    voiceShowBubble(status == 503 ? "Still thinking about the last one." : "My brain is offline.", 3000);
+    // The brain says what went wrong in "say" when it can; otherwise the
+    // bubble names the likeliest cause for that kind of failure.
+    JsonDocument err;
+    const char* say = "";
+    if (status > 0 && !deserializeJson(err, resp)) say = err["say"] | "";
+    if (say[0]) voiceShowBubble(say, 6000);
+    else if (status == 503) voiceShowBubble("Still thinking about the last one.", 3000);
+    else if (status < 0) voiceShowBubble("Can't reach my brain. Is the Mac awake and on this Wi-Fi?", 5000);
+    else voiceShowBubble("My brain had a problem. Check the vizbrain page on the Mac.", 5000);
     voiceFinish(VOICE_ERROR);
     return;
   }
@@ -658,10 +701,11 @@ static int voicePostEvent(const char* json) {
   esp_http_client_handle_t c = esp_http_client_init(&cfg);
   if (!c) return -1;
   esp_http_client_set_header(c, "Content-Type", "application/json");
-  esp_http_client_set_header(c, "X-Bot-Id", mdnsHostname);
+  voiceSetBotHeaders(c);
   esp_http_client_set_post_field(c, json, strlen(json));
   int status = (esp_http_client_perform(c) == ESP_OK) ? esp_http_client_get_status_code(c) : -1;
   esp_http_client_cleanup(c);
+  voiceNoteBrainStatus(status);
   Serial.printf("[Voice] event %s -> %d\n", json, status);
   return status;
 }

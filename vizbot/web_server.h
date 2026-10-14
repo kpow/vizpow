@@ -2309,6 +2309,13 @@ void handleBrainStatus() {
   d["state"] = VOICE_STATE_NAMES[voice.state];
   d["brainHost"] = voice.brainHost;
   d["resolved"] = voice.resolved;
+  // The public half of the pairing token ("<id>.<secret>"): lets vizbrain
+  // see whether this bot holds its token without the secret leaving the bot.
+  char pairId[16] = "";
+  const char* dot = strchr(voice.pairToken, '.');
+  if (dot && (size_t)(dot - voice.pairToken) < sizeof(pairId)) memcpy(pairId, voice.pairToken, dot - voice.pairToken);
+  d["pairId"] = pairId;
+  d["connectFails"] = voice.connectFails;
   d["turns"] = voice.turns;
   d["failures"] = voice.failures;
   d["micRestarts"] = voice.micRestarts;
@@ -2382,7 +2389,7 @@ void handleBrainLastWav() {
   }
 }
 
-// /brain/config?host=<ip[:port]|empty>&enabled=0|1&wake=0|1
+// /brain/config?host=<ip[:port]|empty>&token=<pairing token>&enabled=0|1&wake=0|1
 void handleBrainConfig() {
   if (server.hasArg("host")) {
     String h = server.arg("host");
@@ -2390,6 +2397,13 @@ void handleBrainConfig() {
     strncpy(voice.brainHost, h.c_str(), sizeof(voice.brainHost) - 1);
     voice.brainHost[sizeof(voice.brainHost) - 1] = '\0';
     voice.resolved[0] = '\0';
+    voice.connectFails = 0;
+  }
+  if (server.hasArg("token")) {
+    String t = server.arg("token");
+    t.trim();
+    strncpy(voice.pairToken, t.c_str(), sizeof(voice.pairToken) - 1);
+    voice.pairToken[sizeof(voice.pairToken) - 1] = '\0';
   }
   if (server.hasArg("enabled")) voice.enabled = server.arg("enabled").toInt() != 0;
   if (server.hasArg("wake")) wake.enabled = server.arg("wake").toInt() != 0;

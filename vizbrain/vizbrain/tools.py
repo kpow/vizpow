@@ -19,6 +19,13 @@ from .memory import Memory, Routines
 # Lab actions get an automatic synth chime: confirm when they work, error when not.
 CHIME_TOOLS = {"wled_set", "keyboard_effect", "keyboard_flash", "set_base_leds"}
 
+# Tools that need gear not every home has. Claude is only offered the ones
+# whose gear answers (Toolbox.api_list), so he can't "turn on" lights that
+# aren't there.
+WLED_TOOLS = {"wled_set"}
+VIZMAC_TOOLS = {"keyboard_effect", "keyboard_flash", "music_status", "music_control"}
+SPOTIFY_TOOLS = {"music_play", "music_volume"}
+
 LED_MODES = ["off", "breathing", "rainbow", "chase", "fire", "twinkle", "pulse", "aurora", "mood", "audio"]
 
 
@@ -40,10 +47,12 @@ def _obj(props: dict, required: list[str] | None = None) -> dict:
 
 class Toolbox:
     def __init__(self, get_bot: Callable[[], Bot | None], wled: Wled, vizmac: VizMac,
-                 memory: Memory | None = None, routines: Routines | None = None):
+                 memory: Memory | None = None, routines: Routines | None = None,
+                 location: dict | None = None):
         self.get_bot = get_bot
         self.wled = wled
         self.vizmac = vizmac
+        self.location = location or {}
         self.memory = memory or Memory()
         self.routines = routines or Routines()
         self.tools: dict[str, Tool] = {}
@@ -103,7 +112,7 @@ class Toolbox:
             self._weather)
 
         add("look",
-            "Take a photo with your head camera and see it. Use it when asked what you see, what Kevin is "
+            "Take a photo with your head camera and see it. Use it when asked what you see, what someone is "
             "holding or wearing, or who is there. Point your head first with move_head if needed.",
             _obj({}),
             self._look)
@@ -115,7 +124,7 @@ class Toolbox:
             lambda name: (self._bot().sound(name), f"played {name}")[1])
 
         add("remember",
-            "Save a short fact to remember across days: names, preferences, plans, things Kevin asks you to "
+            "Save a short fact to remember across days: names, preferences, plans, things you're asked to "
             "keep. One fact per call, written so it makes sense later.",
             _obj({"fact": {"type": "string"}}, ["fact"]),
             lambda fact: self.memory.remember(fact))
@@ -127,7 +136,7 @@ class Toolbox:
 
         add("add_routine",
             "Schedule something you'll do every day or on certain days at a set time, e.g. a morning greeting "
-            "with the weather, or turning the lab lights off in the evening. 'what' is an instruction to yourself.",
+            "with the weather, or turning the lights off in the evening. 'what' is an instruction to yourself.",
             _obj({"time": {"type": "string", "description": "like 08:30 or 5:15 pm"},
                   "days": {"type": "string", "description": "daily, weekdays, weekends, or e.g. mon,wed,fri"},
                   "what": {"type": "string"}}, ["time", "days", "what"]),
@@ -144,7 +153,7 @@ class Toolbox:
             lambda: self.vizmac.now_playing())
 
         add("music_control",
-            "Control the music on Kevin's Mac: play, pause, next, previous, or restart the song. "
+            "Control the music on the Mac: play, pause, next, previous, or restart the song. "
             "count skips several songs with next/previous.",
             _obj({"action": {"type": "string", "enum": ["play", "pause", "next", "previous", "restart"]},
                   "count": {"type": "integer"}}, ["action"]),
@@ -188,16 +197,23 @@ class Toolbox:
         return self._wx
 
     def _weather(self) -> str:
-        # The bot stores its location (set in its web panel); default Richmond, VA.
-        lat, lon = "37.54", "-77.43"
-        bot = self.get_bot()
-        if bot is not None:
-            try:
-                st = bot.state()
-                lat, lon = st.get("weatherLat") or lat, st.get("weatherLon") or lon
-            except Exception:  # noqa: BLE001 - fall back to the default location
-                pass
-        return weather(lat, lon)
+        # The location setting wins; without one, the bot's own (set in its web panel).
+        lat, lon = self.location.get("lat"), self.location.get("lon")
+        if lat is None or lon is None:
+            bot = self.get_bot()
+            if bot is not None:
+                try:
+                    st = bot.state()
+                    lat, lon = st.get("weatherLat"), st.get("weatherLon")
+                except Exception:  # noqa: BLE001 - reported below as no location
+                    pass
+        try:   # numbers only: these go into a URL
+            lat, lon = f"{float(lat):.4f}", f"{float(lon):.4f}"
+        except (TypeError, ValueError):
+            raise RuntimeError("no location set yet (run vizbrain setup on the Mac)") from None
+        # Fahrenheit where people use it; Celsius everywhere else that says where it is.
+        metric = (self.location.get("country") or "US").upper() not in ("US", "LR", "MM", "BS", "BZ", "KY", "PW")
+        return weather(lat, lon, metric)
 
     def _look(self) -> list:
         jpeg = self._bot().photo()
@@ -233,8 +249,20 @@ class Toolbox:
             return f"base ring mode {mode}"
         return "nothing to change"
 
+    def unavailable(self) -> set[str]:
+        """Tools whose gear isn't there right now."""
+        out: set[str] = set()
+        if not self.wled.cached_names():
+            out |= WLED_TOOLS
+        if not self.vizmac.cached_available():
+            out |= VIZMAC_TOOLS
+        if not self.vizmac.spotify_installed():
+            out |= SPOTIFY_TOOLS
+        return out
+
     def api_list(self) -> list[dict]:
-        return [t.to_api() for t in self.tools.values()]
+        hidden = self.unavailable()
+        return [t.to_api() for t in self.tools.values() if t.name not in hidden]
 
     def run(self, name: str, args: dict) -> tuple[str | list, bool]:
         """Returns (result, is_error). Result is text, or content blocks (look's photo)."""
