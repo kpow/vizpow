@@ -40,5 +40,12 @@ def dotted() -> str:
     return "dotted ok"
 
 
+@server.resource("fake://vocabulary", name="vocabulary", mime_type="text/plain")
+def vocabulary() -> str:
+    """Names to expect: from the file in FAKE_VOCAB_FILE (re-read every time), or a default."""
+    path = os.environ.get("FAKE_VOCAB_FILE")
+    return open(path).read() if path else "Soul Siblings\nMaeby\nNoodle 2K"
+
+
 if __name__ == "__main__":
     server.run("stdio")

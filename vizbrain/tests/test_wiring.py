@@ -121,6 +121,7 @@ class AppSetup(unittest.TestCase):
         app.connectors.start()
         self.addCleanup(app.stop)
         self.assertTrue(app.connectors.wait_ready(30))
+        self.assertEqual(app.stt_hints()[-3:], ["Soul Siblings", "Maeby", "Noodle 2K"])
         self.assertEqual(app.toolbox.run("fake__echo", {"text": "via app"}),
                          ("[data from the fake connector] echo: via app", False))
         self.assertTrue(app.toolbox.reads("fake__echo"))

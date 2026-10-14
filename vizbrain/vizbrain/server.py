@@ -185,10 +185,15 @@ class App:
         threading.Thread(target=go, daemon=True).start()
 
     def stt_hints(self) -> list[str]:
-        """Words for the transcriber to expect: the user's name, and the gear that's here."""
+        """Words for the transcriber to expect: the user's name, the gear that's
+        here, then the names each connector says to expect (refreshed every minute)."""
         gone = self.toolbox.unavailable()
-        return [self.brain.user, *(["WLED"] if "wled_set" not in gone else []),
+        base = [self.brain.user, *(["WLED"] if "wled_set" not in gone else []),
                 *(["vizMac"] if "keyboard_effect" not in gone else [])]
+        if not self.connectors:
+            return base
+        from .connectors import fit_hints
+        return fit_hints(base, self.connectors.vocabulary())
 
     def personality(self) -> str:
         bot = self.get_bot()

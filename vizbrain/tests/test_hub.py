@@ -63,8 +63,10 @@ class HubTest(unittest.TestCase):
         quiet.__enter__()
         self.addCleanup(quiet.__exit__, None, None, None)
 
-    def hub(self, *conns) -> Hub:
+    def hub(self, *conns, probe_every_s=None) -> Hub:
         hub = Hub({c["name"]: c for c in conns}, log_dir=Path(self.tmp.name))
+        if probe_every_s:
+            hub.probe_every_s = probe_every_s
         hub.start()
         self.addCleanup(hub.stop)
         self.assertTrue(hub.wait_ready(30), "connectors never finished starting")
@@ -140,6 +142,25 @@ class HubTest(unittest.TestCase):
     def test_server_stderr_goes_to_its_own_log(self):
         self.hub(conn())
         self.assertTrue((Path(self.tmp.name) / "connector-fake.log").exists())
+
+    def test_vocabulary_is_read_at_start(self):
+        hub = self.hub(conn())
+        self.assertEqual(hub.vocabulary(), ["Soul Siblings", "Maeby", "Noodle 2K"])
+        self.assertEqual(hub.status()[0]["vocabulary"], 3)
+
+    def test_vocabulary_follows_the_server_as_its_data_changes(self):
+        words = Path(self.tmp.name) / "vocab.txt"
+        words.write_text("Alpha\nBeta\n")
+        hub = self.hub(conn(env={"FAKE_VOCAB_FILE": str(words)}), probe_every_s=0.2)
+        self.assertEqual(hub.vocabulary(), ["Alpha", "Beta"])
+        words.write_text("Gamma\n")
+        self.assertTrue(until(lambda: hub.vocabulary() == ["Gamma"], 10), hub.vocabulary())
+
+    def test_vocabularies_merge_without_repeats(self):
+        words = Path(self.tmp.name) / "vocab.txt"
+        words.write_text("maeby\nPhish\n")
+        hub = self.hub(conn("one"), conn("two", env={"FAKE_VOCAB_FILE": str(words)}))
+        self.assertEqual(hub.vocabulary(), ["Soul Siblings", "Maeby", "Noodle 2K", "Phish"])
 
     def test_an_empty_hub_is_ready_at_once_and_stops_cleanly(self):
         hub = Hub({})

@@ -141,6 +141,18 @@ class Results(unittest.TestCase):
         self.assertEqual(c.to_tool_result(self.result(), 6000), ("(no result)", False))
 
 
+class Hints(unittest.TestCase):
+    def test_extra_words_fill_up_to_the_limit_after_the_base(self):
+        self.assertEqual(c.fit_hints(["Kevin", "WLED"], ["Soul Siblings", "Maeby", "Kevin", "x" * 40], limit=40),
+                         ["Kevin", "WLED", "Soul Siblings", "Maeby"])
+
+    def test_repeats_and_words_always_in_the_prompt_are_left_out(self):
+        self.assertEqual(c.fit_hints(["Kevin"], ["kevin", "vizBot", "Stackchan", "Maeby", "MAEBY"]), ["Kevin", "Maeby"])
+
+    def test_nothing_extra_is_just_the_base(self):
+        self.assertEqual(c.fit_hints(["Kevin"], []), ["Kevin"])
+
+
 class NoMcpImport(unittest.TestCase):
     def test_the_pure_half_does_not_need_the_mcp_library(self):
         src = (c.__file__)

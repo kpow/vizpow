@@ -149,9 +149,12 @@ def to_tool_result(result, limit: int) -> tuple[str, bool]:
 # session open (the client must be entered and exited in the same task). The
 # brain thread calls in with run_coroutine_threadsafe and waits a bounded time.
 
-PROBE_EVERY_S = 60       # a dead server is only noticed when something talks to it
+PROBE_EVERY_S = 60       # a dead server is only noticed when something talks to it; also refreshes vocabulary
 PROBE_TIMEOUT_S = 5
 GIVE_UP_AFTER = 5        # failed starts in a row before retrying only every 5 minutes
+VOCABULARY_RESOURCE = "vocabulary"   # a connector's resource of names to expect in speech, one per line
+MAX_VOCABULARY = 100     # words kept per connector
+HINT_CHARS = 500         # Whisper keeps only ~224 prompt tokens, and drops the start first
 
 
 class ConnectorError(Exception):
@@ -167,6 +170,7 @@ class _Live:
         self.state = "starting"          # starting, ready, restarting, failed, stopped
         self.tools: list[ConnectorTool] = []
         self.skipped: list[str] = []
+        self.vocabulary: list[str] = []
         self.client = None
         self.error = ""
         self.calls = self.errors = 0
@@ -190,6 +194,7 @@ class Hub:
         self._thread: threading.Thread | None = None
         self._tasks: list[concurrent.futures.Future] = []
         self._stopping = False
+        self.probe_every_s = PROBE_EVERY_S
         if not self.live:
             self._ready.set()
 
@@ -253,8 +258,20 @@ class Hub:
             fut.cancel()
             return f"error: the {live.name} connector didn't answer within {timeout:g} seconds", True
 
+    def vocabulary(self) -> list[str]:
+        """Every connector's names to expect in speech, in connectors.json order, without repeats."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for live in self.live.values():
+            for word in live.vocabulary:
+                if word.lower() not in seen:
+                    seen.add(word.lower())
+                    out.append(word)
+        return out
+
     def status(self) -> list[dict]:
-        return [{"name": l.name, "state": l.state, "tools": len(l.tools), "skipped": l.skipped,
+        return [{"name": l.name, "state": l.state, "tools": len(l.tools), "vocabulary": len(l.vocabulary),
+                 "skipped": l.skipped,
                  "calls": l.calls, "errors": l.errors, "last_ms": l.last_ms, "last_error": l.error}
                 for l in self.live.values()]
 
@@ -311,6 +328,7 @@ class Hub:
                 async with Client(transport, client_info=Implementation(name="vizbrain", version=__version__),
                                   cache=None) as client:
                     tools = await _list_tools(client)
+                    live.vocabulary = await _vocabulary(client)
                     scope.deadline = math.inf
                     live.tools, live.skipped = catalog(conf, tools)
                     live.client, live.state, live.error = client, "ready", ""
@@ -329,12 +347,13 @@ class Hub:
         import anyio
         while not self._stopping and not live.restart:
             live.wake.clear()
-            with anyio.move_on_after(PROBE_EVERY_S):
+            with anyio.move_on_after(self.probe_every_s):
                 await live.wake.wait()
             if self._stopping or live.restart:
                 return
             with anyio.fail_after(PROBE_TIMEOUT_S):
                 await client.list_tools()
+                live.vocabulary = await _vocabulary(client)   # it changes when the server's data does
 
     async def _call(self, live: _Live, tool: ConnectorTool, args: dict, timeout: float) -> tuple[str, bool]:
         from mcp import MCPError
@@ -398,6 +417,38 @@ async def _list_tools(client) -> list:
         cursor = page.next_cursor
         if not cursor:
             return tools
+
+
+async def _vocabulary(client) -> list[str]:
+    """The lines of the server's "vocabulary" resource, if it has one."""
+    try:
+        listed = (await client.list_resources()).resources
+        found = next((r for r in listed if r.name == VOCABULARY_RESOURCE), None)
+        if found is None:
+            return []
+        read = await client.read_resource(str(found.uri))
+    except Exception:  # noqa: BLE001 - no resources, or not this one: no vocabulary
+        return []
+    lines = [line.strip() for part in read.contents for line in (getattr(part, "text", "") or "").splitlines()]
+    return [line for line in lines if line and len(line) <= 60][:MAX_VOCABULARY]
+
+
+def fit_hints(base: list[str], extra: list[str], limit: int = HINT_CHARS,
+              skip: tuple[str, ...] = ("vizbot", "stackchan")) -> list[str]:
+    """base, then as many extra words as fit in limit characters (joined with
+    ", "). Words already there, or always in the prompt (skip), aren't repeated."""
+    out = list(base)
+    taken = {w.lower() for w in out} | set(skip)
+    used = len(", ".join(out))
+    for word in extra:
+        if word.lower() in taken:
+            continue
+        if used + len(word) + 2 > limit:
+            break
+        out.append(word)
+        taken.add(word.lower())
+        used += len(word) + 2
+    return out
 
 
 def resolve_command(command: str, path: str) -> str:
