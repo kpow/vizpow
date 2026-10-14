@@ -365,6 +365,28 @@ def check_log(r: Report) -> None:
         r.add(OK, f"Log: no errors recently ({size / 1e6:.1f} MB)")
 
 
+# ---- connectors -------------------------------------------------------------------------
+
+def check_connectors(r: Report, h: dict | None) -> None:
+    conns, problems = config.connectors()
+    for p in problems:
+        r.add(FAIL, f"connectors.json: {p}", "See the list with: vizbrain connectors")
+    if not conns:
+        return
+    live = {c["name"]: c for c in (h or {}).get("connectors", [])}
+    for name in conns:
+        c = live.get(name)
+        if c is None:
+            r.add(WARN if h else SKIP, f"Connector {name} isn't running" + ("" if h else " (vizbrain isn't running)"),
+                  "Run: vizbrain restart" if h else "")
+        elif c["state"] == "ready":
+            r.add(OK, f"Connector {name}: ready, {c['tools']} tools, {c['calls']} calls, {c['errors']} errors")
+        else:
+            r.add(FAIL if c["state"] == "failed" else WARN,
+                  f"Connector {name} is {c['state']}" + (f": {c['last_error']}" if c.get("last_error") else ""),
+                  f"Run: vizbrain connectors test {name}")
+
+
 def run(copy: bool = False) -> int:
     r = Report()
 
@@ -385,6 +407,7 @@ def run(copy: bool = False) -> int:
     step(check_agent)
     my_ip = step(check_mac)
     step(check_bot, settings, h, my_ip)
+    step(check_connectors, h)
     step(check_log)
     text = r.text()
     print(text)

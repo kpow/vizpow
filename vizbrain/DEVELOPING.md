@@ -18,6 +18,9 @@ How vizbrain works inside, how to run it from source, and how to release it. The
 | `vizbrain/doctor.py` | `vizbrain doctor` |
 | `vizbrain/wake.py` | "Hey vizBot": UDP receiver, openWakeWord model, the recording studio page |
 | `vizbrain/mcp_server.py` | `vizlab` MCP server over stdio |
+| `vizbrain/connectors.py` | Connectors: which tools to offer and how results read (pure), and the `Hub` that runs each MCP server |
+| `vizbrain/connectors_cli.py` | `vizbrain connectors` (list, test, add, remove, set-secret) |
+| `vizbrain/pictures.py` | Album covers from connector results onto the bot's screen |
 | `install.sh` | The installer friends run from their install link |
 | `constraints.txt` | The exact dependency versions the installer pins to |
 | `training/wakeword.py` | Trains the wake-word model (own venv, needs PyTorch) |
@@ -43,7 +46,7 @@ Only one copy can serve port 4050. If the login agent is running, `vizbrain stop
 cd vizbrain && PYTHONPATH=. .venv/bin/python -m unittest discover -s tests
 ```
 
-The suite stands in for the bot, launchd, Claude and the network, so it is safe to run next to a live brain.
+The suite stands in for the bot, launchd, Claude and the network, so it is safe to run next to a live brain. The tool loop is tested with a scripted Claude (`tests/fakes.py`), and the connector hub with a real MCP server process (`tests/fake_mcp_server.py`).
 
 ## HTTP and UDP interface
 
@@ -51,6 +54,7 @@ The suite stands in for the bot, launchd, Claude and the network, so it is safe 
 |---|---|---|
 | `POST /v1/voice` | The paired bot | 16 kHz mono s16 WAV in, reply JSON out (`heard`, `text`, `bubble`, `expression`, `audio_id`) |
 | `GET /v1/audio/<id>` | The paired bot | The reply clip, raw s16le mono PCM at 24 kHz, chunked while it is still being spoken |
+| `GET /v1/listen/<id>` | The paired bot | After playing a clip: `{"listen": true}` when the reply asked a question, so the bot listens for the answer |
 | `POST /v1/event` | The paired bot | `{"type": "arrival" \| "lean_in"}` from the bot's senses |
 | `POST /v1/text` | This Mac only | `{"text": ...}` typed turn; the bot speaks the reply |
 | `POST /v1/say` | This Mac only | `{"text": ..., "voice"?: ...}` speak exact text, no model call |
@@ -95,7 +99,8 @@ A bare Python agent is filed under "Python", and with several Pythons installed 
 2. whisper transcribes it. The user's name and any gear present are passed as hints.
 3. `Brain.turn` streams Claude's reply. Faces and gestures ride in the text as `[face:x]` and `[gesture:x]` tags, so they cost no tool round trip.
 4. Each finished sentence is synthesized and appended to one live clip. `/v1/voice` returns as soon as the first sentence is ready and the bot starts playing while the rest arrives.
-5. Tool calls run between model rounds (6 at most). An action tool whose confirmation was already spoken ends the turn without another model call.
+5. Tool calls run between model rounds (6 at most). An action tool whose confirmation was already spoken ends the turn without another model call. A look-up tool (`Tool.info`, or any connector tool not listed as an action) always gets a second round, so its answer is read.
+6. If either of the last two sentences asked something, the clip is marked. The bot, after playing it, asks `/v1/listen/<id>` and records again without a tap, sending `X-Viz-Follow-Up: 1` (3 in a row at most; firmware 3.7.33+). A follow-up is transcribed with the question as Whisper context, and silence ends it quietly.
 
 Prompt caching: the system prompt and tools are cached, and so is the conversation so far. Everything that changes per turn (time, weather, memory, notes) rides in a trailing system message so it never breaks the cached prefix.
 
@@ -111,7 +116,11 @@ The MCP server exposes 9 of the tools to Claude Code:
 claude mcp add vizlab -- "$(which vizbrain)" mcp
 ```
 
-It needs the `mcp` extra, which the friend installer leaves out.
+## Connectors
+
+MCP servers listed in `connectors.json` (see [Connectors](docs/connectors.md)) are run by `connectors.Hub`. One daemon thread runs an asyncio loop, and one long-lived task per server holds its `mcp.Client` session; the brain thread calls in with `run_coroutine_threadsafe`. Their tools are appended to `Toolbox.api_list()` as `name__tool`, sorted, with byte-stable schemas so the prompt cache holds. With no connectors there is no hub and `mcp` is never imported, and the system prompt is byte-for-byte the same as without the feature.
+
+The brain adds the voice handling: a filler before a silent look-up, the 4-call / 15 s look-up budget, the "data from" label, and no memory or routine changes after connector data in the same turn. A result containing `Cover: https://...` (Spotify's image hosts only) goes to the bot's screen through `pictures.Shower` and `POST /bot/art` (firmware 3.7.34+).
 
 ## Wake word
 

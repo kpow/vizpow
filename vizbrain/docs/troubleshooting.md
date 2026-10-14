@@ -53,6 +53,12 @@ Two fixes solve a lot:
 | He never greets you | Greeting needs 3 still minutes first, then waits 10 minutes between greetings. Chill mode turns it off. | Leave the room for a few minutes and come back. |
 | His head doesn't move after an update | The bot needs a full power cycle after new firmware. | Hold the bottom button about 6 seconds to switch him off, then turn him on. |
 | "Hey vizBot" does nothing | The wake word isn't included in this version. | Tap the front of his head. |
+| He asks a question but doesn't listen for the answer | Bot firmware older than 3.7.33, or he already listened 3 times in a row. | Update his firmware, or tap to answer. |
+| "The ... connector isn't running right now" or "didn't answer" | A connector's server stopped or is slow. vizbrain restarts it by itself. | Run `vizbrain connectors` to see it, and `vizbrain connectors test NAME` to start it and see the error. |
+| A connector's tools never show up | It isn't in the list, or its entry is broken. | Run `vizbrain connectors`; it names the problem. `vizbrain doctor` also checks connectors. |
+| Spotify: "needs Spotify's ... permission" | Playlists and likes need a one-time sign-in on the Mac. | Run `spotify-mcp login` and approve it in the browser. |
+| Spotify: "No Spotify app is open to play on" | Nothing is open to play on. | Open Spotify on the Mac or your phone. |
+| No album cover on his screen | Bot firmware older than 3.7.34. | Update his firmware. |
 
 ## Installing
 

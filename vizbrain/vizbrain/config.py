@@ -179,6 +179,37 @@ CONNECTOR_DEFAULTS = {"timeout_s": 8.0, "start_timeout_s": 30.0, "max_result_cha
 _CONNECTOR_LIMITS = {"timeout_s": (1.0, 20.0), "start_timeout_s": (5.0, 120.0), "max_result_chars": (500, 20000)}
 
 
+def connectors_raw() -> dict:
+    """connectors.json as written, for editing it (an empty one if there's no file)."""
+    try:
+        raw = json.loads(CONNECTORS_PATH.read_text())
+    except FileNotFoundError:
+        return {"mcpServers": {}}
+    if not isinstance(raw, dict) or not isinstance(raw.get("mcpServers"), dict):
+        raise ValueError('connectors.json needs an "mcpServers" object')
+    return raw
+
+
+def save_connectors(raw: dict) -> None:
+    """Write connectors.json, readable only by this user: it decides what code runs."""
+    with _lock:
+        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = CONNECTORS_PATH.with_suffix(".tmp")
+        tmp.touch(mode=0o600)
+        tmp.write_text(json.dumps(raw, indent=2) + "\n")
+        tmp.replace(CONNECTORS_PATH)
+
+
+def connector_secret_ids() -> list[str]:
+    """The Keychain ids that connectors.json refers to ("keychain:<id>" env values)."""
+    try:
+        servers = connectors_raw()["mcpServers"]
+    except (OSError, ValueError):
+        return []
+    return sorted({v.removeprefix("keychain:") for e in servers.values() if isinstance(e, dict)
+                   for v in (e.get("env") or {}).values() if isinstance(v, str) and v.startswith("keychain:")})
+
+
 def connectors() -> tuple[dict[str, dict], list[str]]:
     """The enabled connectors in connectors.json, checked and filled in with
     defaults, plus a line for each problem found. A missing file is no

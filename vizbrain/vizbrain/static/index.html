@@ -49,7 +49,12 @@ async function health() {
     let bot = h.bot || 'not found (is he switched on, and on this Wi-Fi?)';
     if (h.bot && h.bot_firmware && !h.bot_firmware_ok) bot += ` · firmware ${h.bot_firmware} is too old, update him`;
     const capped = h.capped ? ` · spend limit reached for the ${h.capped}` : '';
-    $('status').textContent = `Claude: ${claude}${ears} · bot: ${bot} · spend today $${(sp.today_usd || 0).toFixed(3)} (${sp.today_calls || 0} calls) · this month $${(sp.month_usd || 0).toFixed(2)}${capped} · vizbrain ${h.version || ''}`;
+    // Connectors: just the name when it's fine, the state and its error when it isn't.
+    const conns = (h.connectors || []).map(c => c.state === 'ready' ? c.name
+      : `${c.name} ${c.state}${c.last_error ? ` (${c.last_error})` : ''} (in Terminal: vizbrain connectors test ${c.name})`);
+    if ((h.connector_problems || []).length) conns.push('connectors.json has a problem (in Terminal: vizbrain connectors)');
+    const connectors = conns.length ? ` · connectors: ${conns.join(', ')}` : '';
+    $('status').textContent = `Claude: ${claude}${ears} · bot: ${bot}${connectors} · spend today $${(sp.today_usd || 0).toFixed(3)} (${sp.today_calls || 0} calls) · this month $${(sp.month_usd || 0).toFixed(2)}${capped} · vizbrain ${h.version || ''}`;
   } catch { $('status').textContent = 'vizbrain isn\'t answering (in Terminal: vizbrain doctor)'; }
 }
 function card(t) {

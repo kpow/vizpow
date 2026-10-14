@@ -6,6 +6,7 @@ Everything vizBot can do, with one example each. Say it your own way; these are 
 
 - **Tap the front of his head**, wait for "Listening...", then speak.
 - **Tap the front again** to cancel or to stop him mid-answer.
+- **Answer his questions without tapping.** When he ends on a question, he beeps and listens for your answer (up to 3 times in a row). Say nothing and he shows "Okay." and stops. Needs bot firmware 3.7.33 or newer.
 - **Type instead** at [http://localhost:4050](http://localhost:4050) on your Mac. He says the answer out loud.
 - **Tap the back of his head** and he shakes it. That's a reflex; it doesn't start a conversation.
 - **Hold your hand on his head for 2 seconds** for chill mode. He stops greeting you and reacting to movement for a while.
@@ -60,6 +61,18 @@ The Spotify desktop app must be installed.
 - "Play some jazz." He searches for a playlist, then plays it.
 - "Volume 40."
 
+## If you have a Spotify connector
+
+With the Spotify connector (see [Connectors](connectors.md)) he talks to Spotify directly, which is faster than the desktop-app route above and does more:
+
+- "Play some ska." "Play Three Feet High and Rising." He finds and plays it.
+- "What's this song?"
+- "Add this to my Chill playlist." "Make a playlist called Road Trip."
+- "Like this one."
+- "What have I been listening to?"
+
+When he starts something or tells you what's playing, the album cover shows on his screen for a few seconds (bot firmware 3.7.34 or newer). Playing and skipping need Spotify Premium.
+
 ## Kevin's lab only
 
 Keyboard lighting effects, "what's playing?", and pause, skip and previous need vizMac, an app that only runs in Kevin's lab. Without it he'll say he doesn't have that hooked up.
@@ -71,6 +84,7 @@ Keyboard lighting effects, "what's playing?", and pause, skip and previous need 
 - **He forgets the conversation after 5 quiet minutes.** Things you asked him to remember are kept.
 - **60 remembered facts.** After that the oldest drop off.
 - **Two web searches per answer.**
+- **Four connector look-ups per answer**, and 15 seconds of waiting on them.
 - **One voice.**
 - **A daily spending limit.** If he reaches it he says so and is back the next day.
 - **Your Mac must be awake.** He can't think while it sleeps.

@@ -86,11 +86,13 @@ Then look up what he said or did in [Troubleshooting](docs/troubleshooting.md).
 - [Troubleshooting](docs/troubleshooting.md): find the symptom, get the fix.
 - [Settings and upkeep](docs/settings.md): change his voice or location, update, uninstall.
 - [Privacy and cost](docs/privacy-and-cost.md): what leaves your house, and who pays.
+- [Connectors](docs/connectors.md): plug in MCP servers, like Spotify, for vizBot to use.
 - [Developing](DEVELOPING.md): how it works inside, for people changing the code.
 
 ## Versions
 
 | vizbrain | Needs bot firmware |
 |---|---|
+| 1.2.0 (not released yet) | 3.7.31 or newer. Answering his questions without a tap needs 3.7.33; album covers need 3.7.34 |
 | 1.1.1 | 3.7.31 or newer |
 | 1.1.0 | 3.7.31 or newer |
