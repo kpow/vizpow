@@ -91,4 +91,5 @@ Then look up what he said or did in [Troubleshooting](docs/troubleshooting.md).
 
 | vizbrain | Needs bot firmware |
 |---|---|
+| 1.1.1 | 3.7.31 or newer |
 | 1.1.0 | 3.7.31 or newer |

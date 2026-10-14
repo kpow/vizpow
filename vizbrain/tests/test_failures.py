@@ -29,6 +29,8 @@ class Explain(unittest.TestCase):
             (api_error(anthropic.InternalServerError, 529), "busy right now", None),
             (api_error(anthropic.BadRequestError, 400, "Your credit balance is too low"), "out of credit", "no_credit"),
             (anthropic.APIConnectionError(request=req), "can't reach Claude", None),
+            (api_error(anthropic.BadRequestError, 400, "This API key is not scoped to a workspace, so this "
+                       "request must include the anthropic-workspace-id header"), "needs a workspace ID", "rejected"),
             (anthropic.APITimeoutError(request=req), "can't reach Claude", None),
             (TypeError("unexpected keyword"), "vizbrain doctor", None),
         ]

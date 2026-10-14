@@ -173,6 +173,19 @@ class Port(unittest.TestCase):
             port = s.getsockname()[1]
         self.assertIsNone(server.port_holder(port))
 
+    def test_port_a_restarted_copy_just_closed_counts_as_free(self):
+        # The old copy answered someone, then was killed: its side of that
+        # connection sits in TIME_WAIT with nothing listening. A restart must start.
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("0.0.0.0", 0))
+        port = srv.getsockname()[1]
+        srv.listen()
+        c = socket.create_connection(("127.0.0.1", port))
+        a, _ = srv.accept()
+        a.close(), c.close(), srv.close()
+        self.assertIsNone(server.port_holder(port))
+
     def test_taken_port_gets_an_explanation_not_a_traceback(self):
         with socket.socket() as s:
             s.bind(("0.0.0.0", 0))
@@ -191,7 +204,7 @@ class Cli(unittest.TestCase):
     def test_version(self):
         with mock.patch("sys.stdout", io.StringIO()) as out, self.assertRaises(SystemExit):
             cli.main(["--version"])
-        self.assertEqual(out.getvalue().strip(), "vizbrain 1.1.0")
+        self.assertEqual(out.getvalue().strip(), f"vizbrain {cli.__version__}")
 
     def test_commands_reach_install(self):
         for argv, name, args in ((["setup", "--defaults"], "setup", {"interactive": False}),
@@ -255,6 +268,41 @@ class Cli(unittest.TestCase):
         rmtree.assert_not_called()
         run.assert_not_called()
         self.assertIn("Kept your settings", out.getvalue())
+
+    def set_key(self, key, typed_workspace, settings=None):
+        saved = {}
+        with mock.patch.object(cli.getpass, "getpass", return_value=key), \
+                mock.patch.object(cli.subprocess, "run") as run, \
+                mock.patch("builtins.input", return_value=typed_workspace), \
+                mock.patch.object(config, "load", return_value={**config.DEFAULTS, **(settings or {})}), \
+                mock.patch.object(config, "save", side_effect=saved.update), \
+                mock.patch.object(install, "service_loaded", return_value=False), \
+                mock.patch("sys.stdout", io.StringIO()) as out:
+            code = cli.set_key(clipboard=False)
+        return code, saved, out.getvalue(), run
+
+    def test_personal_key_asks_for_its_workspace(self):
+        code, saved, out, run = self.set_key("sk-ant-usr01-" + "y" * 90, "wrkspc_01ABC")
+        self.assertEqual(code, 0)
+        self.assertEqual(saved["workspace_id"], "wrkspc_01ABC")
+        self.assertIn("personal key", out)
+        run.assert_called_once()                    # the key went to the Keychain
+
+    def test_personal_key_without_a_workspace_says_what_will_happen(self):
+        code, saved, out, _ = self.set_key("sk-ant-usr01-" + "y" * 90, "")
+        self.assertEqual(code, 1)
+        self.assertEqual(saved, {})
+        self.assertIn("Claude will refuse this key", out)
+
+    def test_personal_key_with_a_workspace_already_set_asks_nothing(self):
+        code, saved, out, _ = self.set_key("sk-ant-usr01-" + "y" * 90, "unused", {"workspace_id": "wrkspc_1"})
+        self.assertEqual((code, saved), (0, {}))
+        self.assertNotIn("Workspace ID", out)
+
+    def test_workspace_key_asks_nothing(self):
+        code, saved, out, _ = self.set_key("sk-ant-api03-" + "z" * 95, "unused")
+        self.assertEqual((code, saved), (0, {}))
+        self.assertNotIn("workspace", out)
 
     def test_purge_needs_a_typed_yes(self):
         with mock.patch.object(install, "ask", return_value="no"), \

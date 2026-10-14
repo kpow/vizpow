@@ -228,7 +228,7 @@ def service_loaded() -> bool:
     return _launchctl("print", _target()).returncode == 0
 
 
-def health(port: int | None = None, timeout: float = 2.0) -> dict | None:
+def health(port: int | None = None, timeout: float = 5.0) -> dict | None:
     port = port or config.load()["port"]
     try:
         with urllib.request.urlopen(f"http://localhost:{port}/v1/health", timeout=timeout) as r:

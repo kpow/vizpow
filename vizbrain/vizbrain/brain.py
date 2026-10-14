@@ -36,6 +36,8 @@ def explain(e: Exception) -> tuple[str, str | None]:
     """What he says when a Claude call fails, and what it shows about the key
     ("rejected", "no_credit", or None when the key isn't the problem)."""
     import anthropic
+    if "not scoped to a workspace" in str(e).lower():
+        return "My Claude key needs a workspace ID. On the Mac, run vizbrain set-key.", "rejected"
     if "credit balance" in str(e).lower():
         return "My Claude account is out of credit. It needs topping up in the Claude Console.", "no_credit"
     if isinstance(e, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):

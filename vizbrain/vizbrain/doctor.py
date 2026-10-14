@@ -146,7 +146,10 @@ def check_key(r: Report, settings: dict, online: bool) -> str | None:
         r.add(SKIP, f"Claude API key {shown}: couldn't finish the test ({type(e).__name__})")
     except Exception as e:  # noqa: BLE001 - whatever it is, report it
         _, state = explain(e)
-        if state == "rejected":
+        if "not scoped to a workspace" in str(e).lower():
+            r.add(FAIL, f"The key {shown} is a personal key, and no workspace ID is set for it",
+                  "Run: vizbrain set-key   (it asks for the workspace ID, which starts with wrkspc_)")
+        elif state == "rejected":
             r.add(FAIL, f"Claude rejected the key {shown}",
                   "Email Kevin for a working key, then run: vizbrain set-key")
         else:
