@@ -73,7 +73,9 @@ Message 1, the link and the guide:
 >
 > I'll send the Claude key separately. Keep both to yourself.
 
-Message 2, the key: your Anthropic API key, on its own.
+Message 2, the key: your Anthropic API key, on its own. If it's a personal key (it starts `sk-ant-usr`), add the workspace ID on its own line too; the installer asks for it right after the key. A normal API key made in the Console (`sk-ant-api…`) needs no workspace ID, which makes it the simpler one to hand out.
+
+To copy the key from your own Mac without showing it: `security find-generic-password -s vizbrain -a anthropic -w | pbcopy`. Your workspace ID is `workspace_id` in `~/Library/Application Support/vizbrain/settings.json`.
 
 4. **Make sure their bot has firmware 3.7.31 or newer.** The README walks them through updating it.
 5. **When they get stuck,** ask them to run `vizbrain doctor --copy` and paste the result to you. Their [troubleshooting page](docs/troubleshooting.md) covers most things first.
