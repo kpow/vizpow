@@ -79,7 +79,11 @@ class Shower:
         if bot is None or not self.supported():
             return
         self._last = (url, time.time())
+        started = time.time()
         try:
-            bot.art(for_bot(fetch(url)), SHOW_MS)
+            jpeg = for_bot(fetch(url))
+            bot.art(jpeg, SHOW_MS)
         except Exception as e:  # noqa: BLE001 - a missing cover never breaks a turn
             print(f"[art] not shown: {e}")
+            return
+        print(f"[art] cover shown ({len(jpeg) // 1024} KB, {int((time.time() - started) * 1000)} ms)")
