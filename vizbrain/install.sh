@@ -8,7 +8,7 @@
 # questions and the key. Nothing here needs an admin password.
 set -euo pipefail
 
-VERSION="1.1.1"
+VERSION="1.2.0"
 PYTHON_VERSION="3.14"          # the version constraints.txt was made with
 # vizbrain installs from a git tag of this repo; no GitHub release is published.
 REF="vizbrain-v$VERSION"
