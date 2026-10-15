@@ -273,6 +273,7 @@ class MacSpeaker:
     def __init__(self):
         self._lock = threading.Lock()
         self._stop: threading.Event | None = None
+        self._streams = 0            # output streams open right now (guarded by _lock)
         self.error = ""              # why the Mac can't play audio, if it can't
 
     @property
@@ -298,11 +299,36 @@ class MacSpeaker:
             if self._stop:
                 self._stop.set()
 
+    def _open(self, sd):
+        """An output stream on the Mac's current sound output.
+        PortAudio lists CoreAudio's devices once, when it starts. A Bluetooth
+        speaker that drops and reconnects comes back with a new CoreAudio ID,
+        so the old list points at a device that no longer exists and every
+        open fails ("'!obj'", PaErrorCode -9986). Re-reading the list takes
+        about 3 ms, so do it before each clip, unless another clip's stream is
+        still open (restarting PortAudio would pull it out from under it)."""
+        with self._lock:
+            if self._streams == 0:
+                sd._terminate()
+                sd._initialize()
+            out = sd.RawOutputStream(samplerate=PLAY_RATE, channels=1, dtype="int16")
+            self._streams += 1
+        return out
+
+    def _closed(self) -> None:
+        with self._lock:
+            self._streams -= 1
+
     def _run(self, clip: LiveClip, stop: threading.Event) -> None:
         import sounddevice as sd
         pos, last = 0, time.time()
         try:
-            with sd.RawOutputStream(samplerate=PLAY_RATE, channels=1, dtype="int16") as out:
+            out = self._open(sd)
+        except Exception as e:  # noqa: BLE001 - no output device shouldn't take the server down
+            print(f"[mac-speaker] playback failed: {e}")
+            return
+        try:
+            with out:
                 while not stop.is_set():
                     data, done = clip.read_from(pos, timeout=0.2)
                     if data:
@@ -318,6 +344,8 @@ class MacSpeaker:
                     out.abort()      # drop what's queued; leaving the block would play it out
         except Exception as e:  # noqa: BLE001 - a lost output device shouldn't take the server down
             print(f"[mac-speaker] playback failed: {e}")
+        finally:
+            self._closed()
 
 
 class ClipStore:
