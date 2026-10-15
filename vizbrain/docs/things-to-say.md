@@ -71,7 +71,7 @@ With the Spotify connector (see [Connectors](connectors.md)) he talks to Spotify
 - "Like this one."
 - "What have I been listening to?"
 
-When he starts something or tells you what's playing, the album cover shows on his screen for a few seconds (bot firmware 3.7.34 or newer). Playing and skipping need Spotify Premium.
+When he starts something, tells you what's playing, or a new song starts on Spotify (from any app or speaker), the album cover shows on his screen for 8 seconds (bot firmware 3.7.34 or newer). Playing and skipping need Spotify Premium.
 
 ## Kevin's lab only
 

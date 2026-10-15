@@ -93,6 +93,7 @@ Then look up what he said or did in [Troubleshooting](docs/troubleshooting.md).
 
 | vizbrain | Needs bot firmware |
 |---|---|
+| 1.2.1 | 3.7.31 or newer. Answering his questions without a tap, album covers and the voice picker need 3.7.35 |
 | 1.2.0 | 3.7.31 or newer. Answering his questions without a tap, album covers and the voice picker need 3.7.35 |
 | 1.1.1 | 3.7.31 or newer |
 | 1.1.0 | 3.7.31 or newer |

@@ -30,8 +30,13 @@ def cover_url(text: str) -> str | None:
     if not m:
         return None
     url = m.group(1).rstrip(".,;")
-    host = urllib.parse.urlparse(url).hostname or ""
-    return url if HOSTS.match(host) else None
+    return url if allowed(url) else None
+
+
+def allowed(url: str) -> bool:
+    """https on Spotify's image hosts only."""
+    parts = urllib.parse.urlparse(url or "")
+    return parts.scheme == "https" and bool(HOSTS.match(parts.hostname or ""))
 
 
 def fetch(url: str) -> bytes:
@@ -71,9 +76,13 @@ class Shower:
         from .bot import ART_FIRMWARE, firmware_ok
         return firmware_ok(self.firmware(), ART_FIRMWARE)
 
-    def show(self, url: str) -> None:
+    def show(self, url: str, again: bool = False) -> None:
+        """Show this cover. A repeat within repeat_s is skipped unless again
+        (a new song on the same album still flashes)."""
+        if not allowed(url):
+            return
         last_url, at = self._last
-        if url == last_url and time.time() - at < self.repeat_s:
+        if url == last_url and time.time() - at < self.repeat_s and not again:
             return
         bot = self.get_bot()
         if bot is None or not self.supported():

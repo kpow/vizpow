@@ -60,6 +60,7 @@ Other keys: `args`, `env`, `cwd`, `url` (instead of `command`), `tools` (an allo
 - **Trust:** results are labelled as data from that connector. After one, he won't change his memory or routines in the same answer, so a server can't plant anything that sticks.
 - **Names:** a server can offer a resource named `vocabulary`, with names to expect, one per line. Speech-to-text gets them as hints, and it's re-read every minute.
 - **Pictures:** if a result contains `Cover: https://...` from Spotify's image servers, the cover shows on his screen for 8 seconds. This needs bot firmware 3.7.34 or newer.
+- **Song changes:** a server can offer a resource named `now-playing` with JSON `{"playing", "title", "artist", "cover"}`. vizbrain reads it every 3 seconds, and when a new song starts it flashes that song's cover for 8 seconds, like vizSpot's Now Playing. It skips the song already playing at startup, a song resuming after a pause, and any change while he's talking with you.
 
 ## Writing your own server
 
