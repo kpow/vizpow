@@ -309,6 +309,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         <div class="sbody" id="secBrain">
           <div id="brainStatus" class="hint">checking...</div>
           <div class="trow"><span>Voice (front head tap)</span><div class="tog" id="brainToggle" onclick="toggleBrain()"></div></div>
+          <div class="trow" style="margin-top:8px"><span>Speaking voice</span>
+            <select id="brainVoice" class="sel" style="max-width:200px" onchange="setBrainVoice(this.value)"><option>loading...</option></select>
+          </div>
+          <div id="brainVoiceMsg" class="hint"></div>
           <div class="row" style="margin-top:8px">
             <input type="text" id="brainHost" placeholder="brain host:port (blank = auto)" class="inp flex1" maxlength="60">
             <button onclick="setBrainHost()">Set</button>
@@ -468,7 +472,39 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         if (document.activeElement !== hostEl) hostEl.value = b.brainHost || '';
         document.getElementById('brainLast').textContent = b.lastHeard
           ? `Heard: "${b.lastHeard}" → "${b.lastReply}"` : '';
+        if (!voicesLoaded) loadVoices();   // until the brain answers once
       } catch (e) {}
+    }
+    // Speaking voice: the list comes from vizbrain through the bot (/brain/voices).
+    let voicesLoaded = false;
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    async function loadVoices() {
+      const sel = document.getElementById('brainVoice'), msg = document.getElementById('brainVoiceMsg');
+      try {
+        const r = await fetch('/brain/voices');
+        if (!r.ok) throw 0;
+        const d = await r.json();
+        const groups = {};
+        d.voices.forEach(v => (groups[v.group] = groups[v.group] || []).push(v));
+        let html = d.voices.some(v => v.id === d.current) ? '' : `<option value="" selected>${esc(d.current_label)}</option>`;
+        for (const g in groups) {
+          html += `<optgroup label="${esc(g)}">` + groups[g].map(v =>
+            `<option value="${esc(v.id)}"${v.id === d.current ? ' selected' : ''}>${esc(v.label)}</option>`).join('') + '</optgroup>';
+        }
+        sel.innerHTML = html;
+        voicesLoaded = true;
+        msg.textContent = '';
+      } catch (e) { msg.textContent = 'Voice list: brain offline'; }
+    }
+    async function setBrainVoice(id) {
+      if (!id) return;
+      const msg = document.getElementById('brainVoiceMsg');
+      msg.textContent = 'Switching...';
+      try {
+        const r = await fetch('/brain/voice?id=' + encodeURIComponent(id));
+        const d = await r.json();
+        msg.textContent = r.ok ? `Now: ${d.current_label}. Listen for the sample.` : `Couldn't switch: ${d.error || r.status}`;
+      } catch (e) { msg.textContent = 'Couldn\'t switch: brain offline'; }
     }
     function toggleBrain() { api('/brain/config?enabled=' + (brainOn ? 0 : 1)).then(brainRefresh); }
     function setBrainHost() {
@@ -2390,6 +2426,30 @@ void handleBrainLastWav() {
 }
 
 // /brain/config?host=<ip[:port]|empty>&token=<pairing token>&enabled=0|1&wake=0|1
+// /brain/voices -> vizbrain GET /v1/voices (the picker's choices)
+void handleBrainVoices() {
+  const size_t cap = 8192;
+  char* buf = (char*)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+  if (!buf) { server.send(500, "application/json", "{\"error\":\"out of memory\"}"); return; }
+  int status = voiceBrainRequest(false, "/v1/voices", nullptr, buf, cap);
+  if (status > 0) server.send(status, "application/json", buf);
+  else server.send(502, "application/json", "{\"error\":\"brain offline\"}");
+  free(buf);
+}
+
+// /brain/voice?id=<voice id> -> vizbrain POST /v1/voices {"id": ...}; he says a sample in it
+void handleBrainVoice() {
+  if (!server.hasArg("id")) { server.send(400, "application/json", "{\"error\":\"id required\"}"); return; }
+  JsonDocument req;
+  req["id"] = server.arg("id");
+  char body[96];
+  serializeJson(req, body, sizeof(body));
+  char resp[256];
+  int status = voiceBrainRequest(true, "/v1/voices", body, resp, sizeof(resp));
+  if (status > 0) server.send(status, "application/json", resp);
+  else server.send(502, "application/json", "{\"error\":\"brain offline\"}");
+}
+
 void handleBrainConfig() {
   if (server.hasArg("host")) {
     String h = server.arg("host");
@@ -2594,6 +2654,8 @@ void setupWebServer() {
   server.on("/brain/wake", handleBrainWake);
   server.on("/brain/play", handleBrainPlay);
   server.on("/brain/lastwav", handleBrainLastWav);
+  server.on("/brain/voices", handleBrainVoices);
+  server.on("/brain/voice", handleBrainVoice);
   #endif
 
   // Schedule endpoints

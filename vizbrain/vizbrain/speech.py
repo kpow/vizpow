@@ -24,7 +24,9 @@ import numpy as np
 PLAY_RATE = 24000  # Hz, s16le mono — what the bot's speaker plays
 
 # One voice everywhere: the voice doesn't change with the mood.
-# "kokoro:<voice>[@speed]" uses Kokoro (local neural TTS); anything else is a macOS `say` voice.
+# "kokoro:<voice>[@speed]" uses Kokoro (local neural TTS), as does a blend,
+# "kokoro:<voice>*<weight>+<voice>*<weight>[@speed]"; anything else is a macOS
+# `say` voice. The picker on the bot's page chooses from voices.py.
 KOKORO_VOICE = "kokoro:am_puck@1.12"
 SAY_VOICE = "Junior"   # macOS fallback when Kokoro isn't installed
 KOKORO_DIR = Path.home() / "Library" / "Application Support" / "vizbrain" / "kokoro"
@@ -39,6 +41,36 @@ def voice_for(settings: dict) -> str:
     return SAY_VOICE
 
 
+_KOKORO_NAME = re.compile(r"^[a-z]{2}_[a-z]+$")
+
+
+def parse_kokoro(spec: str) -> tuple[list[tuple[str, float]], float]:
+    """ "kokoro:bm_george*0.6+bm_lewis*0.4@0.9" -> ([("bm_george", 0.6), ("bm_lewis", 0.4)], 0.9).
+    A single voice has weight 1. Weights are normalised to add up to 1."""
+    body = spec.removeprefix("kokoro:")
+    mix, _, speed = body.partition("@")
+    parts: list[tuple[str, float]] = []
+    for part in mix.split("+"):
+        name, _, weight = part.strip().partition("*")
+        if not _KOKORO_NAME.match(name):
+            raise ValueError(f"not a Kokoro voice name: {name!r}")
+        w = float(weight) if weight else 1.0
+        if w <= 0:
+            raise ValueError(f"weight must be positive: {part!r}")
+        parts.append((name, w))
+    total = sum(w for _, w in parts)
+    speed_f = float(speed) if speed else 1.0
+    if not 0.5 <= speed_f <= 2.0:
+        raise ValueError(f"speed must be 0.5 to 2: {speed!r}")
+    return [(n, w / total) for n, w in parts], speed_f
+
+
+def kokoro_lang(parts: list[tuple[str, float]]) -> str:
+    """British pronunciation when the voice is mostly British (b* voices)."""
+    british = sum(w for n, w in parts if n.startswith("b"))
+    return "en-gb" if british > 0.5 else "en-us"
+
+
 class _Kokoro:
     """Kokoro-82M via onnxruntime on the CPU (~3.8x real time on an M5; the
     Neural Engine and the int8 model were both slower). One shared session."""
@@ -46,6 +78,7 @@ class _Kokoro:
     def __init__(self):
         self._k = None
         self._lock = threading.Lock()
+        self._styles: dict[str, np.ndarray] = {}   # blended style per mix, built once
 
     def _load(self):
         if self._k is None:
@@ -53,20 +86,33 @@ class _Kokoro:
             self._k = Kokoro(str(KOKORO_DIR / "kokoro-v1.0.onnx"), str(KOKORO_DIR / "voices-v1.0.bin"))
         return self._k
 
-    def warm(self) -> None:
+    def warm(self, spec: str = KOKORO_VOICE) -> None:
+        """Load the model and the voice in use, so the first reply isn't the slow one."""
         try:
-            self.speak("Ready.", "am_puck", 1.12)
+            parts, speed = parse_kokoro(spec if spec.startswith("kokoro:") else KOKORO_VOICE)
+            self.speak("Ready.", parts, speed)
             print("[tts] kokoro ready")
         except Exception as e:  # noqa: BLE001
             print(f"[tts] kokoro unavailable: {e}")
 
-    def speak(self, text: str, voice: str, speed: float) -> bytes:
+    def speak(self, text: str, parts: list[tuple[str, float]] | str, speed: float) -> bytes:
+        """parts: [(voice, weight)] from parse_kokoro, or one voice name."""
+        if isinstance(parts, str):
+            parts = [(parts, 1.0)]
         with self._lock:
-            samples, rate = self._load().create(text, voice=voice, speed=speed, lang="en-us")
+            k = self._load()
+            voice = parts[0][0] if len(parts) == 1 else self._blend(k, parts)
+            samples, rate = k.create(text, voice=voice, speed=speed, lang=kokoro_lang(parts))
         if rate != PLAY_RATE:
             n = int(len(samples) * PLAY_RATE / rate)
             samples = np.interp(np.linspace(0, len(samples), n, endpoint=False), np.arange(len(samples)), samples)
         return (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+
+    def _blend(self, k, parts: list[tuple[str, float]]) -> np.ndarray:
+        key = "+".join(f"{n}*{w:.3f}" for n, w in parts)
+        if key not in self._styles:
+            self._styles[key] = sum(k.get_voice_style(n) * w for n, w in parts).astype(np.float32)
+        return self._styles[key]
 
 
 kokoro = _Kokoro()
@@ -155,9 +201,9 @@ def synthesize(text: str, voice: str, rate: int) -> bytes:
     like "kokoro:am_puck@1.12"; anything else goes to macOS `say` (also the
     fallback if Kokoro fails)."""
     if voice.startswith("kokoro:"):
-        name, _, speed = voice[7:].partition("@")
         try:
-            return kokoro.speak(text, name, float(speed or 1.0))
+            parts, speed = parse_kokoro(voice)
+            return kokoro.speak(text, parts, speed)
         except Exception as e:  # noqa: BLE001 - fall back to say rather than go silent
             print(f"[tts] kokoro failed ({e}); using say")
             voice = ""

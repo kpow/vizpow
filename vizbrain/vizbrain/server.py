@@ -3,6 +3,8 @@
   POST /v1/voice       16 kHz mono s16 WAV from the bot -> reply JSON
   GET  /v1/audio/<id>  reply clip, raw s16le mono PCM @ 24 kHz
   GET  /v1/listen/<id> after playing a clip: {"listen": true} when the reply asked a question
+  GET  /v1/voices      the voice picker's choices and the current one (the bot's page, via /brain/voices)
+  POST /v1/voices      {"id": ...} switch voice; he says a sample line in it
   POST /v1/text        {"text": ...} typed turn; the bot speaks the reply
   POST /v1/event       presence events (Stage 3; logged for now)
   POST /v1/say         {"text": ..., "voice"?: ...} speak exact text, no model call
@@ -491,6 +493,11 @@ class App:
             self.connectors.stop()
 
 
+def _voice_label(settings: dict) -> str:
+    from . import voices
+    return voices.current(settings)["label"]
+
+
 def asks_back(said: str) -> bool:
     """Whether a reply asks something near its end, so an answer is expected.
     The last two sentences count: "How about some rocksteady? Or the Phish
@@ -556,6 +563,7 @@ def make_handler(app: App):
                     "stt": app.settings["stt_model"], "ears": app.listener.state,
                     "tts": app.settings.get("tts_engine", "kokoro"),
                     "voice": speech.voice_for(app.settings),
+                    "voice_label": _voice_label(app.settings),
                     "bot": bot.host if bot else None,
                     "bot_firmware": info["firmware"], "bot_firmware_ok": firmware_ok(info["firmware"]),
                     "bot_seen_s_ago": int(time.time() - info["seen"]) if info["seen"] else None,
@@ -570,6 +578,9 @@ def make_handler(app: App):
                 })
             if path == "/v1/log":
                 return self._json(200, list(app.log))
+            if path == "/v1/voices":
+                from . import voices
+                return self._json(200, voices.listing(app.settings))
             if path.startswith("/v1/listen/"):
                 clip = app.clips.get(path.rsplit("/", 1)[-1])
                 return self._json(200, {"listen": bool(clip and clip.done and clip.listen)})
@@ -637,11 +648,27 @@ def make_handler(app: App):
                         return self._json(413, {"error": f"text is over {MAX_TEXT_CHARS} characters"})
                     app._say_text(text, -1, "say", None, heard="(say)", voice=req.get("voice"))
                     return self._json(200, {"ok": True})
+                if path == "/v1/voices":
+                    return self._choose_voice()
                 self._json(404, {"error": "not found"})
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
                 self._json(500, {"error": str(e),
                                  "say": "Something went wrong in my brain. Check the vizbrain page on the Mac."})
+
+        def _choose_voice(self):
+            """The picker on the bot's page: switch voice and say a sample line in it.
+            voice_for() reads the settings on every reply, so no restart."""
+            from . import voices
+            choice = voices.find(app.settings, str(self._json_body().get("id") or ""))
+            if choice is None:
+                return self._json(400, {"error": "unknown voice"})
+            app.settings["tts_voice"] = choice["spec"]
+            config.save(app.settings)
+            print(f"[voice] now {choice['label']} ({choice['spec']})")
+            threading.Thread(target=app._say_text, args=(voices.SAMPLE, -1, "voice", None),
+                             kwargs={"heard": "(voice picked)", "voice": choice["spec"]}, daemon=True).start()
+            return self._json(200, {"ok": True, "current": choice["id"], "current_label": choice["label"]})
 
         def _voice(self):
             app.adopt_bot(self.client_address[0], trusted=app.bot_token is not None)
@@ -784,7 +811,7 @@ def serve(port: int | None = None) -> None:
     print(f"[vizbrain] {__version__} starting. Claude "
           f"{'ONLINE (' + app.settings['model'] + ')' if app.brain.online else 'OFFLINE (no API key yet: run vizbrain set-key)'}")
     threading.Thread(target=app.listener.warm, daemon=True).start()
-    threading.Thread(target=speech.kokoro.warm, daemon=True).start()
+    threading.Thread(target=speech.kokoro.warm, args=(speech.voice_for(app.settings),), daemon=True).start()
     threading.Thread(target=app.run_announce, args=(port,), daemon=True).start()
     threading.Thread(target=app.wled.refresh, daemon=True).start()
     app.toolbox.cached_weather()  # warm the prompt's weather so the first question is one call

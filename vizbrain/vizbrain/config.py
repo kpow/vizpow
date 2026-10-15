@@ -50,6 +50,9 @@ DEFAULTS: dict = {
     "tts_voice": "",                 # "" = default (Kokoro am_puck); e.g. "kokoro:af_heart@1.0" or a macOS voice
     "tts_engine": "kokoro",          # "kokoro" (local neural) or "say" (macOS voices)
     "tts_rate": 190,
+    # Extra voices for the picker on the bot's page: [{"id", "label", "group", "spec"}]
+    # with a spec like "kokoro:bm_george*0.6+bm_lewis*0.4@0.9" (see voices.py).
+    "custom_voices": [],
     # WLED devices the brain may control, by name. null = every device found.
     "wled_allow": None,
     "vizmac_url": "http://127.0.0.1:4049",

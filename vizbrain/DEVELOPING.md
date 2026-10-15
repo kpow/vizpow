@@ -21,6 +21,7 @@ How vizbrain works inside, how to run it from source, and how to release it. The
 | `vizbrain/connectors.py` | Connectors: which tools to offer and how results read (pure), and the `Hub` that runs each MCP server |
 | `vizbrain/connectors_cli.py` | `vizbrain connectors` (list, test, add, remove, set-secret) |
 | `vizbrain/pictures.py` | Album covers from connector results onto the bot's screen |
+| `vizbrain/voices.py` | The voice picker's catalog: English Kokoro voices, mixes, and `custom_voices` |
 | `install.sh` | The installer friends run from their install link |
 | `constraints.txt` | The exact dependency versions the installer pins to |
 | `training/wakeword.py` | Trains the wake-word model (own venv, needs PyTorch) |
@@ -54,6 +55,7 @@ The suite stands in for the bot, launchd, Claude and the network, so it is safe 
 |---|---|---|
 | `POST /v1/voice` | The paired bot | 16 kHz mono s16 WAV in, reply JSON out (`heard`, `text`, `bubble`, `expression`, `audio_id`) |
 | `GET /v1/audio/<id>` | The paired bot | The reply clip, raw s16le mono PCM at 24 kHz, chunked while it is still being spoken |
+| `GET /v1/voices`, `POST /v1/voices` | The paired bot | The voice picker: the choices and the current one; `{"id"}` switches voice and says a sample (the bot's page reaches them through `/brain/voices` and `/brain/voice`) |
 | `GET /v1/listen/<id>` | The paired bot | After playing a clip: `{"listen": true}` when the reply asked a question, so the bot listens for the answer |
 | `POST /v1/event` | The paired bot | `{"type": "arrival" \| "lean_in"}` from the bot's senses |
 | `POST /v1/text` | This Mac only | `{"text": ...}` typed turn; the bot speaks the reply |

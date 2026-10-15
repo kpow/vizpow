@@ -769,6 +769,41 @@ static int voicePostEvent(const char* json) {
   return status;
 }
 
+// A small JSON request to vizbrain on behalf of the bot's own web page. The
+// browser can't call the brain itself: the brain refuses any request carrying
+// an Origin, and the pairing token stays on the bot. Returns the HTTP status
+// (-1 when the brain can't be reached) and fills resp, NUL-terminated.
+static int voiceBrainRequest(bool post, const char* path, const char* body, char* resp, size_t cap) {
+  resp[0] = '\0';
+  if (!voiceResolveBrain()) return -1;
+  char url[128];
+  snprintf(url, sizeof(url), "http://%s%s", voice.resolved, path);
+  esp_http_client_config_t cfg = {};
+  cfg.url = url;
+  cfg.method = post ? HTTP_METHOD_POST : HTTP_METHOD_GET;
+  cfg.timeout_ms = 3000;
+  cfg.buffer_size = 2048;
+  esp_http_client_handle_t c = esp_http_client_init(&cfg);
+  if (!c) return -1;
+  voiceSetBotHeaders(c);
+  size_t len = body ? strlen(body) : 0;
+  if (post) esp_http_client_set_header(c, "Content-Type", "application/json");
+  int status = -1;
+  if (esp_http_client_open(c, len) == ESP_OK &&
+      (len == 0 || esp_http_client_write(c, body, len) == (int)len)) {
+    esp_http_client_fetch_headers(c);
+    status = esp_http_client_get_status_code(c);
+    size_t got = 0;
+    int r;
+    while (got < cap - 1 && (r = esp_http_client_read(c, resp + got, cap - 1 - got)) > 0) got += r;
+    resp[got] = '\0';
+  }
+  esp_http_client_close(c);
+  esp_http_client_cleanup(c);
+  voiceNoteBrainStatus(status);
+  return status;
+}
+
 #define VOICE_LEAN_IN_COOLDOWN_MS (3UL * 60UL * 1000UL)
 
 // Called from voiceTask while idle: camera motion check + pending sense events.
