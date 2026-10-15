@@ -773,8 +773,14 @@ void renderBotMode() {
   }
   #endif
 
-  // Album art from vizbrain covers the face for a few seconds (album_art.h)
+  // Album art from vizbrain covers the face for a few seconds (album_art.h),
+  // with his face still on, small, in a black circle in the top right corner.
   if (artRender()) {
+    const int16_t r = ART_FACE_R, ccx = LCD_WIDTH - r - 3, ccy = r + 3;
+    gfx->fillCircle(ccx, ccy, r + 2, ART_FACE_RING);
+    gfx->fillCircle(ccx, ccy, r, BOT_COLOR_BG);
+    // The face reaches further below its centre (mouth) than above (brows): nudge it up.
+    renderBotFaceAt(botMode.face, ccx, ccy - 4, ART_FACE_SCALE, BOT_COLOR_BG);
     gfx->flushCanvas();
     botFrameInProgress = false;
     return;
