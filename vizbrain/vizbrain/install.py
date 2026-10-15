@@ -389,11 +389,13 @@ def uninstall(purge: bool = False, assume_yes: bool = False) -> int:
     shutil.rmtree(APP_PATH, ignore_errors=True)
     print("Removed the login agent.")
     if purge:
-        subprocess.run(["security", "delete-generic-password", "-s", "vizbrain", "-a", "anthropic"],
-                       capture_output=True)
+        secrets = ["anthropic"] + [f"connector/{i}" for i in config.connector_secret_ids()]   # before the files go
+        for account in secrets:
+            subprocess.run(["security", "delete-generic-password", "-s", "vizbrain", "-a", account],
+                           capture_output=True)
         for p in leftovers:
             shutil.rmtree(p, ignore_errors=True)
-        print("Removed the API key, settings, memory, logs and models.")
+        print("Removed the API key, connector secrets, settings, memory, logs and models.")
     else:
         print(f"Kept your settings and vizBot's memory in {config.SETTINGS_DIR}\n"
               f"(remove those too with: vizbrain uninstall --purge)")

@@ -2,6 +2,9 @@
 
   POST /v1/voice       16 kHz mono s16 WAV from the bot -> reply JSON
   GET  /v1/audio/<id>  reply clip, raw s16le mono PCM @ 24 kHz
+  GET  /v1/listen/<id> after playing a clip: {"listen": true} when the reply asked a question
+  GET  /v1/voices      the voice picker's choices and the current one (the bot's page, via /brain/voices)
+  POST /v1/voices      {"id": ...} switch voice; he says a sample line in it
   POST /v1/text        {"text": ...} typed turn; the bot speaks the reply
   POST /v1/event       presence events (Stage 3; logged for now)
   POST /v1/say         {"text": ..., "voice"?: ...} speak exact text, no model call
@@ -19,6 +22,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import signal
 import socket
 import stat
@@ -55,6 +59,9 @@ EVENTS = {
 # reached over the LAN, and once a bot is paired they need its token.
 LOCAL_ROUTES = ("/", "/index.html", "/v1/text", "/v1/say", "/v1/log", "/v1/health")
 MAX_JSON_BODY = 64 * 1024
+# Answers in a row the bot listens for without a tap. A follow-up recording
+# says so with the X-Viz-Follow-Up header.
+MAX_FOLLOW_UPS = 3
 MAX_TEXT_CHARS = 2000
 
 
@@ -115,12 +122,29 @@ class App:
         self.started = time.time()
         # What the announce loop last learned about the bot, for /v1/health.
         self.bot_info: dict = {"firmware": None, "seen": 0.0, "error": "", "brain_addr": ""}
+        # Connectors: MCP servers from connectors.json. With none listed there is
+        # no hub at all, and the MCP library is never loaded.
+        conns, self.connector_problems = config.connectors()
+        for problem in self.connector_problems:
+            print(f"[connectors] {problem}")
+        self.connectors = None
+        if conns:
+            from .connectors import Hub
+            from .install import LOG_DIR
+            self.connectors = Hub(conns, log_dir=LOG_DIR)
         self.toolbox = Toolbox(self.get_bot, self.wled, self.vizmac, Memory(), Routines(),
-                               config.location(self.settings))
+                               config.location(self.settings), connectors=self.connectors)
         self._event_last: dict[str, float] = {}
         self.brain = Brain(self.settings, self.toolbox, config.api_key())
+        # Album covers from music connectors go on his screen (fw 3.7.34+).
+        from .pictures import Shower
+        self.pictures = Shower(self.get_bot, lambda: self.bot_info.get("firmware"))
+        self.brain.on_picture = lambda url: threading.Thread(target=self.pictures.show, args=(url,),
+                                                              daemon=True).start()
         self.log: collections.deque = collections.deque(maxlen=50)
         self.busy = threading.Lock()
+        self.follow_ups = 0             # follow-up answers in a row (see MAX_FOLLOW_UPS)
+        self.last_said = ""             # his last spoken reply: context for hearing the answer to it
         self._bonjour: subprocess.Popen | None = None
         self.wake = WakeDetector(self.on_wake, threshold=self.settings["wake_threshold"])
         self.wake.verbose = bool(self.settings["debug_log"])
@@ -175,10 +199,15 @@ class App:
         threading.Thread(target=go, daemon=True).start()
 
     def stt_hints(self) -> list[str]:
-        """Words for the transcriber to expect: the user's name, and the gear that's here."""
+        """Words for the transcriber to expect: the user's name, the gear that's
+        here, then the names each connector says to expect (refreshed every minute)."""
         gone = self.toolbox.unavailable()
-        return [self.brain.user, *(["WLED"] if "wled_set" not in gone else []),
+        base = [self.brain.user, *(["WLED"] if "wled_set" not in gone else []),
                 *(["vizMac"] if "keyboard_effect" not in gone else [])]
+        if not self.connectors:
+            return base
+        from .connectors import fit_hints
+        return fit_hints(base, self.connectors.vocabulary())
 
     def personality(self) -> str:
         bot = self.get_bot()
@@ -189,7 +218,7 @@ class App:
 
     # ---- turns -----------------------------------------------------------
 
-    def start_turn(self, heard: str, source: str, on_done=None) -> dict:
+    def start_turn(self, heard: str, source: str, on_done=None, may_listen: bool = False) -> dict:
         """Start a turn and return as soon as the first sentence is ready.
 
         Claude's reply streams in; each finished sentence is synthesized and
@@ -197,6 +226,8 @@ class App:
         talking after the first sentence instead of the whole answer. Later
         sentences and any tool calls keep flowing into the same clip. on_done
         runs when the whole turn (including speech synthesis) is finished.
+        may_listen: if the reply ends in a question, mark the clip so the bot
+        listens for the answer without a tap.
         """
         t0 = time.time()
         personality = self.personality()
@@ -237,15 +268,17 @@ class App:
                     on_sentence("Something went wrong in my brain.")
                 result["tools"] = result.get("tools", []) + [f"error: {e}"]
             finally:
+                said = " ".join(mouth.spoken)
+                clip.listen = may_listen and asks_back(said)   # before close: the bot asks once the clip ends
+                self.last_said = said
                 mouth.close()
                 ready.set()
-                said = " ".join(mouth.spoken)
                 timing = {"first_sentence": int(((st["t_first"] or time.time()) - t0) * 1000),
                           "turn": int((time.time() - t0) * 1000)}
                 self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source,
                                      "personality": personality, "tools": result.get("tools", []),
                                      "online": self.brain.online, "heard": heard, "text": said,
-                                     "timing_ms": timing})
+                                     "timing_ms": timing, "listen": clip.listen})
                 if self.settings["debug_log"]:
                     print(f"[turn] {source}: {heard!r} -> {said!r} tools={result.get('tools')} {timing}")
                 else:   # the log file keeps no words, only how the turn went
@@ -456,6 +489,22 @@ class App:
     def stop(self) -> None:
         if self._bonjour:
             self._bonjour.terminate()
+        if self.connectors:
+            self.connectors.stop()
+
+
+def _voice_label(settings: dict) -> str:
+    from . import voices
+    return voices.current(settings)["label"]
+
+
+def asks_back(said: str) -> bool:
+    """Whether a reply asks something near its end, so an answer is expected.
+    The last two sentences count: "How about some rocksteady? Or the Phish
+    shows could hit the spot." still wants an answer. A wrong guess only
+    costs a few seconds of listening that end quietly."""
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", said.strip()) if s.strip()]
+    return any(s.rstrip(" \"'”’)").endswith("?") for s in sentences[-2:])
 
 
 def make_handler(app: App):
@@ -464,7 +513,7 @@ def make_handler(app: App):
 
         def log_message(self, fmt, *args):  # quieter default logging
             # Clip fetches, and the typing page polling every 4 s, would bury everything else.
-            if not self.path.startswith(("/v1/audio/", "/v1/health", "/v1/log")):
+            if not self.path.startswith(("/v1/audio/", "/v1/listen/", "/v1/health", "/v1/log")):
                 print(f"[http] {self.client_address[0]} {fmt % args}")
 
         # -- helpers --
@@ -514,6 +563,7 @@ def make_handler(app: App):
                     "stt": app.settings["stt_model"], "ears": app.listener.state,
                     "tts": app.settings.get("tts_engine", "kokoro"),
                     "voice": speech.voice_for(app.settings),
+                    "voice_label": _voice_label(app.settings),
                     "bot": bot.host if bot else None,
                     "bot_firmware": info["firmware"], "bot_firmware_ok": firmware_ok(info["firmware"]),
                     "bot_seen_s_ago": int(time.time() - info["seen"]) if info["seen"] else None,
@@ -523,9 +573,17 @@ def make_handler(app: App):
                     "capped": app.brain.capped(), "paired": app.pairing["paired"],
                     "wake": {"model": app.wake.available, "threshold": app.wake.threshold,
                              "wakes": app.wake.wakes, "packets": app.wake.receiver.packets},
+                    "connectors": app.connectors.status() if app.connectors else [],
+                    "connector_problems": app.connector_problems,
                 })
             if path == "/v1/log":
                 return self._json(200, list(app.log))
+            if path == "/v1/voices":
+                from . import voices
+                return self._json(200, voices.listing(app.settings))
+            if path.startswith("/v1/listen/"):
+                clip = app.clips.get(path.rsplit("/", 1)[-1])
+                return self._json(200, {"listen": bool(clip and clip.done and clip.listen)})
             if path.startswith("/v1/audio/"):
                 clip = app.clips.get(path.rsplit("/", 1)[-1])
                 if clip is None:
@@ -590,11 +648,27 @@ def make_handler(app: App):
                         return self._json(413, {"error": f"text is over {MAX_TEXT_CHARS} characters"})
                     app._say_text(text, -1, "say", None, heard="(say)", voice=req.get("voice"))
                     return self._json(200, {"ok": True})
+                if path == "/v1/voices":
+                    return self._choose_voice()
                 self._json(404, {"error": "not found"})
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
                 self._json(500, {"error": str(e),
                                  "say": "Something went wrong in my brain. Check the vizbrain page on the Mac."})
+
+        def _choose_voice(self):
+            """The picker on the bot's page: switch voice and say a sample line in it.
+            voice_for() reads the settings on every reply, so no restart."""
+            from . import voices
+            choice = voices.find(app.settings, str(self._json_body().get("id") or ""))
+            if choice is None:
+                return self._json(400, {"error": "unknown voice"})
+            app.settings["tts_voice"] = choice["spec"]
+            config.save(app.settings)
+            print(f"[voice] now {choice['label']} ({choice['spec']})")
+            threading.Thread(target=app._say_text, args=(voices.SAMPLE, -1, "voice", None),
+                             kwargs={"heard": "(voice picked)", "voice": choice["spec"]}, daemon=True).start()
+            return self._json(200, {"ok": True, "current": choice["id"], "current_label": choice["label"]})
 
         def _voice(self):
             app.adopt_bot(self.client_address[0], trusted=app.bot_token is not None)
@@ -608,14 +682,23 @@ def make_handler(app: App):
                                         "say": "My hearing isn't working. On the Mac, run vizbrain doctor."})
             if not app.busy.acquire(blocking=False):
                 return self._json(503, {"error": "busy"})
+            follow_up = self.headers.get("X-Viz-Follow-Up") == "1"
+            app.follow_ups = app.follow_ups + 1 if follow_up else 0
             started = False
             try:
                 t0 = time.time()
                 samples, _ = speech.wav_to_float(wav)
                 samples = speech.normalize(samples)
-                heard = app.listener.transcribe(samples, app.stt_hints()) if samples.size > 1600 else ""
+                context = app.last_said if follow_up else ""   # the question this answers
+                heard = app.listener.transcribe(samples, app.stt_hints(), context) if samples.size > 1600 else ""
                 stt_ms = int((time.time() - t0) * 1000)
-                reply = app.start_turn(heard, "voice", on_done=app.busy.release)
+                if follow_up and len(heard.split()) == 0:
+                    # Noise where an answer was expected: end quietly rather
+                    # than have him ask "say that again?" into an empty room.
+                    return self._json(200, {"heard": "", "text": "", "bubble": "", "expression": -1,
+                                            "audio_id": "", "audio_ms": 0, "timing_ms": {"stt": stt_ms}})
+                reply = app.start_turn(heard, "voice", on_done=app.busy.release,
+                                       may_listen=app.follow_ups < MAX_FOLLOW_UPS)
                 started = True
                 reply["timing_ms"]["stt"] = stt_ms
                 reply["timing_ms"]["audio_in_ms"] = int(samples.size / 16)
@@ -728,10 +811,13 @@ def serve(port: int | None = None) -> None:
     print(f"[vizbrain] {__version__} starting. Claude "
           f"{'ONLINE (' + app.settings['model'] + ')' if app.brain.online else 'OFFLINE (no API key yet: run vizbrain set-key)'}")
     threading.Thread(target=app.listener.warm, daemon=True).start()
-    threading.Thread(target=speech.kokoro.warm, daemon=True).start()
+    threading.Thread(target=speech.kokoro.warm, args=(speech.voice_for(app.settings),), daemon=True).start()
     threading.Thread(target=app.run_announce, args=(port,), daemon=True).start()
     threading.Thread(target=app.wled.refresh, daemon=True).start()
     app.toolbox.cached_weather()  # warm the prompt's weather so the first question is one call
+    if app.connectors:
+        app.connectors.start()    # in the background; their tools appear as each one is ready
+        print(f"[connectors] starting {', '.join(app.connectors.live)}")
     threading.Thread(target=app.run_scheduler, daemon=True).start()
     if app.settings["wake_enabled"] and app.wake.available:
         app.wake.start()

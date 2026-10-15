@@ -48,6 +48,7 @@
 #include "proximity_light.h" // Core S3 proximity & ambient light sensor
 #endif
 #include "effects_ambient.h"
+#include "album_art.h"      // Covers from vizbrain drawn instead of the face (must come before bot_mode.h)
 #include "bot_mode.h"
 #include "info_mode.h"
 #include "wled_display.h"

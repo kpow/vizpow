@@ -16,10 +16,8 @@ dependencies = [
   "kokoro-onnx>=0.4",
   "onnxruntime>=1.20",
   "huggingface_hub>=0.20",
+  "mcp>=2.0",          # connectors (MCP servers whose tools vizBot uses) and `vizbrain mcp`
 ]
-
-[project.optional-dependencies]
-mcp = ["mcp>=2.0"]
 
 [project.scripts]
 vizbrain = "vizbrain.__main__:main"

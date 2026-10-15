@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 # Index order matches the firmware's BotExpressionIndex (vizbot/bot_faces.h).
 EXPRESSIONS = [
@@ -116,6 +117,22 @@ class Bot:
         except (urllib.error.URLError, OSError) as e:
             raise BotError(f"photo: {e}") from e
 
+    def art(self, jpeg: bytes, ms: int = 8000) -> None:
+        """Show a picture (a baseline JPEG, at most 240x240) instead of his face
+        for ms milliseconds (fw 3.7.34+, see ART_FIRMWARE)."""
+        boundary = uuid.uuid4().hex
+        body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"art\"; filename=\"art.jpg\"\r\n"
+                f"Content-Type: image/jpeg\r\n\r\n").encode() + jpeg + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(f"http://{self.host}/bot/art?ms={int(ms)}", data=body, method="POST",
+                                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                r.read()
+        except urllib.error.HTTPError as e:
+            raise BotError(f"art: {e.code} {e.read()[:80]!r}") from e
+        except (urllib.error.URLError, OSError) as e:
+            raise BotError(f"art: {e}") from e
+
     def personality(self) -> str:
         p = self._get("/bot/personality")
         try:
@@ -166,9 +183,13 @@ def browse(service: str, seconds: float = 2.5) -> list[str]:
 MIN_FIRMWARE = (3, 7, 31)
 
 
-def firmware_ok(version: str | None) -> bool:
+# Oldest firmware that can show a picture (album art) instead of his face.
+ART_FIRMWARE = (3, 7, 34)
+
+
+def firmware_ok(version: str | None, at_least: tuple = MIN_FIRMWARE) -> bool:
     try:
-        return tuple(int(x) for x in str(version).split(".")[:3]) >= MIN_FIRMWARE
+        return tuple(int(x) for x in str(version).split(".")[:3]) >= at_least
     except ValueError:
         return False
 

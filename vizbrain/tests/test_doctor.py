@@ -240,3 +240,31 @@ class Whole(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Connectors(unittest.TestCase):
+    def check(self, conns, problems, health):
+        r = doctor.Report()
+        with mock.patch.object(config, "connectors", return_value=(conns, problems)):
+            doctor.check_connectors(r, health)
+        return r, "\n".join(r.lines)
+
+    def test_none_listed_says_nothing(self):
+        r, text = self.check({}, [], HEALTHY)
+        self.assertEqual(text, "")
+
+    def test_ready_failed_and_missing(self):
+        health = dict(HEALTHY, connectors=[
+            {"name": "kpow", "state": "ready", "tools": 11, "calls": 3, "errors": 0, "last_error": ""},
+            {"name": "spotify", "state": "failed", "tools": 0, "calls": 0, "errors": 0,
+             "last_error": "command not found: spotify-mcp"}])
+        r, text = self.check({"kpow": {}, "spotify": {}, "new": {}}, [], health)
+        self.assertIn("[ OK ] Connector kpow: ready, 11 tools, 3 calls, 0 errors", text)
+        self.assertIn("[FAIL] Connector spotify is failed: command not found: spotify-mcp", text)
+        self.assertIn("Fix: Run: vizbrain connectors test spotify", text)
+        self.assertIn("[WARN] Connector new isn't running", text)
+        self.assertEqual((r.problems, r.warnings), (1, 1))
+
+    def test_a_broken_file_is_a_problem(self):
+        r, text = self.check({}, ["connectors.json is unreadable: bad"], None)
+        self.assertIn("[FAIL] connectors.json: connectors.json is unreadable: bad", text)

@@ -9,6 +9,7 @@
   vizbrain update              install the newest version
   vizbrain uninstall [--purge] remove vizbrain (--purge: its data too)
   vizbrain mcp                 run the lab tools as an MCP server (stdio)
+  vizbrain connectors ...      list, test, add or remove MCP connectors (see connectors_cli.py)
 """
 
 from __future__ import annotations
@@ -81,6 +82,8 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--purge", action="store_true", help="also delete settings, memory, the key and models")
     u.add_argument("--yes", action="store_true", help="don't ask before deleting")
     sub.add_parser("mcp")
+    from . import connectors_cli
+    connectors_cli.add_parser(sub)
     d = sub.add_parser("doctor")
     d.add_argument("--copy", action="store_true", help="also put the report on the clipboard")
     args = p.parse_args(argv)
@@ -95,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
             return install.uninstall(args.purge, args.yes)
         return {"install-service": install.install_service, "restart": install.restart,
                 "stop": install.stop, "update": install.update}[args.cmd]()
+    if args.cmd == "connectors":
+        return connectors_cli.run(args)
     if args.cmd == "doctor":
         from . import doctor
         return doctor.run(args.copy)

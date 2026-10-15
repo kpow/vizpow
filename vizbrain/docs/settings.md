@@ -22,6 +22,20 @@ Open Terminal and type any of these.
 
 Run `vizbrain setup` and answer the questions again. Press Return to keep an answer as it is.
 
+## Change his voice
+
+On the bot's own web page (type his address into a browser), open **Brain (voice)** and pick from **Speaking voice**. He says a short line in the new voice straight away, and keeps it from then on. No restart needed. The list has every English Kokoro voice (American and British) plus a few mixes. Needs bot firmware 3.7.35 or newer.
+
+To save a mix of your own, add it to `custom_voices` in the settings file below and restart vizbrain; it shows up under "Custom":
+
+```json
+"custom_voices": [
+  {"id": "mine", "label": "My mix", "spec": "kokoro:af_heart*0.7+bf_emma*0.3@1.05"}
+]
+```
+
+A spec is `kokoro:` and one voice, or several voices with weights joined by `+`, then optionally `@` and a speed from 0.5 to 2. Mostly British mixes speak with British pronunciation.
+
 ## Change other settings
 
 Other settings live in one file:
@@ -57,7 +71,8 @@ Then run `vizbrain restart`. A typo makes the whole file unreadable and he goes 
 | `daily_cap_usd` | Most he can spend on Claude in a day, in dollars. `0` means no limit. | `2.0` | `1.0` |
 | `monthly_cap_usd` | Most he can spend in a calendar month. `0` means no limit. | `20.0` | `10.0` |
 | `web_search` | Whether he can look things up online. | `true` | `false` |
-| `tts_voice` | His voice. Empty means his usual one. | `""` | `"kokoro:af_heart@1.0"` or a Mac voice such as `"Samantha"` |
+| `tts_voice` | His voice; the picker on the bot's page sets it. Empty means his usual one. | `""` | `"kokoro:af_heart@1.0"`, a mix like `"kokoro:bm_george*0.6+bm_lewis*0.4@0.9"`, or a Mac voice such as `"Samantha"` |
+| `custom_voices` | Your own voices for the picker. | `[]` | see "Change his voice" |
 | `wled_allow` | Which WLED lights he may control, by name. `null` means all he finds. | `null` | `["Desk Lamp", "Shelf"]` |
 | `bot_host` | The bot's address, if he can't be found automatically. | `""` (find him) | `"192.168.1.80"` |
 | `debug_log` | Write what was heard and said into the log file. | `false` | `true` |

@@ -288,6 +288,10 @@ Most write endpoints take query args and return `text/plain` `"OK"`; read endpoi
 | `/brightness` | GET | `v` 1-255 | OK |
 | `/bot/expression` | GET | `v` 0-24 | OK |
 | `/bot/say` | GET | `text`, `dur` 1000-10000 | OK |
+| `/bot/art` | POST | multipart, one baseline JPEG up to 240x240 and 96 KB; `ms` 1000-30000 (default 8000) | JSON; drawn instead of the face until `ms` ends, a voice turn starts, or `/bot/art/hide` (Stackchan, 3.7.34+) |
+| `/bot/art/hide` | GET | | JSON; back to the face |
+| `/brain/voices` | GET | | JSON from vizbrain `GET /v1/voices` (the picker's choices); 502 when the brain is offline (3.7.35+) |
+| `/brain/voice` | GET | `id` | JSON from vizbrain `POST /v1/voices`: switches voice, he says a sample (3.7.35+) |
 | `/bot/time` | GET | `v` 0/1/2 (2=toggle) | OK |
 | `/bot/hires` | GET | `v` 0/1 | OK |
 | `/bot/background` | GET | `v` or `style` 0-4 | OK |
