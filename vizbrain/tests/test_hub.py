@@ -4,6 +4,7 @@ Run: python -m unittest discover -s tests"""
 
 import contextlib
 import io
+import json
 import os
 import signal
 import sys
@@ -167,6 +168,32 @@ class HubTest(unittest.TestCase):
         hub = self.hub(conn("fake", replaces=["music_play"]), conn("nope", command="no-such-mcp-server-anywhere",
                                                                      replaces=["music_status"]))
         self.assertEqual(hub.replaced(), {"music_play"})
+
+    def test_a_new_song_is_reported_once_and_pauses_and_the_first_song_are_not(self):
+        now = Path(self.tmp.name) / "now.json"
+        song = lambda t, playing=True: now.write_text(json.dumps(
+            {"playing": playing, "title": t, "artist": "New Order", "cover": f"https://i.scdn.co/image/{t}"}))
+        song("Temptation")
+        seen = []
+        hub = Hub({"fake": conn(env={"FAKE_NOW_FILE": str(now)})}, log_dir=Path(self.tmp.name))
+        hub.watch_every_s = 0.1
+        hub.on_track = seen.append
+        hub.start()
+        self.addCleanup(hub.stop)
+        self.assertTrue(hub.wait_ready(30))
+        time.sleep(0.5)
+        self.assertEqual(seen, [])                       # already playing at start: not a change
+        song("Blue Monday")
+        self.assertTrue(until(lambda: len(seen) == 1, 5))
+        self.assertEqual(seen[0], {"title": "Blue Monday", "artist": "New Order",
+                                   "cover": "https://i.scdn.co/image/Blue Monday", "connector": "fake"})
+        song("Blue Monday", playing=False)
+        time.sleep(0.4)
+        song("Blue Monday")                              # resuming the same song
+        time.sleep(0.4)
+        self.assertEqual(len(seen), 1)
+        song("Ceremony")
+        self.assertTrue(until(lambda: len(seen) == 2, 5))
 
     def test_an_empty_hub_is_ready_at_once_and_stops_cleanly(self):
         hub = Hub({})

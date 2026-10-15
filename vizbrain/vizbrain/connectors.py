@@ -153,6 +153,8 @@ PROBE_EVERY_S = 60       # a dead server is only noticed when something talks to
 PROBE_TIMEOUT_S = 5
 GIVE_UP_AFTER = 5        # failed starts in a row before retrying only every 5 minutes
 VOCABULARY_RESOURCE = "vocabulary"   # a connector's resource of names to expect in speech, one per line
+NOW_PLAYING_RESOURCE = "now-playing"  # JSON {playing, title, artist, cover}: watched for song changes
+WATCH_EVERY_S = 3
 MAX_VOCABULARY = 100     # words kept per connector
 HINT_CHARS = 500         # Whisper keeps only ~224 prompt tokens, and drops the start first
 
@@ -171,6 +173,8 @@ class _Live:
         self.tools: list[ConnectorTool] = []
         self.skipped: list[str] = []
         self.vocabulary: list[str] = []
+        self.now_playing_uri: str | None = None
+        self.track: tuple | None = None     # the song last seen playing, as (title, artist, cover)
         self.client = None
         self.error = ""
         self.calls = self.errors = 0
@@ -195,6 +199,10 @@ class Hub:
         self._tasks: list[concurrent.futures.Future] = []
         self._stopping = False
         self.probe_every_s = PROBE_EVERY_S
+        self.watch_every_s = WATCH_EVERY_S
+        # Called (on the hub's thread) with {"title", "artist", "cover", "connector"} when a
+        # connector's now-playing changes to a new song. Set by the app.
+        self.on_track = None
         if not self.live:
             self._ready.set()
 
@@ -339,6 +347,8 @@ class Hub:
                                   cache=None) as client:
                     tools = await _list_tools(client)
                     live.vocabulary = await _vocabulary(client)
+                    live.now_playing_uri = await _resource_uri(client, NOW_PLAYING_RESOURCE)
+                    live.track = None   # the song already playing at start isn't a change
                     scope.deadline = math.inf
                     live.tools, live.skipped = catalog(conf, tools)
                     live.client, live.state, live.error = client, "ready", ""
@@ -353,17 +363,43 @@ class Hub:
                 errlog.close()
 
     async def _hold(self, live: _Live, client) -> None:
-        """Keep the session open, checking every minute that the server is still there."""
+        """Keep the session open, checking every minute that the server is still there,
+        and every few seconds what it's playing, if it says."""
         import anyio
+        next_probe = time.monotonic() + self.probe_every_s
         while not self._stopping and not live.restart:
             live.wake.clear()
-            with anyio.move_on_after(self.probe_every_s):
+            wait = self.watch_every_s if live.now_playing_uri else self.probe_every_s
+            with anyio.move_on_after(max(0.05, min(wait, next_probe - time.monotonic()))):
                 await live.wake.wait()
             if self._stopping or live.restart:
                 return
+            if live.now_playing_uri:
+                await self._watch(live, client)
+            if time.monotonic() >= next_probe:
+                next_probe = time.monotonic() + self.probe_every_s
+                with anyio.fail_after(PROBE_TIMEOUT_S):
+                    await client.list_tools()
+                    live.vocabulary = await _vocabulary(client)   # it changes when the server's data does
+
+    async def _watch(self, live: _Live, client) -> None:
+        """Note a new song starting; the first one seen is only remembered."""
+        import anyio
+        try:
             with anyio.fail_after(PROBE_TIMEOUT_S):
-                await client.list_tools()
-                live.vocabulary = await _vocabulary(client)   # it changes when the server's data does
+                read = await client.read_resource(live.now_playing_uri)
+            data = json.loads("".join(getattr(p, "text", "") or "" for p in read.contents) or "{}")
+        except Exception:  # noqa: BLE001 - a missed look is fine; the minute probe catches a dead server
+            return
+        if not isinstance(data, dict) or not data.get("playing") or not data.get("title"):
+            return   # paused or nothing: a song resuming after a pause isn't new
+        track = (data.get("title"), data.get("artist"), data.get("cover"))
+        seen, live.track = live.track, track
+        if seen is not None and track != seen and data.get("cover") and self.on_track:
+            try:
+                self.on_track({"title": track[0], "artist": track[1], "cover": track[2], "connector": live.name})
+            except Exception as e:  # noqa: BLE001
+                print(f"[connectors] {live.name}: song change not shown: {e}")
 
     async def _call(self, live: _Live, tool: ConnectorTool, args: dict, timeout: float) -> tuple[str, bool]:
         from mcp import MCPError
@@ -427,6 +463,15 @@ async def _list_tools(client) -> list:
         cursor = page.next_cursor
         if not cursor:
             return tools
+
+
+async def _resource_uri(client, name: str) -> str | None:
+    try:
+        listed = (await client.list_resources()).resources
+    except Exception:  # noqa: BLE001 - a server without resources
+        return None
+    found = next((r for r in listed if r.name == name), None)
+    return str(found.uri) if found else None
 
 
 async def _vocabulary(client) -> list[str]:

@@ -14,6 +14,12 @@
 // GET /bot/art/hide.
 // ============================================================================
 
+// While a cover shows, his face stays on: small, in a black circle in the top
+// right corner, still blinking, looking around and moving his mouth.
+#define ART_FACE_R      48
+#define ART_FACE_SCALE  0.36f
+#define ART_FACE_RING   0x3186   // dark grey, so the circle stands off a dark cover
+
 #ifdef VOICE_ENABLED
 
 #include <WebServer.h>

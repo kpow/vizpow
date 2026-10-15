@@ -110,6 +110,16 @@ class Shower(unittest.TestCase):
         self.shower.show("https://i.scdn.co/b")
         self.assertEqual(self.sent, [(b"jpeg:raw:https://i.scdn.co/a", 8000), (b"jpeg:raw:https://i.scdn.co/b", 8000)])
 
+    def test_again_shows_a_repeat_for_a_new_song_on_the_same_album(self):
+        self.shower.show("https://i.scdn.co/a")
+        self.shower.show("https://i.scdn.co/a", again=True)
+        self.assertEqual(len(self.sent), 2)
+
+    def test_only_spotify_https_covers_are_fetched(self):
+        self.shower.show("https://evil.example/a.jpg", again=True)
+        self.shower.show("http://i.scdn.co/a", again=True)
+        self.assertEqual(self.sent, [])
+
     def test_old_firmware_or_no_bot_shows_nothing(self):
         self.firmware = "3.7.33"
         self.shower.show("https://i.scdn.co/a")
@@ -140,6 +150,33 @@ class Hub:
 
     def run(self, name, args, timeout=None):
         return self.answer
+
+
+class SongChanges(unittest.TestCase):
+    def app(self):
+        from vizbrain import server
+        app = object.__new__(server.App)
+        app.busy = threading.Lock()
+        app.shown = []
+        app.pictures = SimpleNamespace(show=lambda url, again=False: app.shown.append((url, again)))
+        return app
+
+    def test_a_new_song_flashes_its_cover_even_if_repeated(self):
+        app = self.app()
+        with mock.patch("sys.stdout", io.StringIO()):
+            app.on_track({"title": "Ceremony", "artist": "New Order", "cover": "https://i.scdn.co/c", "connector": "spotify"})
+        for _ in range(50):
+            if app.shown:
+                break
+            threading.Event().wait(0.01)
+        self.assertEqual(app.shown, [("https://i.scdn.co/c", True)])
+
+    def test_not_while_he_is_talking_with_someone(self):
+        app = self.app()
+        app.busy.acquire()
+        app.on_track({"title": "x", "artist": "y", "cover": "https://i.scdn.co/c", "connector": "spotify"})
+        threading.Event().wait(0.05)
+        self.assertEqual(app.shown, [])
 
 
 class FromATurn(BrainTest):

@@ -141,6 +141,8 @@ class App:
         self.pictures = Shower(self.get_bot, lambda: self.bot_info.get("firmware"))
         self.brain.on_picture = lambda url: threading.Thread(target=self.pictures.show, args=(url,),
                                                               daemon=True).start()
+        if self.connectors:
+            self.connectors.on_track = self.on_track
         self.log: collections.deque = collections.deque(maxlen=50)
         self.busy = threading.Lock()
         self.follow_ups = 0             # follow-up answers in a row (see MAX_FOLLOW_UPS)
@@ -148,6 +150,15 @@ class App:
         self._bonjour: subprocess.Popen | None = None
         self.wake = WakeDetector(self.on_wake, threshold=self.settings["wake_threshold"])
         self.wake.verbose = bool(self.settings["debug_log"])
+
+    def on_track(self, song: dict) -> None:
+        """A new song started (a music connector's now-playing): flash its cover,
+        like vizSpot's Now Playing. Not while he's talking with someone."""
+        if self.busy.locked():
+            return
+        print(f"[art] new song from {song['connector']}")
+        threading.Thread(target=self.pictures.show, args=(song["cover"],), kwargs={"again": True},
+                         daemon=True).start()
 
     # ---- bot address ------------------------------------------------------
 

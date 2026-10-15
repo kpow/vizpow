@@ -47,5 +47,12 @@ def vocabulary() -> str:
     return open(path).read() if path else "Soul Siblings\nMaeby\nNoodle 2K"
 
 
+@server.resource("fake://now-playing", name="now-playing", mime_type="application/json")
+def now_playing() -> str:
+    """What's playing: from the file in FAKE_NOW_FILE (re-read every time), or nothing."""
+    path = os.environ.get("FAKE_NOW_FILE")
+    return open(path).read() if path else '{"playing": false}'
+
+
 if __name__ == "__main__":
     server.run("stdio")
