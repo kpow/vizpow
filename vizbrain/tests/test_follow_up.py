@@ -65,7 +65,7 @@ class StartTurn(unittest.TestCase):
 
     def app(self, reply_text):
         app = object.__new__(server.App)
-        app.settings = {"tts_rate": 190, "debug_log": False}
+        app.settings = {"tts_rate": 190, "debug_log": False, "speaker": "bot"}
         app.clips = speech.ClipStore()
         app.log = collections.deque(maxlen=5)
         app.personality = lambda: "Chill"

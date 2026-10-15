@@ -3,8 +3,9 @@
   POST /v1/voice       16 kHz mono s16 WAV from the bot -> reply JSON
   GET  /v1/audio/<id>  reply clip, raw s16le mono PCM @ 24 kHz
   GET  /v1/listen/<id> after playing a clip: {"listen": true} when the reply asked a question
-  GET  /v1/voices      the voice picker's choices and the current one (the bot's page, via /brain/voices)
-  POST /v1/voices      {"id": ...} switch voice; he says a sample line in it
+  GET  /v1/voices      the voice picker's choices, the current one, and where he speaks (the bot's page, via /brain/voices)
+  POST /v1/voices      {"id": ...} switch voice, or {"speaker": "bot"|"mac"}; he says a sample line
+  POST /v1/hush        the bot was tapped quiet: stop the clip the Mac is playing
   POST /v1/text        {"text": ...} typed turn; the bot speaks the reply
   POST /v1/event       presence events (Stage 3; logged for now)
   POST /v1/say         {"text": ..., "voice"?: ...} speak exact text, no model call
@@ -35,7 +36,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
 from . import __version__, config, speech, usage
-from .bot import EXPRESSIONS, GESTURES, Bot, BotError, discover_stackchan, firmware_ok
+from .bot import (EXPRESSIONS, GESTURES, MAC_SPEAKER_FIRMWARE, Bot, BotError, discover_stackchan,
+                  firmware_ok)
 from .brain import Brain, bubble_text
 from .lab import VizMac, Wled
 from .memory import Memory, Routines
@@ -110,6 +112,7 @@ class App:
     def __init__(self):
         self.settings = config.load()
         self.clips = speech.ClipStore()
+        self.mac_speaker = speech.MacSpeaker()
         self.listener = speech.Listener(self.settings["stt_model"])
         self.wled = Wled(self.settings["wled_allow"])
         self.vizmac = VizMac(self.settings["vizmac_url"])
@@ -229,6 +232,18 @@ class App:
 
     # ---- turns -----------------------------------------------------------
 
+    def mac_problem(self) -> str:
+        """Why his voice can't play on the Mac right now ("" = it can)."""
+        if not self.mac_speaker.available:
+            return f"this Mac can't play audio ({self.mac_speaker.error})"
+        if not firmware_ok(self.bot_info["firmware"], MAC_SPEAKER_FIRMWARE):
+            return "the bot needs firmware 3.7.37 or later"
+        return ""
+
+    def mac_voice(self) -> bool:
+        """Play the next clip on the Mac: chosen in settings, and possible."""
+        return self.settings["speaker"] == "mac" and not self.mac_problem()
+
     def start_turn(self, heard: str, source: str, on_done=None, may_listen: bool = False) -> dict:
         """Start a turn and return as soon as the first sentence is ready.
 
@@ -244,6 +259,7 @@ class App:
         personality = self.personality()
         voice = speech.voice_for(self.settings)
         clip = speech.LiveClip()
+        clip.mac = self.mac_voice()
         cid = self.clips.add(clip)
         mouth = speech.Mouth(clip, voice, self.settings["tts_rate"])
         st = {"first": None, "t_first": None, "expression": -1, "gesture": None}
@@ -304,7 +320,7 @@ class App:
         first = st["first"] or ""
         return {
             "heard": heard, "text": first, "bubble": bubble_text(first),
-            "expression": st["expression"], "audio_id": cid,
+            "expression": st["expression"], "audio_id": cid, "mac": clip.mac,
             # Bubble-time hint for the bot (the clip's length isn't known yet).
             "audio_ms": max(2500, len(first.split()) * 380),
             "timing_ms": {"first_sentence": int(((st["t_first"] or time.time()) - t0) * 1000)},
@@ -327,7 +343,7 @@ class App:
             raise
         if bot:
             try:
-                bot.play(reply["audio_id"], reply["bubble"], reply["audio_ms"], reply["expression"])
+                bot.play(reply["audio_id"], reply["bubble"], reply["audio_ms"], reply["expression"], mac=reply["mac"])
             except BotError as e:
                 print(f"[speak] {source}: bot didn't take the clip: {e}")
         return reply
@@ -397,13 +413,15 @@ class App:
         """Speak an already-written reply (no model call)."""
         voice = voice or speech.voice_for(self.settings)
         pcm = speech.synthesize(text, voice, self.settings["tts_rate"])
-        cid = self.clips.put(pcm)
+        clip = speech.LiveClip(pcm)
+        clip.mac = self.mac_voice()
+        cid = self.clips.add(clip)
         bot = self.get_bot()
         if bot:
             if sound:
                 threading.Thread(target=lambda: _quiet(bot.sound, sound), daemon=True).start()
             try:
-                bot.play(cid, bubble_text(text), speech.pcm_ms(pcm), expression)
+                bot.play(cid, bubble_text(text), speech.pcm_ms(pcm), expression, mac=clip.mac)
             except BotError as e:
                 print(f"[speak] {source}: bot didn't take the clip: {e}")
         self.log.appendleft({"at": time.strftime("%H:%M:%S"), "source": source, "heard": heard,
@@ -591,7 +609,8 @@ def make_handler(app: App):
                 return self._json(200, list(app.log))
             if path == "/v1/voices":
                 from . import voices
-                return self._json(200, voices.listing(app.settings))
+                return self._json(200, {**voices.listing(app.settings), "speaker": app.settings["speaker"],
+                                        "mac_problem": app.mac_problem()})
             if path.startswith("/v1/listen/"):
                 clip = app.clips.get(path.rsplit("/", 1)[-1])
                 return self._json(200, {"listen": bool(clip and clip.done and clip.listen)})
@@ -611,6 +630,8 @@ def make_handler(app: App):
         def _stream_clip(self, clip):
             """Send a clip, chunked, as it grows (a finished clip goes out in one piece)."""
             ctype = f"audio/L16; rate={speech.PLAY_RATE}; channels=1"
+            if clip.mac:
+                app.mac_speaker.play(clip)   # starts with the bot's fetch, so voice and mouth line up
             data, done = clip.read_from(0, timeout=0)
             if done:
                 return self._send(200, data, ctype)
@@ -661,6 +682,9 @@ def make_handler(app: App):
                     return self._json(200, {"ok": True})
                 if path == "/v1/voices":
                     return self._choose_voice()
+                if path == "/v1/hush":
+                    app.mac_speaker.hush()
+                    return self._json(200, {"ok": True})
                 self._json(404, {"error": "not found"})
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
@@ -671,7 +695,10 @@ def make_handler(app: App):
             """The picker on the bot's page: switch voice and say a sample line in it.
             voice_for() reads the settings on every reply, so no restart."""
             from . import voices
-            choice = voices.find(app.settings, str(self._json_body().get("id") or ""))
+            body = self._json_body()
+            if "speaker" in body:
+                return self._choose_speaker(str(body["speaker"]))
+            choice = voices.find(app.settings, str(body.get("id") or ""))
             if choice is None:
                 return self._json(400, {"error": "unknown voice"})
             app.settings["tts_voice"] = choice["spec"]
@@ -680,6 +707,19 @@ def make_handler(app: App):
             threading.Thread(target=app._say_text, args=(voices.SAMPLE, -1, "voice", None),
                              kwargs={"heard": "(voice picked)", "voice": choice["spec"]}, daemon=True).start()
             return self._json(200, {"ok": True, "current": choice["id"], "current_label": choice["label"]})
+
+        def _choose_speaker(self, where: str):
+            """Where his voice plays: "bot" or "mac". He says a line there to show it."""
+            if where not in ("bot", "mac"):
+                return self._json(400, {"error": "speaker must be bot or mac"})
+            app.settings["speaker"] = where
+            config.save(app.settings)
+            problem = app.mac_problem() if where == "mac" else ""
+            print(f"[voice] speaker: {where}" + (f" (not yet: {problem})" if problem else ""))
+            line = "Now I'm talking through the Mac." if where == "mac" else "Back on my own speaker."
+            threading.Thread(target=app._say_text, args=(line, -1, "voice", None),
+                             kwargs={"heard": "(speaker picked)"}, daemon=True).start()
+            return self._json(200, {"ok": True, "speaker": where, "mac_problem": problem})
 
         def _voice(self):
             app.adopt_bot(self.client_address[0], trusted=app.bot_token is not None)
@@ -736,7 +776,7 @@ def make_handler(app: App):
             spoke = False
             if bot and data.get("speak", True):
                 try:
-                    bot.play(reply["audio_id"], reply["bubble"], reply["audio_ms"], reply["expression"])
+                    bot.play(reply["audio_id"], reply["bubble"], reply["audio_ms"], reply["expression"], mac=reply["mac"])
                     spoke = True
                 except BotError:
                     try:  # firmware without voice: show the reply as a bubble

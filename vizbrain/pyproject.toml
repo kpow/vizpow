@@ -17,6 +17,7 @@ dependencies = [
   "onnxruntime>=1.20",
   "huggingface_hub>=0.20",
   "mcp>=2.0",          # connectors (MCP servers whose tools vizBot uses) and `vizbrain mcp`
+  "sounddevice>=0.5",  # his voice through the Mac's speaker (settings "speaker": "mac")
 ]
 
 [project.scripts]

@@ -140,11 +140,13 @@ class Bot:
         except (KeyError, IndexError, TypeError):
             return "Chill"
 
-    def play(self, audio_id: str, text: str, audio_ms: int, expression: int = -1):
-        """Ask the bot to fetch a reply clip from us and speak it."""
-        r = self._get("/brain/play", {
-            "id": audio_id, "text": text[:95], "ms": audio_ms, "expr": expression,
-        }, timeout=4.0)
+    def play(self, audio_id: str, text: str, audio_ms: int, expression: int = -1, mac: bool = False):
+        """Ask the bot to fetch a reply clip from us and speak it.
+        mac: the Mac plays the clip; the bot mouths it with his speaker muted (fw 3.7.37+)."""
+        params = {"id": audio_id, "text": text[:95], "ms": audio_ms, "expr": expression}
+        if mac:
+            params["mac"] = 1
+        r = self._get("/brain/play", params, timeout=4.0)
         if not (isinstance(r, dict) and r.get("ok")):
             raise BotError("bot firmware has no /brain/play")
         return r
@@ -181,6 +183,7 @@ def browse(service: str, seconds: float = 2.5) -> list[str]:
 
 # Oldest bot firmware this brain works with (pairing token, error bubbles).
 MIN_FIRMWARE = (3, 7, 31)
+MAC_SPEAKER_FIRMWARE = (3, 7, 37)   # mutes his speaker for a clip the Mac plays
 
 
 # Oldest firmware that can show a picture (album art) instead of his face.

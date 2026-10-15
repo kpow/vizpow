@@ -106,9 +106,12 @@ class Routes(unittest.TestCase):
 
     def setUp(self):
         self.spoken, self.saved = [], []
-        app = SimpleNamespace(settings={"tts_voice": "kokoro:am_puck@1.12"}, bot_token=None,
+        self.hushed = []
+        app = SimpleNamespace(settings={"tts_voice": "kokoro:am_puck@1.12", "speaker": "bot"}, bot_token=None,
                               _say_text=lambda text, expr, source, sound, heard="", voice=None:
-                                  self.spoken.append((text, voice)))
+                                  self.spoken.append((text, voice)),
+                              mac_problem=lambda: "",
+                              mac_speaker=SimpleNamespace(hush=lambda: self.hushed.append(True)))
         self.app = app
         patch = mock.patch.object(config, "save", lambda s: self.saved.append(dict(s)))
         patch.start()
@@ -157,9 +160,122 @@ class Routes(unittest.TestCase):
         self.assertEqual(self.call("POST", "/v1/voices", {"id": "puck"})[0], 403)
         self.assertEqual(self.call("GET", "/v1/voices", headers={"X-Viz-Token": "ab12cd34.secret"})[0], 200)
 
+    def wait_spoken(self):
+        for _ in range(50):
+            if self.spoken:
+                return
+            threading.Event().wait(0.02)
+
+    def test_get_says_where_he_speaks(self):
+        _, data = self.call("GET", "/v1/voices")
+        self.assertEqual((data["speaker"], data["mac_problem"]), ("bot", ""))
+
+    def test_post_speaker_switches_saves_and_says_a_line(self):
+        with mock.patch("sys.stdout", io.StringIO()):
+            status, data = self.call("POST", "/v1/voices", {"speaker": "mac"})
+        self.assertEqual((status, data["speaker"]), (200, "mac"))
+        self.assertEqual(self.saved[-1]["speaker"], "mac")
+        self.assertEqual(self.app.settings["tts_voice"], "kokoro:am_puck@1.12")   # the voice is untouched
+        self.wait_spoken()
+        self.assertEqual(len(self.spoken), 1)
+
+    def test_post_speaker_reports_why_the_mac_cant_yet(self):
+        self.app.mac_problem = lambda: "the bot needs firmware 3.7.37 or later"
+        with mock.patch("sys.stdout", io.StringIO()):
+            _, data = self.call("POST", "/v1/voices", {"speaker": "mac"})
+        self.assertEqual(data["mac_problem"], "the bot needs firmware 3.7.37 or later")
+
+    def test_an_unknown_speaker_is_refused(self):
+        status, _ = self.call("POST", "/v1/voices", {"speaker": "kitchen"})
+        self.assertEqual(status, 400)
+        self.assertEqual(self.app.settings["speaker"], "bot")
+
+    def test_hush_stops_the_mac(self):
+        self.assertEqual(self.call("POST", "/v1/hush", {})[0], 200)
+        self.assertEqual(self.hushed, [True])
+
     def test_a_browser_page_cannot_switch_it(self):
         status, _ = self.call("POST", "/v1/voices", {"id": "puck"}, headers={"Origin": "http://evil.example"})
         self.assertEqual(status, 403)
+
+
+class MacVoice(unittest.TestCase):
+    """Which clips the Mac plays: chosen in settings, and only when it can."""
+
+    def app(self, speaker="mac", firmware="3.7.37", audio=True):
+        app = object.__new__(server.App)
+        app.settings = {"speaker": speaker}
+        app.bot_info = {"firmware": firmware}
+        app.mac_speaker = SimpleNamespace(available=audio, error="OSError: no PortAudio")
+        return app
+
+    def test_mac_when_chosen_and_possible(self):
+        self.assertTrue(self.app().mac_voice())
+
+    def test_the_bot_when_chosen(self):
+        self.assertFalse(self.app(speaker="bot").mac_voice())
+
+    def test_older_firmware_keeps_his_own_speaker(self):
+        # It can't mute itself, so he would talk twice.
+        app = self.app(firmware="3.7.36")
+        self.assertFalse(app.mac_voice())
+        self.assertIn("3.7.37", app.mac_problem())
+
+    def test_a_mac_without_audio_keeps_his_own_speaker(self):
+        app = self.app(audio=False)
+        self.assertFalse(app.mac_voice())
+        self.assertIn("PortAudio", app.mac_problem())
+
+
+class MacSpeakerPlayback(unittest.TestCase):
+    """MacSpeaker plays a clip as it grows, and a hush cuts it short."""
+
+    def setUp(self):
+        self.written, self.aborted = [], []
+        test = self
+
+        class Out:
+            def __init__(self, **kw):
+                test.opened = kw
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+            def write(self, data):
+                test.written.append(len(data))
+                threading.Event().wait(0.01)
+            def abort(self):
+                test.aborted.append(True)
+        sd = SimpleNamespace(RawOutputStream=Out)
+        patch = mock.patch.dict("sys.modules", {"sounddevice": sd})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def wait(self, cond):
+        for _ in range(200):
+            if cond():
+                return True
+            threading.Event().wait(0.01)
+        return False
+
+    def test_plays_a_growing_clip_to_the_end(self):
+        clip = speech.LiveClip()
+        clip.append(b"\0" * 9600)
+        speech.MacSpeaker().play(clip)
+        clip.append(b"\0" * 4800)
+        clip.finish()
+        self.assertTrue(self.wait(lambda: sum(self.written) == 14400))
+        self.assertEqual(self.opened, {"samplerate": speech.PLAY_RATE, "channels": 1, "dtype": "int16"})
+        self.assertFalse(self.aborted)
+
+    def test_hush_stops_and_drops_the_rest(self):
+        clip = speech.LiveClip(b"\0" * speech.MacSpeaker.PIECE * 50)   # 5 s
+        mac = speech.MacSpeaker()
+        mac.play(clip)
+        self.assertTrue(self.wait(lambda: self.written))
+        mac.hush()
+        self.assertTrue(self.wait(lambda: self.aborted))
+        self.assertLess(sum(self.written), speech.MacSpeaker.PIECE * 50)
 
 
 if __name__ == "__main__":

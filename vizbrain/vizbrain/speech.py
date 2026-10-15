@@ -238,6 +238,8 @@ class LiveClip:
         # The reply asked a question: the bot should listen for the answer
         # without a tap (it asks GET /v1/listen/<id> once it has finished speaking).
         self.listen = False
+        # Played by the Mac (settings "speaker": "mac"); the bot mutes himself for it.
+        self.mac = False
         self._cv = threading.Condition()
 
     def append(self, pcm: bytes) -> None:
@@ -256,6 +258,66 @@ class LiveClip:
             if len(self.buf) <= pos and not self.done:
                 self._cv.wait(timeout)
             return bytes(self.buf[pos:]), self.done   # done: nothing will follow this data
+
+
+class MacSpeaker:
+    """Plays reply clips through the Mac's sound output, so a Bluetooth or
+    AirPlay speaker paired to the Mac can be his voice (the Stackchan's own
+    speaker is 1 W). The bot still fetches each clip and moves his mouth to it
+    with his speaker muted; playback here starts when he fetches it, and both
+    play as the clip arrives, so the mouth and the voice stay together."""
+
+    PIECE = PLAY_RATE // 10 * 2      # 100 ms of s16 PCM: how quickly a hush cuts in
+    STALL_S = 45                     # no new audio for this long: give up (as GET /v1/audio does)
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._stop: threading.Event | None = None
+        self.error = ""              # why the Mac can't play audio, if it can't
+
+    @property
+    def available(self) -> bool:
+        try:
+            import sounddevice  # noqa: F401 - bundles PortAudio; OSError if that won't load
+            return True
+        except (ImportError, OSError) as e:
+            self.error = f"{type(e).__name__}: {e}"[:200]
+            return False
+
+    def play(self, clip: LiveClip) -> None:
+        """Start playing clip (stopping whatever was playing: one voice at a time)."""
+        with self._lock:
+            if self._stop:
+                self._stop.set()
+            stop = self._stop = threading.Event()
+        threading.Thread(target=self._run, args=(clip, stop), daemon=True).start()
+
+    def hush(self) -> None:
+        """The bot was tapped to stop talking."""
+        with self._lock:
+            if self._stop:
+                self._stop.set()
+
+    def _run(self, clip: LiveClip, stop: threading.Event) -> None:
+        import sounddevice as sd
+        pos, last = 0, time.time()
+        try:
+            with sd.RawOutputStream(samplerate=PLAY_RATE, channels=1, dtype="int16") as out:
+                while not stop.is_set():
+                    data, done = clip.read_from(pos, timeout=0.2)
+                    if data:
+                        last = time.time()
+                        for i in range(0, len(data), self.PIECE):   # blocks: paces at real time
+                            if stop.is_set():
+                                break
+                            out.write(data[i:i + self.PIECE])
+                        pos += len(data)
+                    elif done or time.time() - last > self.STALL_S:
+                        break
+                if stop.is_set():
+                    out.abort()      # drop what's queued; leaving the block would play it out
+        except Exception as e:  # noqa: BLE001 - a lost output device shouldn't take the server down
+            print(f"[mac-speaker] playback failed: {e}")
 
 
 class ClipStore:
