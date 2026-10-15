@@ -90,6 +90,7 @@ struct VoiceClient {
   char     playText[MAX_SAY_LEN] = "";
   int8_t   playExpr = -1;
   uint32_t playMs = 0;
+  bool     playMac = false;        // the Mac plays this clip (vizbrain "speaker": "mac")
 
   volatile VoiceState state = VOICE_IDLE;
   bool     enabled = true;
@@ -469,10 +470,15 @@ static bool voiceAskListen(const char* id) {
 #define VOICE_PREROLL_SAMPLES  7200   // 0.3 s buffered before the first piece plays
 #define VOICE_READ_BYTES       4096   // esp_http_client_read blocks until it fills this
 
+static int voiceBrainRequest(bool post, const char* path, const char* body, char* resp, size_t cap);
+
 // Returns samples played (0 = the clip couldn't be fetched).
 // hintMs: the brain's estimate for how long to show the bubble (the clip may
 // still be growing when playback starts, so its length isn't known).
-static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, uint32_t hintMs) {
+// mac: the Mac is playing this clip through a louder speaker. He still plays
+// it here, at volume 0, so the mouth keeps the speaker's clock and lines up.
+static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, uint32_t hintMs,
+                               bool mac) {
   char url[128];
   snprintf(url, sizeof(url), "http://%s/v1/audio/%s", voice.resolved, id);
   esp_http_client_config_t cfg = {};
@@ -506,6 +512,7 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
 
   uint32_t tSpk = millis();
   voiceTakeSpeaker();
+  if (mac) M5.Speaker.setVolume(0);
   voice.lastSpeakerMs = millis() - tSpk;
   for (;;) {
     if (voice.cancelRequested) break;
@@ -572,6 +579,13 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
     vTaskDelay(pdMS_TO_TICKS(15));
   }
   if (voice.cancelRequested) M5.Speaker.stop(0);
+  if (mac) {
+    M5.Speaker.setVolume(botSounds.volume);
+    if (voice.cancelRequested) {          // tapped quiet: the Mac stops too
+      char resp[64];
+      voiceBrainRequest(true, "/v1/hush", "{}", resp, sizeof(resp));
+    }
+  }
   voiceSpeakT0 = 0;
   voice.lastPlayMs = t0 ? millis() - t0 : 0;
   return queued;
@@ -702,6 +716,7 @@ static void voiceRunTurn() {
   const char* clip = doc["audio_id"] | "";
   int8_t expr = doc["expression"] | -1;
   uint32_t hintMs = doc["audio_ms"] | 0;
+  bool mac = doc["mac"] | false;
   if (!clip[0] && followUp) {        // the brain heard no words in the answer: stop quietly
     cmdSetExpression(EXPR_NEUTRAL);
     voiceShowBubble("Okay.", 1000);    // replaces "Listening..."
@@ -710,7 +725,7 @@ static void voiceRunTurn() {
   }
 
   // 3. Speak (streamed: he starts talking while the clip downloads)
-  size_t n = clip[0] ? voiceStreamSpeak(clip, voice.lastReply, expr, hintMs) : 0;
+  size_t n = clip[0] ? voiceStreamSpeak(clip, voice.lastReply, expr, hintMs, mac) : 0;
   if (n == 0 && !voice.cancelRequested) {
     voiceShowBubble(voice.lastReply, 4000);   // at least show the answer
     voiceSetError("reply audio fetch failed");
@@ -739,7 +754,7 @@ static void voiceRunPlay() {
   scCamMotion.paused = true;
   voiceOwnsAudio = true;
   vTaskDelay(pdMS_TO_TICKS(60));
-  if (voiceStreamSpeak(voice.playId, voice.playText, voice.playExpr, voice.playMs) == 0) {
+  if (voiceStreamSpeak(voice.playId, voice.playText, voice.playExpr, voice.playMs, voice.playMac) == 0) {
     voiceSetError("play: clip fetch failed");
     voiceShowBubble(voice.playText, 4000);
   }
