@@ -312,6 +312,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           <div class="trow" style="margin-top:8px"><span>Speaking voice</span>
             <select id="brainVoice" class="sel" style="max-width:200px" onchange="setBrainVoice(this.value)"><option>loading...</option></select>
           </div>
+          <div class="trow" style="margin-top:8px"><span>Talk through the Mac's speaker</span><div class="tog" id="brainMacSpk" onclick="toggleMacSpeaker()"></div></div>
           <div id="brainVoiceMsg" class="hint"></div>
           <div class="row" style="margin-top:8px">
             <input type="text" id="brainHost" placeholder="brain host:port (blank = auto)" class="inp flex1" maxlength="60">
@@ -492,6 +493,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             `<option value="${esc(v.id)}"${v.id === d.current ? ' selected' : ''}>${esc(v.label)}</option>`).join('') + '</optgroup>';
         }
         sel.innerHTML = html;
+        macSpeaker = d.speaker === 'mac';
+        document.getElementById('brainMacSpk').className = 'tog' + (macSpeaker ? ' on' : '');
         voicesLoaded = true;
         msg.textContent = '';
       } catch (e) { msg.textContent = 'Voice list: brain offline'; }
@@ -505,6 +508,20 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         const d = await r.json();
         msg.textContent = r.ok ? `Now: ${d.current_label}. Listen for the sample.` : `Couldn't switch: ${d.error || r.status}`;
       } catch (e) { msg.textContent = 'Couldn\'t switch: brain offline'; }
+    }
+    // His voice through the Mac's sound output (a Bluetooth speaker paired to the Mac).
+    let macSpeaker = false;
+    async function toggleMacSpeaker() {
+      const msg = document.getElementById('brainVoiceMsg'), want = macSpeaker ? 'bot' : 'mac';
+      try {
+        const r = await fetch('/brain/voice?speaker=' + want);
+        const d = await r.json();
+        if (!r.ok) throw d.error || r.status;
+        macSpeaker = d.speaker === 'mac';
+        document.getElementById('brainMacSpk').className = 'tog' + (macSpeaker ? ' on' : '');
+        msg.textContent = d.mac_problem ? `Mac speaker not yet: ${d.mac_problem}` :
+          (macSpeaker ? 'Talking through the Mac. Listen for him there.' : 'Back on his own speaker.');
+      } catch (e) { msg.textContent = `Couldn't switch: ${typeof e === 'string' ? e : 'brain offline'}`; }
     }
     function toggleBrain() { api('/brain/config?enabled=' + (brainOn ? 0 : 1)).then(brainRefresh); }
     function setBrainHost() {
@@ -2438,13 +2455,15 @@ void handleBrainVoices() {
 }
 
 // /brain/voice?id=<voice id> -> vizbrain POST /v1/voices {"id": ...}; he says a sample in it
+// /brain/voice?speaker=bot|mac -> {"speaker": ...}: his voice from his speaker or the Mac's
 void handleBrainVoice() {
-  if (!server.hasArg("id")) { server.send(400, "application/json", "{\"error\":\"id required\"}"); return; }
   JsonDocument req;
-  req["id"] = server.arg("id");
+  if (server.hasArg("speaker")) req["speaker"] = server.arg("speaker");
+  else if (server.hasArg("id")) req["id"] = server.arg("id");
+  else { server.send(400, "application/json", "{\"error\":\"id required\"}"); return; }
   char body[96];
   serializeJson(req, body, sizeof(body));
-  char resp[256];
+  char resp[512];   // room for a mac_problem message
   int status = voiceBrainRequest(true, "/v1/voices", body, resp, sizeof(resp));
   if (status > 0) server.send(status, "application/json", resp);
   else server.send(502, "application/json", "{\"error\":\"brain offline\"}");
@@ -2509,6 +2528,7 @@ void handleBrainPlay() {
   voice.playText[sizeof(voice.playText) - 1] = '\0';
   voice.playExpr = server.hasArg("expr") ? (int8_t)server.arg("expr").toInt() : -1;
   voice.playMs = server.hasArg("ms") ? (uint32_t)server.arg("ms").toInt() : 0;
+  voice.playMac = server.hasArg("mac") && server.arg("mac").toInt() != 0;
   voice.playRequested = true;
   server.send(200, "application/json", "{\"ok\":true}");
 }

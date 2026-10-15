@@ -50,6 +50,9 @@ DEFAULTS: dict = {
     "tts_voice": "",                 # "" = default (Kokoro am_puck); e.g. "kokoro:af_heart@1.0" or a macOS voice
     "tts_engine": "kokoro",          # "kokoro" (local neural) or "say" (macOS voices)
     "tts_rate": 190,
+    # Where his voice plays: "bot" (the Stackchan's speaker) or "mac" (this Mac's
+    # sound output, e.g. a Bluetooth speaker paired to it; the bot mutes himself).
+    "speaker": "bot",
     # Extra voices for the picker on the bot's page: [{"id", "label", "group", "spec"}]
     # with a spec like "kokoro:bm_george*0.6+bm_lewis*0.4@0.9" (see voices.py).
     "custom_voices": [],
