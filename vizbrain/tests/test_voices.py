@@ -4,6 +4,7 @@
 import http.client
 import io
 import json
+import subprocess
 import threading
 import time
 import unittest
@@ -278,7 +279,9 @@ class MacSpeakerRemembersAFailure(unittest.TestCase):
                 pass
         self.written = []
         return SimpleNamespace(RawOutputStream=Out, _terminate=lambda: None,
-                               _initialize=lambda: None)
+                               _initialize=lambda: None,
+                               default=SimpleNamespace(device=(0, 1)),
+                               query_devices=lambda i: {"name": "MIDDLETON"})
 
     def play(self, mac, err=None):
         clip = speech.LiveClip(b"\0" * 4800)
@@ -334,11 +337,24 @@ class MacSpeakerPlayback(unittest.TestCase):
                 threading.Event().wait(0.01)
             def abort(self):
                 test.aborted.append(True)
-        sd = SimpleNamespace(RawOutputStream=Out, _terminate=lambda: self.refreshed.append("stop"),
-                             _initialize=lambda: self.refreshed.append("start"))
-        patch = mock.patch.dict("sys.modules", {"sounddevice": sd})
+        self.sd = SimpleNamespace(
+            RawOutputStream=Out, _terminate=lambda: self.refreshed.append("stop"),
+            _initialize=lambda: self.refreshed.append("start"),
+            default=SimpleNamespace(device=(0, 1)),
+            query_devices=lambda i: {"name": "MIDDLETON"} if i == 1 else {"name": "a microphone"})
+        patch = mock.patch.dict("sys.modules", {"sounddevice": self.sd})
         patch.start()
         self.addCleanup(patch.stop)
+        self.logged = []
+        said = mock.patch("builtins.print", lambda *a, **kw: self.logged.append(" ".join(str(x) for x in a)))
+        said.start()
+        self.addCleanup(said.stop)
+
+    def line(self):
+        """The one [mac-speaker] line this clip logged."""
+        lines = [l for l in self.logged if l.startswith("[mac-speaker]")]
+        self.assertEqual(len(lines), 1, self.logged)
+        return lines[0]
 
     def wait(self, cond):
         for _ in range(200):
@@ -379,6 +395,87 @@ class MacSpeakerPlayback(unittest.TestCase):
         mac.play(speech.LiveClip(b"\0" * 4800))
         self.assertTrue(self.wait(lambda: self.written))
         self.assertEqual(self.refreshed, [])
+
+    def test_a_clip_that_played_says_where_and_how_long(self):
+        """The whole point: nobody turns on debug_log before the morning he
+        goes quiet, so a clip that worked has to leave a line of its own."""
+        mac = speech.MacSpeaker()
+        mac.play(speech.LiveClip(b"\0" * speech.PLAY_RATE * 2))      # 1.0 s of s16 mono
+        self.assertTrue(self.wait(lambda: mac._streams == 0 and self.logged))
+        line = self.line()
+        self.assertIn("played 1.0s", line)
+        self.assertIn("on MIDDLETON", line)
+        self.assertRegex(line, r"in \d+\.\ds$")
+
+    def test_a_hush_reads_differently_from_a_clip_that_finished(self):
+        mac = speech.MacSpeaker()
+        mac.play(speech.LiveClip(b"\0" * speech.MacSpeaker.PIECE * 50))   # 5 s
+        self.assertTrue(self.wait(lambda: self.written))
+        mac.hush()
+        self.assertTrue(self.wait(lambda: self.logged))
+        line = self.line()
+        self.assertTrue(line.startswith("[mac-speaker] hushed "), line)
+        self.assertIn("on MIDDLETON", line)
+        self.assertLess(float(line.split("hushed ")[1].split("s ")[0]), 5.0)
+
+    def test_a_clip_that_stalls_reads_differently_again(self):
+        mac = speech.MacSpeaker()
+        mac.STALL_S = 0.0                   # a clip that never finishes and never grows
+        mac.play(speech.LiveClip())
+        self.assertTrue(self.wait(lambda: self.logged))
+        self.assertTrue(self.line().startswith("[mac-speaker] stalled 0.0s on MIDDLETON "), self.line())
+
+    def test_a_failed_open_still_says_so_once(self):
+        def boom(**kw):
+            raise RuntimeError("'!obj'")
+        self.sd.RawOutputStream = boom
+        mac = speech.MacSpeaker()
+        mac.play(speech.LiveClip(b"\0" * 4800))
+        self.assertTrue(self.wait(lambda: self.logged))
+        self.assertIn("playback failed", self.line())
+
+
+class MacSound(unittest.TestCase):
+    """What /v1/health reports about the Mac's own sound, which nothing else
+    in the stack can see: volume 0 looks exactly like a dropped clip."""
+
+    def test_reads_the_volume_and_the_mute_switch(self):
+        out = SimpleNamespace(stdout="output volume:69, input volume:33, alert volume:55, output muted:false")
+        with mock.patch("subprocess.run", return_value=out):
+            self.assertEqual(speech.system_volume(), (69, False))
+        out.stdout = "output volume:0, input volume:33, alert volume:55, output muted:true"
+        with mock.patch("subprocess.run", return_value=out):
+            self.assertEqual(speech.system_volume(), (0, True))
+
+    def test_survives_osascript_being_unavailable(self):
+        for blow_up in (OSError("no osascript"), subprocess.TimeoutExpired("osascript", 1)):
+            with mock.patch("subprocess.run", side_effect=blow_up):
+                self.assertEqual(speech.system_volume(), (None, None))
+
+    def test_names_the_output_a_clip_would_go_to(self):
+        sd = SimpleNamespace(_terminate=lambda: None, _initialize=lambda: None,
+                             default=SimpleNamespace(device=(0, 1)),
+                             query_devices=lambda i: {"name": "MIDDLETON"})
+        with mock.patch.dict("sys.modules", {"sounddevice": sd}):
+            self.assertEqual(speech.MacSpeaker().output(), "MIDDLETON")
+
+    def test_an_output_portaudio_cannot_name_is_not_an_error(self):
+        def gone(i):
+            raise RuntimeError("Error querying device 99")
+        sd = SimpleNamespace(_terminate=lambda: None, _initialize=lambda: None,
+                             default=SimpleNamespace(device=(0, 99)), query_devices=gone)
+        with mock.patch.dict("sys.modules", {"sounddevice": sd}):
+            self.assertEqual(speech.MacSpeaker().output(), "")
+
+    def test_health_gets_one_reading_for_a_run_of_polls(self):
+        mac = speech.MacSpeaker()
+        out = SimpleNamespace(stdout="output volume:44, input volume:33, alert volume:55, output muted:false")
+        with mock.patch("subprocess.run", return_value=out) as run, \
+             mock.patch.object(speech.MacSpeaker, "output", lambda self: "MIDDLETON"):
+            self.assertEqual(mac.sound(), {"volume": 44, "muted": False, "output": "MIDDLETON"})
+            for _ in range(5):
+                mac.sound()
+            self.assertEqual(run.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -179,6 +179,17 @@ Two changes you'll notice: the log no longer shows what was said (set `"debug_lo
 
 The Stackchan can't do Bluetooth audio (the ESP32-S3 has no Classic Bluetooth), so the louder option runs through the Mac. On the bot's page, **Brain (voice)** › **Talk through the Mac's speaker** sets the vizbrain `speaker` setting to `"mac"` (`"bot"` is the default). vizbrain then plays each reply on the Mac's sound output, such as a Bluetooth speaker paired to the Mac, and the bot mouths it with his own speaker muted. Needs vizbrain 1.3.0 and bot firmware 3.7.37. If the switch says "Mac speaker not yet", the message names what's missing. Details for friends: [Settings › Make him louder](docs/settings.md#make-him-louder).
 
+**If he mouths a reply and you hear nothing**, the log says which of the two it was. Every Mac clip leaves one line in `~/Library/Logs/vizbrain/vizbrain.log`:
+
+```
+[mac-speaker] played 2.4s on MIDDLETON in 2.5s
+[mac-speaker] hushed 0.4s on MacBook Pro Speakers in 0.5s
+[mac-speaker] stalled 1.2s on MIDDLETON in 46.3s
+[mac-speaker] playback failed: Internal PortAudio error [PaErrorCode -9986]
+```
+
+No line at all means the bot never fetched the clip. A `played` line means the audio reached a device, so the problem is the device: `curl -s localhost:4050/v1/health | jq .mac_sound` gives the Mac's output volume, its mute switch and the output a clip would go to now — volume 0, or a Bluetooth speaker muted at the device, looks exactly like a dropped clip from in here. `.mac_dropped` names the last clip's failure, if there was one.
+
 ## Where everything lives
 
 | What | Where |
