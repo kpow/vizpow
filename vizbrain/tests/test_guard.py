@@ -89,7 +89,9 @@ class OverHttp(unittest.TestCase):
             brain=SimpleNamespace(online=True, capped=lambda: None, key_state="valid", last_error=None),
             settings={"model": "m", "stt_model": "s", "tts_voice": "kokoro:am_puck",
                       "speaker": "bot"},
-            mac_problem=lambda: "", mac_speaker=SimpleNamespace(failing=""),
+            mac_problem=lambda: "",
+            mac_speaker=SimpleNamespace(
+                failing="", sound=lambda: {"volume": 44, "muted": False, "output": "MIDDLETON"}),
             started=0.0, listener=SimpleNamespace(state="ready", error=""),
             bot_info={"firmware": "3.7.31", "seen": 0.0, "error": "", "brain_addr": ""},
             adopt_bot=lambda ip, trusted=False: None,
@@ -195,6 +197,10 @@ class OverHttp(unittest.TestCase):
                          (server.__version__, "valid", "ready", True))
         self.assertEqual(h["voice"], "kokoro:am_puck")
         self.assertIsNone(h["bot_seen_s_ago"])
+        # Why he can be mouthing a reply nobody heard: the Mac's own sound,
+        # which neither the brain nor the bot can see from anywhere else.
+        self.assertEqual(h["mac_sound"], {"volume": 44, "muted": False, "output": "MIDDLETON"})
+        self.assertEqual(h["mac_dropped"], "")
 
     def test_voice_before_the_ears_are_ready_gets_a_bubble_not_a_hang(self):
         for state, words in (("loading", "still getting my ears ready"), ("failed", "vizbrain doctor")):

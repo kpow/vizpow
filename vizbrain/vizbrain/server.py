@@ -611,6 +611,10 @@ def make_handler(app: App):
                     "last_error": app.brain.last_error,
                     "speaker": app.settings["speaker"], "mac_problem": app.mac_problem(),
                     "mac_dropped": app.mac_speaker.failing,   # diagnostic: the last clip's failure
+                    # Also diagnostic, and only here: silence a dropped clip
+                    # can't explain — the Mac turned down, or muted at the
+                    # device — plus the output a clip would go to now.
+                    "mac_sound": app.mac_speaker.sound(),
                     "spend": usage.summary(),
                     "capped": app.brain.capped(), "paired": app.pairing["paired"],
                     "wake": {"model": app.wake.available, "threshold": app.wake.threshold,

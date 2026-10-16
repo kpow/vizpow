@@ -260,6 +260,30 @@ class LiveClip:
             return bytes(self.buf[pos:]), self.done   # done: nothing will follow this data
 
 
+_VOLUME = re.compile(r"output volume:(\d+).*?output muted:(true|false)", re.S)
+
+
+def system_volume(timeout: float = 1.0) -> tuple[int | None, bool | None]:
+    """The Mac's output volume (0-100) and whether it's muted; (None, None) if
+    `osascript` can't say. Read-only, and about 40 ms, so cache the answer."""
+    try:
+        r = subprocess.run(["osascript", "-e", "get volume settings"],
+                           capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    m = _VOLUME.search(r.stdout)
+    return (int(m.group(1)), m.group(2) == "true") if m else (None, None)
+
+
+def output_name(sd) -> str:
+    """The name of the sound output PortAudio would play to, or "" if it won't say.
+    Worth asking per clip, because the default output changes under us."""
+    try:
+        return sd.query_devices(sd.default.device[1])["name"]
+    except Exception:  # noqa: BLE001 - a name for a log line is not worth an exception
+        return ""
+
+
 class MacSpeaker:
     """Plays reply clips through the Mac's sound output, so a Bluetooth or
     AirPlay speaker paired to the Mac can be his voice (the Stackchan's own
@@ -271,6 +295,7 @@ class MacSpeaker:
     STALL_S = 45                     # no new audio for this long: give up (as GET /v1/audio does)
 
     FAILED_S = 120                   # how long a clip that didn't play stands for the next one
+    SOUND_TTL_S = 5                  # /v1/health is polled every few seconds: one reading does for all
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -278,6 +303,7 @@ class MacSpeaker:
         self._streams = 0            # output streams open right now (guarded by _lock)
         self.error = ""              # why the Mac can't play audio, if it can't
         self._failure = ("", 0.0)    # the last clip's failure and when: read it through failing
+        self._sound = ({}, 0.0)      # the last sound() reading and when, written in one assignment
 
     @property
     def failing(self) -> str:
@@ -316,6 +342,43 @@ class MacSpeaker:
             if self._stop:
                 self._stop.set()
 
+    def sound(self) -> dict:
+        """The Mac's sound output as the person standing at it sees it: the
+        system volume, the mute switch, and which output a clip would go to.
+
+        For /v1/health, not for mac_problem(): a Mac turned down is nothing to
+        announce on the bot's page, but it is the first thing to check when he
+        mouths a reply nobody heard, because from in here it looks exactly like
+        a clip we dropped. Cached for SOUND_TTL_S — `osascript` is ~40 ms and
+        the page polls health every few seconds.
+        """
+        now = time.time()
+        state, read = self._sound
+        if state and now - read <= self.SOUND_TTL_S:
+            return state
+        volume, muted = system_volume()
+        state = {"volume": volume, "muted": muted, "output": self.output()}
+        self._sound = (state, now)
+        return state
+
+    def output(self) -> str:
+        """Which sound output a clip would go to right now ("" if we can't tell).
+
+        Re-reads the device list for the reason _open does — the cached one can
+        name a device that is gone — unless a clip is playing against it."""
+        try:
+            import sounddevice as sd
+        except (ImportError, OSError):
+            return ""
+        try:
+            with self._lock:
+                if self._streams == 0:
+                    sd._terminate()
+                    sd._initialize()
+                return output_name(sd)
+        except Exception:  # noqa: BLE001 - a health field is not worth an exception
+            return ""
+
     def _open(self, sd):
         """An output stream on the Mac's current sound output.
         PortAudio lists CoreAudio's devices once, when it starts. A Bluetooth
@@ -345,6 +408,8 @@ class MacSpeaker:
             self._failure = (f"{e}"[:200], time.time())
             print(f"[mac-speaker] playback failed: {e}")
             return
+        began, wrote, why = time.time(), 0, "played"
+        name = output_name(sd)      # after the open: the list it opened against is the current one
         try:
             with out:
                 self._failure = ("", 0.0)   # the device took a stream: it is playing again
@@ -355,12 +420,21 @@ class MacSpeaker:
                         for i in range(0, len(data), self.PIECE):   # blocks: paces at real time
                             if stop.is_set():
                                 break
-                            out.write(data[i:i + self.PIECE])
+                            piece = data[i:i + self.PIECE]
+                            out.write(piece)
+                            wrote += len(piece)
                         pos += len(data)
                     elif done or time.time() - last > self.STALL_S:
+                        why = "played" if done else "stalled"
                         break
                 if stop.is_set():
+                    why = "hushed"
                     out.abort()      # drop what's queued; leaving the block would play it out
+            # One line per clip, always, not behind debug_log: every way this
+            # feature goes quiet is otherwise diagnosed by the absence of an
+            # error, and nobody turns debug on before the morning it happens.
+            print(f"[mac-speaker] {why} {wrote / 2 / PLAY_RATE:.1f}s "
+                  f"on {name or '?'} in {time.time() - began:.1f}s")
         except Exception as e:  # noqa: BLE001 - a lost output device shouldn't take the server down
             self._failure = (f"{e}"[:200], time.time())
             print(f"[mac-speaker] playback failed: {e}")
