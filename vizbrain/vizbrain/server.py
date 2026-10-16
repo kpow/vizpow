@@ -241,8 +241,19 @@ class App:
         return ""
 
     def mac_voice(self) -> bool:
-        """Play the next clip on the Mac: chosen in settings, and possible."""
-        return self.settings["speaker"] == "mac" and not self.mac_problem()
+        """Play the next clip on the Mac: chosen in settings, and possible.
+
+        A clip the Mac just dropped counts against it, for MacSpeaker.FAILED_S.
+        The bot mutes himself for a Mac clip, so without this a Mac that is
+        failing leaves him silent; this way the next clips come out of his own
+        speaker, quiet but audible. It lapses on its own, and the clip that goes
+        back is the one whose open re-reads the sound devices, so it does not
+        stop him returning to the Mac. mac_problem() deliberately does not
+        mention it: a dropped clip is ours to deal with, not something to put in
+        front of whoever opened the page.
+        """
+        return (self.settings["speaker"] == "mac" and not self.mac_problem()
+                and not self.mac_speaker.failing)
 
     def start_turn(self, heard: str, source: str, on_done=None, may_listen: bool = False) -> dict:
         """Start a turn and return as soon as the first sentence is ready.
@@ -598,6 +609,8 @@ def make_handler(app: App):
                     "bot_seen_s_ago": int(time.time() - info["seen"]) if info["seen"] else None,
                     "bot_error": info["error"], "brain_addr": info["brain_addr"],
                     "last_error": app.brain.last_error,
+                    "speaker": app.settings["speaker"], "mac_problem": app.mac_problem(),
+                    "mac_dropped": app.mac_speaker.failing,   # diagnostic: the last clip's failure
                     "spend": usage.summary(),
                     "capped": app.brain.capped(), "paired": app.pairing["paired"],
                     "wake": {"model": app.wake.available, "threshold": app.wake.threshold,

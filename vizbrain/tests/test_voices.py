@@ -5,6 +5,7 @@ import http.client
 import io
 import json
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
@@ -202,11 +203,12 @@ class Routes(unittest.TestCase):
 class MacVoice(unittest.TestCase):
     """Which clips the Mac plays: chosen in settings, and only when it can."""
 
-    def app(self, speaker="mac", firmware="3.7.37", audio=True):
+    def app(self, speaker="mac", firmware="3.7.37", audio=True, failing=""):
         app = object.__new__(server.App)
         app.settings = {"speaker": speaker}
         app.bot_info = {"firmware": firmware}
-        app.mac_speaker = SimpleNamespace(available=audio, error="OSError: no PortAudio")
+        app.mac_speaker = SimpleNamespace(available=audio, error="OSError: no PortAudio",
+                                          failing=failing)
         return app
 
     def test_mac_when_chosen_and_possible(self):
@@ -225,6 +227,91 @@ class MacVoice(unittest.TestCase):
         app = self.app(audio=False)
         self.assertFalse(app.mac_voice())
         self.assertIn("PortAudio", app.mac_problem())
+
+
+class MacDroppedAClip(unittest.TestCase):
+    """A clip the Mac dropped is ours to handle, not news for the page."""
+
+    def app(self, failing=""):
+        app = object.__new__(server.App)
+        app.settings = {"speaker": "mac"}
+        app.bot_info = {"firmware": "3.7.37"}
+        app.mac_speaker = SimpleNamespace(available=True, error="", failing=failing)
+        return app
+
+    def test_the_next_clip_goes_to_his_own_speaker(self):
+        # He mutes himself for a Mac clip, so a failing Mac would leave silence.
+        self.assertFalse(self.app(failing="PaErrorCode -9986").mac_voice())
+
+    def test_it_is_not_put_in_front_of_anyone(self):
+        # mac_problem() reaches the bot's page; a dropped clip is a diagnostic.
+        app = self.app(failing="PaErrorCode -9986")
+        self.assertEqual(app.mac_problem(), "")
+
+    def test_setup_problems_are_still_worth_saying(self):
+        app = self.app(failing="PaErrorCode -9986")
+        app.mac_speaker.available = False
+        app.mac_speaker.error = "OSError: no PortAudio"
+        self.assertIn("PortAudio", app.mac_problem())   # this one the page should say
+
+    def test_once_it_lapses_he_goes_back_to_the_mac(self):
+        self.assertTrue(self.app(failing="").mac_voice())
+
+
+class MacSpeakerRemembersAFailure(unittest.TestCase):
+    """MacSpeaker.failing: set when a clip is dropped, cleared when one plays."""
+
+    def stub(self, err):
+        test = self
+
+        class Out:
+            def __init__(self, **kw):
+                if err:
+                    raise err
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+            def write(self, data):
+                test.written.append(len(data))
+            def abort(self):
+                pass
+        self.written = []
+        return SimpleNamespace(RawOutputStream=Out, _terminate=lambda: None,
+                               _initialize=lambda: None)
+
+    def play(self, mac, err=None):
+        clip = speech.LiveClip(b"\0" * 4800)
+        clip.finish()
+        with mock.patch.dict("sys.modules", {"sounddevice": self.stub(err)}):
+            mac._run(clip, threading.Event())
+
+    def test_an_open_that_fails_is_remembered_not_raised(self):
+        mac = speech.MacSpeaker()
+        self.assertEqual(mac.failing, "")
+        self.play(mac, RuntimeError("Internal PortAudio error [PaErrorCode -9986]"))
+        self.assertIn("-9986", mac.failing)
+        self.assertEqual(self.written, [])
+
+    def test_a_clip_that_plays_clears_it(self):
+        mac = speech.MacSpeaker()
+        self.play(mac, RuntimeError("no device"))
+        self.assertIn("no device", mac.failing)
+        self.play(mac)
+        self.assertEqual(mac.failing, "")
+        self.assertEqual(sum(self.written), 4800)
+
+    def test_it_lapses_so_he_tries_the_mac_again(self):
+        mac = speech.MacSpeaker()
+        mac._failure = ("no device", time.time())
+        self.assertEqual(mac.failing, "no device")
+        mac._failure = ("no device", time.time() - speech.MacSpeaker.FAILED_S - 1)
+        self.assertEqual(mac.failing, "")
+
+    def test_a_failed_open_still_lets_go_of_the_stream_count(self):
+        mac = speech.MacSpeaker()
+        self.play(mac, RuntimeError("no device"))
+        self.assertEqual(mac._streams, 0)   # or the next clip would skip the re-read
 
 
 class MacSpeakerPlayback(unittest.TestCase):
