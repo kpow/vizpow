@@ -175,6 +175,10 @@ Your own vizbrain still runs the 1.0 code from your main checkout. When you want
 
 Two changes you'll notice: the log no longer shows what was said (set `"debug_log": true` in settings.json to get it back), and web search uses the city from setup.
 
+## 9. If a friend says he's too quiet
+
+The Stackchan can't do Bluetooth audio (the ESP32-S3 has no Classic Bluetooth), so the louder option runs through the Mac. On the bot's page, **Brain (voice)** › **Talk through the Mac's speaker** sets the vizbrain `speaker` setting to `"mac"` (`"bot"` is the default). vizbrain then plays each reply on the Mac's sound output, such as a Bluetooth speaker paired to the Mac, and the bot mouths it with his own speaker muted. Needs vizbrain 1.3.0 and bot firmware 3.7.37. If the switch says "Mac speaker not yet", the message names what's missing. Details for friends: [Settings › Make him louder](docs/settings.md#make-him-louder).
+
 ## Where everything lives
 
 | What | Where |

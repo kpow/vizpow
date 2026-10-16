@@ -36,6 +36,12 @@ To save a mix of your own, add it to `custom_voices` in the settings file below 
 
 A spec is `kokoro:` and one voice, or several voices with weights joined by `+`, then optionally `@` and a speed from 0.5 to 2. Mostly British mixes speak with British pronunciation.
 
+## Make him louder
+
+His own speaker is small. To have him talk through your Mac's sound output instead, such as a Bluetooth speaker paired to the Mac, open **Brain (voice)** on the bot's page and turn on **Talk through the Mac's speaker**. He says a line on the Mac to show it worked, and his mouth still moves on the bot. Tapping his head stops the Mac too. Turn it off to go back to his own speaker. Needs bot firmware 3.7.37 or newer and vizbrain 1.3.0 or newer.
+
+The switch saves the `speaker` setting: `"bot"` (his own speaker, the default) or `"mac"`. Sound goes to whatever the Mac is set to play through, so pick the speaker in the Mac's Sound settings.
+
 ## Change other settings
 
 Other settings live in one file:
@@ -72,6 +78,7 @@ Then run `vizbrain restart`. A typo makes the whole file unreadable and he goes 
 | `monthly_cap_usd` | Most he can spend in a calendar month. `0` means no limit. | `20.0` | `10.0` |
 | `web_search` | Whether he can look things up online. | `true` | `false` |
 | `tts_voice` | His voice; the picker on the bot's page sets it. Empty means his usual one. | `""` | `"kokoro:af_heart@1.0"`, a mix like `"kokoro:bm_george*0.6+bm_lewis*0.4@0.9"`, or a Mac voice such as `"Samantha"` |
+| `speaker` | Where his voice plays: `"bot"` (his own speaker) or `"mac"` (the Mac's sound output). The switch on the bot's page sets it. | `"bot"` | `"mac"` |
 | `custom_voices` | Your own voices for the picker. | `[]` | see "Change his voice" |
 | `wled_allow` | Which WLED lights he may control, by name. `null` means all he finds. | `null` | `["Desk Lamp", "Shelf"]` |
 | `bot_host` | The bot's address, if he can't be found automatically. | `""` (find him) | `"192.168.1.80"` |

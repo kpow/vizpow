@@ -93,6 +93,7 @@ Then look up what he said or did in [Troubleshooting](docs/troubleshooting.md).
 
 | vizbrain | Needs bot firmware |
 |---|---|
+| 1.3.0 | 3.7.31 or newer. Answering his questions without a tap, album covers and the voice picker need 3.7.35; talking through the Mac's speaker needs 3.7.37 |
 | 1.2.1 | 3.7.31 or newer. Answering his questions without a tap, album covers and the voice picker need 3.7.35 |
 | 1.2.0 | 3.7.31 or newer. Answering his questions without a tap, album covers and the voice picker need 3.7.35 |
 | 1.1.1 | 3.7.31 or newer |

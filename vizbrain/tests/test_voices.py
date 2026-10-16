@@ -228,10 +228,11 @@ class MacVoice(unittest.TestCase):
 
 
 class MacSpeakerPlayback(unittest.TestCase):
-    """MacSpeaker plays a clip as it grows, and a hush cuts it short."""
+    """MacSpeaker plays a clip as it grows, a hush cuts it short, and each clip
+    gets a fresh device list (a reconnected Bluetooth speaker has a new ID)."""
 
     def setUp(self):
-        self.written, self.aborted = [], []
+        self.written, self.aborted, self.refreshed = [], [], []
         test = self
 
         class Out:
@@ -246,7 +247,8 @@ class MacSpeakerPlayback(unittest.TestCase):
                 threading.Event().wait(0.01)
             def abort(self):
                 test.aborted.append(True)
-        sd = SimpleNamespace(RawOutputStream=Out)
+        sd = SimpleNamespace(RawOutputStream=Out, _terminate=lambda: self.refreshed.append("stop"),
+                             _initialize=lambda: self.refreshed.append("start"))
         patch = mock.patch.dict("sys.modules", {"sounddevice": sd})
         patch.start()
         self.addCleanup(patch.stop)
@@ -276,6 +278,20 @@ class MacSpeakerPlayback(unittest.TestCase):
         mac.hush()
         self.assertTrue(self.wait(lambda: self.aborted))
         self.assertLess(sum(self.written), speech.MacSpeaker.PIECE * 50)
+
+    def test_rereads_devices_before_each_clip(self):
+        mac = speech.MacSpeaker()
+        for _ in range(2):
+            mac.play(speech.LiveClip(b"\0" * 4800))
+            self.assertTrue(self.wait(lambda: mac._streams == 0 and self.written))
+        self.assertEqual(self.refreshed, ["stop", "start"] * 2)
+
+    def test_leaves_portaudio_alone_while_a_stream_is_open(self):
+        mac = speech.MacSpeaker()
+        mac._streams = 1                    # another clip still playing
+        mac.play(speech.LiveClip(b"\0" * 4800))
+        self.assertTrue(self.wait(lambda: self.written))
+        self.assertEqual(self.refreshed, [])
 
 
 if __name__ == "__main__":
