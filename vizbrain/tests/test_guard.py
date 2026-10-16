@@ -87,7 +87,9 @@ class OverHttp(unittest.TestCase):
         app = SimpleNamespace(
             _bot=None, log=collections.deque([{"heard": "secret", "text": "secret"}]),
             brain=SimpleNamespace(online=True, capped=lambda: None, key_state="valid", last_error=None),
-            settings={"model": "m", "stt_model": "s", "tts_voice": "kokoro:am_puck"},
+            settings={"model": "m", "stt_model": "s", "tts_voice": "kokoro:am_puck",
+                      "speaker": "bot"},
+            mac_problem=lambda: "", mac_speaker=SimpleNamespace(failing=""),
             started=0.0, listener=SimpleNamespace(state="ready", error=""),
             bot_info={"firmware": "3.7.31", "seen": 0.0, "error": "", "brain_addr": ""},
             adopt_bot=lambda ip, trusted=False: None,

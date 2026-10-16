@@ -270,11 +270,28 @@ class MacSpeaker:
     PIECE = PLAY_RATE // 10 * 2      # 100 ms of s16 PCM: how quickly a hush cuts in
     STALL_S = 45                     # no new audio for this long: give up (as GET /v1/audio does)
 
+    FAILED_S = 120                   # how long a clip that didn't play stands for the next one
+
     def __init__(self):
         self._lock = threading.Lock()
         self._stop: threading.Event | None = None
         self._streams = 0            # output streams open right now (guarded by _lock)
         self.error = ""              # why the Mac can't play audio, if it can't
+        self._failure = ("", 0.0)    # the last clip's failure and when: read it through failing
+
+    @property
+    def failing(self) -> str:
+        """Why the last clip didn't play, while that is still likely true ("" = it played).
+
+        An internal signal, not something to show anyone: it is here so the next
+        clip can go to his own speaker instead of being muted for a Mac that is
+        dropping them, and so /v1/health can say what happened. Separate from
+        `error`, which is PortAudio not loading at all. A playing thread writes
+        both halves in one assignment, so a reader never catches a reason
+        without its time.
+        """
+        why, when = self._failure
+        return why if why and time.time() - when <= self.FAILED_S else ""
 
     @property
     def available(self) -> bool:
@@ -325,10 +342,12 @@ class MacSpeaker:
         try:
             out = self._open(sd)
         except Exception as e:  # noqa: BLE001 - no output device shouldn't take the server down
+            self._failure = (f"{e}"[:200], time.time())
             print(f"[mac-speaker] playback failed: {e}")
             return
         try:
             with out:
+                self._failure = ("", 0.0)   # the device took a stream: it is playing again
                 while not stop.is_set():
                     data, done = clip.read_from(pos, timeout=0.2)
                     if data:
@@ -343,6 +362,7 @@ class MacSpeaker:
                 if stop.is_set():
                     out.abort()      # drop what's queued; leaving the block would play it out
         except Exception as e:  # noqa: BLE001 - a lost output device shouldn't take the server down
+            self._failure = (f"{e}"[:200], time.time())
             print(f"[mac-speaker] playback failed: {e}")
         finally:
             self._closed()
