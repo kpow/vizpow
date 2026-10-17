@@ -186,7 +186,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.7.37"
+#define FIRMWARE_VERSION "3.7.38"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -263,6 +263,19 @@
   #define HAS_LOW_POWER_MODE
   #define LOW_POWER_CPU_MHZ     80   // 240 normally. 80 is the floor for USB serial and WiFi; 160 if animation drags
   #define LOW_POWER_BL_PERCENT  60   // backlight runs at this % of the brightness setting
+#endif
+
+// Pendant shake reactions (pendant_shake.h) — low power mode only.
+// With the radio off there is no weather, so the sustained shake that normally
+// opens info mode gets a random reaction instead. A 1.69 worn as a pendant
+// shakes all day on its own, so the reactions run on a budget: so many per
+// window, then a stretch where shakes are ignored outright.
+#ifdef HAS_LOW_POWER_MODE
+  #define PENDANT_SHAKE_GAP_MS       8000   // minimum quiet between two reactions
+  #define PENDANT_SHAKE_WINDOW_MS  120000   // rolling budget window
+  #define PENDANT_SHAKE_BUDGET          4   // reactions allowed inside one window
+  #define PENDANT_SHAKE_COOLOFF_MS 180000   // once spent, shakes are ignored this long
+  #define PENDANT_METER_RELEASE_MS    500   // shaking must stop this long for the meter to settle
 #endif
 
 // Any target with an addressable strip the base LED engine (stackchan_leds.h) drives
