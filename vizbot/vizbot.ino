@@ -80,6 +80,7 @@
 #endif
 #endif
 #include "power_button.h"   // 1.69 PWR button hold-to-power-off; no-op without PWR_HOLD_PIN
+#include "pendant_shake.h" // low power shake reactions; no-op without HAS_LOW_POWER_MODE
 #include "task_manager.h"
 #include "esp_now_mesh.h"
 #include "wifi_provisioning.h"
@@ -359,6 +360,7 @@ void setup() {
   DBGLN("\n=== vizBot starting ===");
   #ifdef HAS_LOW_POWER_MODE
   loadLowPowerMode();   // before the boot sequence, which starts the radio
+  pendantShake.init();
   if (lowPowerMode) {
     setCpuFrequencyMhz(LOW_POWER_CPU_MHZ);
     DBGLN("Low power mode: radio off, CPU " + String(getCpuFrequencyMhz()) + " MHz");
@@ -525,12 +527,22 @@ void loop() {
       if (!shakeSustainedTriggered && shakeAboveCount >= 8 &&
           (millis() - shakeStartTime) >= SUSTAINED_SHAKE_DURATION_MS) {
         shakeSustainedTriggered = true;
-        DBGLN("Sustained shake detected — toggling info mode");
-        // Toggle info mode
-        if (infoMode.active) {
-          infoMode.beginExitTransition();
-        } else {
-          infoMode.beginEnterTransition();
+        #ifdef HAS_LOW_POWER_MODE
+        if (lowPowerMode) {
+          // Radio off: there is no weather for info mode to show, and a pendant
+          // shakes all day. The gesture gets a random reaction on a budget
+          // instead — see pendant_shake.h.
+          pendantShakeSustained();
+        } else
+        #endif
+        {
+          DBGLN("Sustained shake detected — toggling info mode");
+          // Toggle info mode
+          if (infoMode.active) {
+            infoMode.beginExitTransition();
+          } else {
+            infoMode.beginEnterTransition();
+          }
         }
       }
     } else if (shakeStartTime > 0) {
@@ -539,7 +551,13 @@ void loop() {
       if (shakeGapFrames > SHAKE_GAP_TOLERANCE) {
         // Shake truly ended — if it was short, treat as quick shake (dizzy)
         if (!shakeSustainedTriggered && !infoMode.active) {
-          if (shakeAboveCount >= 2 && !botMode.shakeReacting) {
+          bool quiet = false;
+          #ifdef HAS_LOW_POWER_MODE
+          // Same budget as the sustained reactions: during a cool-off the
+          // pendant stays still-faced however much it gets jostled.
+          quiet = lowPowerMode && pendantShakeCoolingOff();
+          #endif
+          if (shakeAboveCount >= 2 && !botMode.shakeReacting && !quiet) {
             botMode.onShake();
           }
         }
@@ -549,6 +567,11 @@ void loop() {
         shakeSustainedTriggered = false;
       }
     }
+
+    #ifdef HAS_LOW_POWER_MODE
+    // Drives the dizzy meter's escalation and its settle once shaking stops.
+    if (lowPowerMode) pendantShakeUpdate(mag > SHAKE_SUSTAIN_THRESHOLD);
+    #endif
 
     // Regular interaction tracking (unchanged)
     if (mag > 1.3f) {
