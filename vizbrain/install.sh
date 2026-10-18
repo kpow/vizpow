@@ -24,6 +24,43 @@ say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 die() { printf '\n%s\n' "$*" >&2; exit 1; }
 fetch() { case "$1" in http*) curl -fsSL "$1" -o "$2" ;; *) cp "$1" "$2" ;; esac; }
 
+# The vizbrain command lives in ~/.local/bin, and a new Terminal window only
+# finds it if a shell startup file puts that directory on PATH. Step 2 below
+# puts it on *this* process's PATH, which is why `uv tool update-shell` is no
+# help here: it looks at PATH, sees the directory, and writes nothing.
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+
+# The startup file a new Terminal window reads, for the login shell this Mac uses.
+shell_profile() {
+  case "${SHELL:-/bin/zsh}" in
+    */zsh)  printf '%s\n' "$HOME/.zshrc" ;;
+    */bash) printf '%s\n' "$HOME/.bash_profile" ;;
+  esac
+}
+
+# A fresh login shell, started without this process's PATH, the way Terminal
+# starts one. zsh reads .zshrc only when interactive, hence -i.
+new_terminal_finds_vizbrain() {
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin "${SHELL:-/bin/zsh}" -lic \
+    'command -v vizbrain' </dev/null >/dev/null 2>&1
+}
+
+# Put ~/.local/bin on the PATH of future Terminal windows, once. Returns
+# non-zero if a new window still wouldn't find vizbrain, so the caller can say
+# what to do instead of promising something that isn't true.
+ensure_path() {
+  profile="$(shell_profile)"
+  if [ -n "$profile" ] && ! grep -q '\.local/bin' "$profile" 2>/dev/null; then
+    if [ -s "$profile" ] && [ -n "$(tail -c 1 "$profile")" ]; then printf '\n' >> "$profile"; fi
+    printf '\n# Added by the vizbrain installer: where the vizbrain command lives.\n%s\n' \
+      "$PATH_LINE" >> "$profile"
+  fi
+  new_terminal_finds_vizbrain
+}
+
+# Just the PATH step and nothing else (tests/test_install.py).
+[ "$MODE" = "--ensure-path" ] && { ensure_path; exit $?; }
+
 # 1. Can this Mac run it?
 [ "$(uname -s)" = "Darwin" ] || die "vizbrain runs on a Mac."
 [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ] ||
@@ -57,6 +94,7 @@ fi
 
 if [ "$MODE" = "--update" ]; then
   "$VIZBRAIN" setup --defaults        # new models if any; restarts the running copy
+  ensure_path || true                 # silent if a new Terminal window already finds him
   say "vizbrain is up to date ($("$VIZBRAIN" --version))."
   exit 0
 fi
@@ -75,7 +113,8 @@ fi
 # 6. Run at login, and start now.
 say "Starting vizbrain"
 "$VIZBRAIN" install-service
-uv tool update-shell >/dev/null 2>&1 || true
+path_ok=yes
+ensure_path || path_ok=no
 
 # 7. Check everything, so anything left to fix is on screen now.
 say "Checking everything"
@@ -83,5 +122,16 @@ say "Checking everything"
 
 say "Done. Tap the front of vizBot's head and say hello."
 echo "His page on this Mac: http://localhost:4050"
-echo "The vizbrain command works in new Terminal windows. If he ever stops answering: vizbrain doctor"
+if [ "$path_ok" = yes ]; then
+  echo "The vizbrain command works in new Terminal windows. If he ever stops answering: vizbrain doctor"
+else
+  profile="$(shell_profile)"
+  profile="${profile:-$HOME/.zshrc}"
+  echo "One thing left: Terminal can't find the vizbrain command yet. Paste this line in"
+  echo "Terminal, press Return, then open a new Terminal window:"
+  echo
+  echo "    echo '$PATH_LINE' >> ~/${profile#"$HOME"/}"
+  echo
+  echo "Then, if he ever stops answering: vizbrain doctor"
+fi
 open "http://localhost:4050" 2>/dev/null || true
