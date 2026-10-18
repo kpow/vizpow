@@ -7,6 +7,7 @@ import io
 import json
 import plistlib
 import socket
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -179,6 +180,82 @@ class Questions(unittest.TestCase):
             code = install.setup(interactive=False)
         self.assertEqual(code, 1)
         self.assertIn("run: vizbrain setup", out.getvalue())
+
+
+class InstallerPath(unittest.TestCase):
+    """install.sh step 6: ~/.local/bin on the PATH of a *new* Terminal window, not
+    just the installer's own process. Run against a throwaway HOME."""
+
+    SCRIPT = Path(__file__).resolve().parent.parent / "install.sh"
+    LINE = 'export PATH="$HOME/.local/bin:$PATH"'
+
+    def ensure_path(self, home, installed=True):
+        """Run install.sh's PATH step alone; returns its exit code."""
+        if installed:
+            bin = home / ".local/bin"
+            bin.mkdir(parents=True, exist_ok=True)
+            (bin / "vizbrain").write_text("#!/bin/sh\nexit 0\n")
+            (bin / "vizbrain").chmod(0o755)
+        return subprocess.run(["/bin/bash", str(self.SCRIPT), "--ensure-path"],
+                              env={"HOME": str(home), "SHELL": "/bin/zsh",
+                                   "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+                              capture_output=True, text=True).returncode
+
+    def home(self, zshrc=None):
+        home = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        if zshrc is not None:
+            (home / ".zshrc").write_text(zshrc)
+        return home
+
+    def test_dotfile_with_no_local_bin_gets_the_line(self):
+        # Kevin's Mac: a .zshrc full of nvm, no mention of ~/.local/bin anywhere.
+        home = self.home('export NVM_DIR="$HOME/.nvm"\n')
+        self.assertEqual(self.ensure_path(home), 0)
+        text = (home / ".zshrc").read_text()
+        self.assertIn(self.LINE, text)
+        self.assertIn("NVM_DIR", text)                       # what was there is kept
+        self.assertIn("vizbrain installer", text)            # and it says who added it
+
+    def test_no_dotfile_at_all_is_created(self):
+        home = self.home()
+        self.assertEqual(self.ensure_path(home), 0)
+        self.assertIn(self.LINE, (home / ".zshrc").read_text())
+
+    def test_running_again_adds_nothing(self):
+        home = self.home("# nothing here\n")
+        self.assertEqual(self.ensure_path(home), 0)
+        once = (home / ".zshrc").read_text()
+        self.assertEqual(self.ensure_path(home), 0)
+        self.assertEqual((home / ".zshrc").read_text(), once)
+        self.assertEqual(once.count(self.LINE), 1)
+
+    def test_dotfile_that_already_has_it_is_left_untouched(self):
+        home = self.home(f"# mine\n{self.LINE}\n")
+        before = (home / ".zshrc").read_text()
+        self.assertEqual(self.ensure_path(home), 0)
+        self.assertEqual((home / ".zshrc").read_text(), before)
+
+    def test_line_is_not_glued_onto_a_dotfile_without_a_final_newline(self):
+        home = self.home("export FOO=1")
+        self.assertEqual(self.ensure_path(home), 0)
+        self.assertNotIn("export FOO=1export", (home / ".zshrc").read_text())
+        self.assertIn("\nexport PATH=", (home / ".zshrc").read_text())
+
+    def test_a_new_window_that_still_cannot_find_him_is_reported(self):
+        # Nothing in ~/.local/bin: the installer must not claim the command works.
+        home = self.home("# nothing here\n")
+        self.assertEqual(self.ensure_path(home, installed=False), 1)
+
+    def test_bash_users_get_their_own_profile(self):
+        home = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (home / ".local/bin").mkdir(parents=True)
+        out = subprocess.run(["/bin/bash", str(self.SCRIPT), "--ensure-path"],
+                             env={"HOME": str(home), "SHELL": "/bin/bash",
+                                  "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+                             capture_output=True, text=True)
+        self.assertIn(self.LINE, (home / ".bash_profile").read_text())
+        self.assertFalse((home / ".zshrc").exists())
+        self.assertEqual(out.returncode, 1)                  # nothing installed to find
 
 
 class Firmware(unittest.TestCase):

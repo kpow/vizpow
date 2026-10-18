@@ -190,6 +190,24 @@ The Stackchan can't do Bluetooth audio (the ESP32-S3 has no Classic Bluetooth), 
 
 No line at all means the bot never fetched the clip. A `played` line means the audio reached a device, so the problem is the device: `curl -s localhost:4050/v1/health | jq .mac_sound` gives the Mac's output volume, its mute switch and the output a clip would go to now — volume 0, or a Bluetooth speaker muted at the device, looks exactly like a dropped clip from in here. `.mac_dropped` names the last clip's failure, if there was one.
 
+## 10. If a friend says `vizbrain: command not found`
+
+Their service is probably fine (vizBot answers, `http://localhost:4050` loads); only the
+command is missing, because nothing in their shell startup files puts `~/.local/bin` on
+PATH. Installs before 2026-10-18 all have this: `install.sh` put that directory on its
+own PATH before calling `uv tool update-shell`, so update-shell decided there was nothing
+to do and wrote nothing. Fixed in the installer; a re-install or `vizbrain update` now
+writes the line and checks a fresh login shell can find him.
+
+One line to send them. It appends to `~/.zshrc`, and the new Terminal window is the part
+people forget:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+Then: close that Terminal window, open a new one, and run `vizbrain doctor`.
+
 ## Where everything lives
 
 | What | Where |
