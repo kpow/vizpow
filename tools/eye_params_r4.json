@@ -1,0 +1,1938 @@
+{
+ "source": "vizBot eye lab round 4 baseline + Kevin saved tweaks, frozen 2026-10-24",
+ "lab": "https://claude.ai/artifact/EDGxtjiEETp2j2d3x1Y66q",
+ "baseline": "r4",
+ "globals": {
+  "R": 48,
+  "gap": 0.08,
+  "arcW": 0.18,
+  "spin": 0.6
+ },
+ "expressions": [
+  {
+   "index": 0,
+   "name": "NEUTRAL",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.04,
+    0.04
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 300,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 1,
+   "name": "HAPPY",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1.03,
+    1.03
+   ],
+   "lidTop": [
+    0.04,
+    0.04
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.35,
+    0.35
+   ],
+   "bow": [
+    0.5,
+    0.5
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    -0.12,
+    -0.12
+   ],
+   "pw": [
+    0.3,
+    0.3
+   ],
+   "ph": [
+    0.3,
+    0.3
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "joy",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 1,
+   "transitionMs": 250,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 2,
+   "name": "SAD",
+   "kevinTuned": true,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    0.96,
+    0.96
+   ],
+   "lidTop": [
+    0.22,
+    0.22
+   ],
+   "slant": [
+    -0.45,
+    -0.45
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0.3,
+    0.3
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0.1,
+    0.1
+   ],
+   "pw": [
+    0.32,
+    0.32
+   ],
+   "ph": [
+    0.34,
+    0.34
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "plead",
+   "gazeX": 0,
+   "gazeY": 0.2,
+   "pop": 0,
+   "transitionMs": 400,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 3,
+   "name": "SURPRISED",
+   "kevinTuned": false,
+   "aspect": [
+    1,
+    1
+   ],
+   "scale": [
+    1.1,
+    1.1
+   ],
+   "lidTop": [
+    0,
+    0
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.08,
+    0.08
+   ],
+   "ph": [
+    0.08,
+    0.08
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "dot",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 1,
+   "transitionMs": 170,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "small",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 4,
+   "name": "CHILL",
+   "kevinTuned": true,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.38,
+    0.38
+   ],
+   "slant": [
+    -0.05,
+    -0.05
+   ],
+   "sag": [
+    0.08,
+    0.08
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0.05,
+    0.05
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 400,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 5,
+   "name": "ANGRY",
+   "kevinTuned": false,
+   "aspect": [
+    0.85,
+    0.85
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.3,
+    0.3
+   ],
+   "slant": [
+    0.45,
+    0.45
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.12,
+    0.12
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.18,
+    0.18
+   ],
+   "ph": [
+    0.18,
+    0.18
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "small",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0.5,
+   "transitionMs": 230,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 6,
+   "name": "LOVE",
+   "kevinTuned": true,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0,
+    0
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.25,
+    0.25
+   ],
+   "bow": [
+    0.4,
+    0.4
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.42,
+    0.42
+   ],
+   "ph": [
+    0.42,
+    0.42
+   ],
+   "heart": [
+    1,
+    1
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "heart",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 1,
+   "transitionMs": 300,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": true,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 7,
+   "name": "DIZZY",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1.04,
+    0.94
+   ],
+   "lidTop": [
+    0.04,
+    0.04
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 200,
+   "overlay": "spiral",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 8,
+   "name": "THINKING",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    0.96,
+    1.06
+   ],
+   "lidTop": [
+    0.24,
+    0
+   ],
+   "slant": [
+    -0.1,
+    0.1
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.1,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.18,
+    0.18
+   ],
+   "ph": [
+    0.18,
+    0.18
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "small",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 350,
+   "overlay": "none",
+   "gaze": "thinking",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 9,
+   "name": "EXCITED",
+   "kevinTuned": true,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1.08,
+    1.08
+   ],
+   "lidTop": [
+    0.14,
+    0.14
+   ],
+   "slant": [
+    -0.35,
+    -0.35
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.42,
+    0.42
+   ],
+   "ph": [
+    0.42,
+    0.42
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    1,
+    1
+   ],
+   "preset": "star",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 1,
+   "transitionMs": 200,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 10,
+   "name": "MISCHIEF",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.32,
+    0.08
+   ],
+   "slant": [
+    0.2,
+    0.05
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.2,
+    0.12
+   ],
+   "bow": [
+    0.35,
+    0.35
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0.32,
+   "gazeY": 0,
+   "pop": 0.5,
+   "transitionMs": 300,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 11,
+   "name": "SKEPTICAL",
+   "kevinTuned": true,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    0.95,
+    1.05
+   ],
+   "lidTop": [
+    0.38,
+    0
+   ],
+   "slant": [
+    0.15,
+    -0.05
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.16,
+    0.26
+   ],
+   "ph": [
+    0.16,
+    0.26
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "odd",
+   "gazeX": 0.12,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 300,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 12,
+   "name": "WORRIED",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.12,
+    0.12
+   ],
+   "slant": [
+    -0.35,
+    -0.35
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0.06,
+    0.06
+   ],
+   "pw": [
+    0.18,
+    0.18
+   ],
+   "ph": [
+    0.18,
+    0.18
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "small",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 350,
+   "overlay": "none",
+   "gaze": "worried",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 13,
+   "name": "CONFUSED",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1.06,
+    0.88
+   ],
+   "lidTop": [
+    0,
+    0.3
+   ],
+   "slant": [
+    0,
+    -0.2
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.16,
+    0.26
+   ],
+   "ph": [
+    0.16,
+    0.26
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "odd",
+   "gazeX": 0,
+   "gazeY": -0.1,
+   "pop": 0.5,
+   "transitionMs": 350,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 14,
+   "name": "PROUD",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1.04,
+    1.04
+   ],
+   "lidTop": [
+    0.04,
+    0.04
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    1,
+    1
+   ],
+   "cup": [
+    1,
+    1
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0.5,
+   "transitionMs": 350,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 15,
+   "name": "SHY",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    0.97
+   ],
+   "lidTop": [
+    0.16,
+    0.16
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.3,
+    0.3
+   ],
+   "bow": [
+    0.4,
+    0.4
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 400,
+   "overlay": "none",
+   "gaze": "shy",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 16,
+   "name": "ANNOYED",
+   "kevinTuned": false,
+   "aspect": [
+    0.88,
+    0.88
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.5,
+    0.5
+   ],
+   "slant": [
+    0.03,
+    0.03
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0.02,
+    0.02
+   ],
+   "pw": [
+    0.2,
+    0.2
+   ],
+   "ph": [
+    0.2,
+    0.2
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "peek",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 350,
+   "overlay": "none",
+   "gaze": "annoyed",
+   "pulse": false,
+   "exitBlink": true,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 17,
+   "name": "FOCUSED",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.2,
+    0.2
+   ],
+   "slant": [
+    0.08,
+    0.08
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.1,
+    0.1
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.18,
+    0.18
+   ],
+   "ph": [
+    0.18,
+    0.18
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "small",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 300,
+   "overlay": "none",
+   "gaze": "focused",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 18,
+   "name": "WINKING",
+   "kevinTuned": true,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.04,
+    0.04
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.2,
+    0
+   ],
+   "bow": [
+    0.3,
+    0
+   ],
+   "shut": [
+    0,
+    1
+   ],
+   "cup": [
+    0,
+    1
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0.5,
+   "transitionMs": 320,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 19,
+   "name": "DEVIOUS",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.36,
+    0.36
+   ],
+   "slant": [
+    0.3,
+    0.3
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0.22,
+    0.22
+   ],
+   "bow": [
+    0.45,
+    0.45
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.18,
+    0.18
+   ],
+   "ph": [
+    0.18,
+    0.18
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "small",
+   "gazeX": 0.15,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 300,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 20,
+   "name": "SHOCKED",
+   "kevinTuned": false,
+   "aspect": [
+    1.12,
+    1.12
+   ],
+   "scale": [
+    1.12,
+    1.12
+   ],
+   "lidTop": [
+    0,
+    0
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.08,
+    0.08
+   ],
+   "ph": [
+    0.08,
+    0.08
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "dot",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 1,
+   "transitionMs": 200,
+   "overlay": "none",
+   "gaze": "shocked",
+   "pulse": false,
+   "exitBlink": true,
+   "entry": "",
+   "noBlinkMs": 1500,
+   "blinkRate": 1
+  },
+  {
+   "index": 21,
+   "name": "KISSING",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.04,
+    0.04
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    1,
+    1
+   ],
+   "cup": [
+    0.2,
+    0.2
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0.5,
+   "transitionMs": 250,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 22,
+   "name": "NERVOUS",
+   "kevinTuned": true,
+   "aspect": [
+    1.05,
+    1.05
+   ],
+   "scale": [
+    0.94,
+    0.94
+   ],
+   "lidTop": [
+    0.08,
+    0.08
+   ],
+   "slant": [
+    -0.3,
+    -0.3
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.16,
+    0.16
+   ],
+   "ph": [
+    0.16,
+    0.16
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "small",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 200,
+   "overlay": "none",
+   "gaze": "nervous",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 2
+  },
+  {
+   "index": 23,
+   "name": "GLITCHING",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.04,
+    0.04
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0,
+   "gazeY": 0,
+   "pop": 0,
+   "transitionMs": 100,
+   "overlay": "glitch",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  },
+  {
+   "index": 24,
+   "name": "SASSY",
+   "kevinTuned": false,
+   "aspect": [
+    0.92,
+    0.92
+   ],
+   "scale": [
+    1,
+    1
+   ],
+   "lidTop": [
+    0.25,
+    0.15
+   ],
+   "slant": [
+    0,
+    0
+   ],
+   "sag": [
+    0,
+    0
+   ],
+   "lidBot": [
+    0,
+    0
+   ],
+   "bow": [
+    0,
+    0
+   ],
+   "shut": [
+    0,
+    0
+   ],
+   "cup": [
+    0,
+    0
+   ],
+   "inset": [
+    0.08,
+    0.08
+   ],
+   "pdy": [
+    0,
+    0
+   ],
+   "pw": [
+    0.27,
+    0.27
+   ],
+   "ph": [
+    0.27,
+    0.27
+   ],
+   "heart": [
+    0,
+    0
+   ],
+   "star": [
+    0,
+    0
+   ],
+   "preset": "circle",
+   "gazeX": 0.2,
+   "gazeY": -0.05,
+   "pop": 0.5,
+   "transitionMs": 250,
+   "overlay": "none",
+   "gaze": "idle",
+   "pulse": false,
+   "exitBlink": false,
+   "entry": "eyeroll",
+   "noBlinkMs": 0,
+   "blinkRate": 1
+  }
+ ]
+}
