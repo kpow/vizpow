@@ -483,6 +483,15 @@ static void uiPill(const UiRect& r, uint16_t bg, uint16_t border) {
 
 static bool uiToastActive() { return ui.toast[0] && (long)(ui.toastUntil - millis()) > 0; }
 
+// Pendant mode skips frames while the face rests (bot_mode.h). Anything the UI
+// is showing or animating keeps them coming.
+bool uiNeedsRedraw() {
+  unsigned long now = millis();
+  return ui.screen != UI_HOME || now - ui.faceAnimStart < UI_FACE_ANIM_MS + 50 ||
+         uiFaceAnimValue() > 0.001f || uiToastActive() || ui.pressedId != UI_ID_NONE || uiTrack.down ||
+         (ui.lastTouch != 0 && now - ui.lastTouch < UI_HANDLE_SHOW_MS + 100);
+}
+
 static void uiDrawToast() {
   int16_t w = uiTextW(ui.toast, &fonts::DejaVu12) + 28;
   if (w < 84) w = 84;
@@ -763,63 +772,22 @@ static void uiRenderLight() {
   }
 }
 
-// Tiny line-art version of an expression for the mood chips. The full face
-// renderer uses fixed pixel strokes and thresholds that fall apart at 1/5 size,
-// so this redraws the same geometry with hairline strokes.
-static void uiDrawExprGlyph(uint8_t e, int16_t cx, int16_t cy, float s, uint16_t bg) {
+// Tiny version of an expression for the mood chips. Eyes and brows come from
+// the eye model at rest (its own instance, so the live face is untouched); the
+// mouth is redrawn with hairline strokes, since the face's fixed pixel strokes
+// fall apart at 1/5 size.
+static void uiDrawExprGlyph(uint8_t e, int16_t cx, int16_t cy, float s) {
+  static BotEyeModel chipEyes;
+  if (!chipEyes.ready) chipEyes.init(millis());
   BotFaceState g = botMode.face;
   g.loadExpression(e);
   const uint16_t W = botFaceColor, K = BOT_COLOR_PUPIL;
   // Eyes a bit smaller and mouth a bit bigger than true scale: at chip size
   // the mouth carries most of the expression.
   const float se = s * 0.8f, sm = s * 1.6f;
-  float ew = max(3.0f, g.eyeWhiteW * se), eh = max(3.0f, g.eyeWhiteH * se);
-  float sp = g.eyeSpacing * s * 0.9f, pr = max(1.5f, g.pupilRadius * se);
-  float px = g.pupilOffsetX * s, py = g.pupilOffsetY * s;
   const float lw = 0.9f;  // drawWideLine radius → ~2px strokes
-  for (int side = 0; side < 2; side++) {
-    float ex = cx + (side ? sp : -sp);
-    BotEyeMode m = g.eyeMode;
-    if (m == EYE_WINK) m = side ? EYE_CLOSED : EYE_NORMAL;
-    switch (m) {
-      case EYE_CLOSED:
-        gfx->drawWideLine(ex - ew, cy, ex + ew, cy, lw, W);
-        break;
-      case EYE_CARET:   // ^ happy squint
-        gfx->drawWideLine(ex - ew, cy + eh * 0.4f, ex, cy - eh * 0.4f, lw, W);
-        gfx->drawWideLine(ex, cy - eh * 0.4f, ex + ew, cy + eh * 0.4f, lw, W);
-        break;
-      case EYE_CURVED:  // u crescent
-        gfx->drawWideLine(ex - ew, cy - eh * 0.3f, ex, cy + eh * 0.4f, lw, W);
-        gfx->drawWideLine(ex, cy + eh * 0.4f, ex + ew, cy - eh * 0.3f, lw, W);
-        break;
-      default: {
-        gfx->fillEllipse(ex, cy, ew, eh, W);
-        if (m == EYE_HALF) gfx->fillRect(ex - ew - 1, cy - eh - 1, ew * 2 + 3, eh + 1, bg);
-        float qx = ex + constrain(px, -(ew - pr), ew - pr), qy = cy + constrain(py, -(eh - pr), eh - pr);
-        if (m == EYE_HALF) qy = max(qy, (float)cy + 1);
-        if (m == EYE_X) {
-          gfx->drawWideLine(qx - pr, qy - pr, qx + pr, qy + pr, 0.7f, K);
-          gfx->drawWideLine(qx - pr, qy + pr, qx + pr, qy - pr, 0.7f, K);
-        } else if (m == EYE_HEART) {
-          gfx->fillCircle(qx, qy, pr + 1, 0xF800);
-        } else if (m == EYE_SPIRAL) {
-          gfx->drawCircle(qx, qy, pr + 1, K);
-        } else if (m == EYE_DOT) {
-          gfx->fillCircle(qx, qy, 1, K);
-        } else {
-          gfx->fillCircle(qx, qy, pr, K);
-        }
-      }
-    }
-  }
-  if (g.browVisible) {
-    float by = cy - eh + g.browOffsetY * s, bl = g.browLength * s;
-    float rl = g.browAngleL * PI / 180.0f, rr = g.browAngleR * PI / 180.0f;
-    float lx = cx - sp, rx = cx + sp;
-    gfx->drawWideLine(lx - bl, by + sinf(-rl) * bl, lx + bl, by + sinf(rl) * bl, lw, W);
-    gfx->drawWideLine(rx - bl, by + sinf(rr) * bl, rx + bl, by + sinf(-rr) * bl, lw, W);
-  }
+  chipEyes.restAt(e);
+  chipEyes.render(cx, cy, se, W, false, millis());
   float mx = cx, my = cy + g.mouthOffsetY * s, mw = max(3.0f, g.mouthWidth * sm), mc = g.mouthCurve * sm;
   auto curve = [&](float dip) {  // quadratic from (mx-mw,my) through the dip to (mx+mw,my)
     float ox = mx - mw, oy = my;
@@ -882,7 +850,7 @@ static void uiRenderMood() {
     gfx->fillCircle(dotsR - (UI_MOOD_PAGES - 1 - d) * 9 - 3, UI_MOOD_INFO_Y, 3, d == ui.moodPage ? UI_C_MOOD : UI_C_TRACK);
   }
 
-  // Expression chips: each is a tiny line-art render of that expression
+  // Expression chips: each is a tiny render of that expression
   for (uint8_t k = 0; k < UI_CHIPS_PER_PAGE; k++) {
     uint8_t e = ui.moodPage * UI_CHIPS_PER_PAGE + k;
     if (e >= BOT_NUM_EXPRESSIONS) break;
@@ -892,7 +860,7 @@ static void uiRenderMood() {
     uint16_t bg = pr ? UI_C_MOOD : (sel ? uiBlend(UI_C_TILE, UI_C_MOOD, 0.18f) : UI_C_TILE);
     gfx->fillRoundRect(r.x, r.y, r.w, r.h, 8, bg);
     if (sel && !pr) gfx->drawRoundRect(r.x, r.y, r.w, r.h, 8, UI_C_MOOD);
-    uiDrawExprGlyph(e, r.x + r.w / 2, r.y + r.h / 2 - 5, 0.2f, bg);
+    uiDrawExprGlyph(e, r.x + r.w / 2, r.y + r.h / 2 - 5, 0.2f);
   }
 }
 

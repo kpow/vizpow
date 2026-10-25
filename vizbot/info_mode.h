@@ -229,7 +229,7 @@ struct InfoModeData {
 InfoModeData infoMode;
 
 // ============================================================================
-// Smoothstep easing (same as BotLookAround)
+// Smoothstep easing
 // ============================================================================
 
 static float smoothstep(float t) {
@@ -433,53 +433,9 @@ void renderInfoTransition(float t, bool entering) {
   // Scale: 1.0 → 0.3
   float scale = 1.0f - ease * 0.7f;
 
-  // Scale eye parameters from current face state
-  int16_t eyeW = (int16_t)(botMode.face.eyeWhiteW * scale);
-  int16_t eyeH = (int16_t)(botMode.face.eyeWhiteH * scale);
-  int16_t spacing = (int16_t)(botMode.face.eyeSpacing * scale);
-  int16_t pupilR = max((int16_t)2, (int16_t)(botMode.face.pupilRadius * scale));
-
-  // Apply blink
-  float blinkAmount = botMode.face.blinkAmount;
-  int16_t effectiveH = (int16_t)(eyeH * (1.0f - blinkAmount));
-  if (effectiveH < 1) effectiveH = 1;
-
-  // Draw eye whites
-  int16_t leftCX = cx - spacing;
-  int16_t rightCX = cx + spacing;
-
-  gfx->fillEllipse(leftCX, cy, eyeW, effectiveH, botFaceColor);
-  gfx->fillEllipse(rightCX, cy, eyeW, effectiveH, botFaceColor);
-
-  // Draw pupils
-  if (effectiveH > 3 && pupilR >= 2) {
-    gfx->fillCircle(leftCX, cy, pupilR, BOT_COLOR_PUPIL);
-    gfx->fillCircle(rightCX, cy, pupilR, BOT_COLOR_PUPIL);
-  }
-
-  // Brows (fade out early in enter, fade in late in exit)
-  if (ease < 0.4f && botMode.face.browVisible && scale > 0.5f) {
-    int16_t browLen = (int16_t)(botMode.face.browLength * scale);
-    int16_t browThick = max((int16_t)1, (int16_t)(botMode.face.browThickness * scale));
-    int16_t browY = cy - effectiveH - (int16_t)(botMode.face.browOffsetY * scale);
-
-    float browAngleL = botMode.face.browAngleL * DEG_TO_RAD;
-    float browAngleR = botMode.face.browAngleR * DEG_TO_RAD;
-
-    // Left brow
-    int16_t lbx0 = leftCX - browLen;
-    int16_t lby0 = browY + (int16_t)(sinf(browAngleL) * browLen);
-    int16_t lbx1 = leftCX + browLen;
-    int16_t lby1 = browY - (int16_t)(sinf(browAngleL) * browLen);
-    drawThickLine(lbx0, lby0, lbx1, lby1, browThick, botFaceColor);
-
-    // Right brow
-    int16_t rbx0 = rightCX - browLen;
-    int16_t rby0 = browY - (int16_t)(sinf(browAngleR) * browLen);
-    int16_t rbx1 = rightCX + browLen;
-    int16_t rby1 = browY + (int16_t)(sinf(browAngleR) * browLen);
-    drawThickLine(rbx0, rby0, rbx1, rby1, browThick, botFaceColor);
-  }
+  // Eyes and brows: the eye model, shrinking with the face. Brows fade out
+  // early in enter, fade in late in exit.
+  botEyes.render(cx, cy, scale, botFaceColor, false, millis(), ease < 0.4f && scale > 0.5f);
 
   // Mouth (fade out very early in enter)
   if (ease < 0.3f && scale > 0.6f) {
@@ -524,8 +480,7 @@ void renderInfoMode() {
       // Still showing bot face — update and render bot mode on canvas
       botMode.speechBubble.update();
       botMode.face.update();
-      botMode.face.blinkAmount = botMode.blink.update();
-      prevFrame.invalidate();
+      botStepEyes(millis());
       renderBotFace(botMode.face, BOT_COLOR_BG);
       botMode.speechBubble.render();
       break;

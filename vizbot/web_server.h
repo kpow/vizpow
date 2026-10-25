@@ -1275,6 +1275,7 @@ void handleState() {
                 "},\"wled\":" + getWledStatusJson() +
                 ",\"wledEmoji\":" + getWledEmojiJson() +
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
+                ",\"faceRender\":" + botFaceRenderStatsJson() +   // µs per face render since the last read
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
                 ",\"timezone\":\"" + String(timezoneTZ) + "\"" +

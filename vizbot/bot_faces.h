@@ -14,26 +14,10 @@
 // Transitions use tween-driven easing for smooth expression morphing.
 // Rendering uses TFT drawing primitives only — no sprites.
 //
-// Eye style: large white ellipses (overlapping at center), dark pupils,
-// thick arc eyebrows. Matches cartoon eye reference sheet aesthetic.
+// The eyes themselves are drawn by the parametric eye model (bot_eye_model.h,
+// values in bot_eye_params.h). This table still supplies the brows (angle,
+// length, thickness, visible) and the mouth; its eye columns are legacy data.
 // ============================================================================
-
-// Special eye modes (override normal ellipse rendering)
-enum BotEyeMode : uint8_t {
-  EYE_NORMAL = 0,    // Standard ellipse whites + circle pupils
-  EYE_CARET,         // Happy squint — full-size eyes with upward arc line
-  EYE_HEART,         // Heart-shaped eyes
-  EYE_X,             // X X dead/angry eyes
-  EYE_SPIRAL,        // Spiral dizzy eyes (animated)
-  EYE_STAR,          // Star/sparkle eyes
-  EYE_CLOSED,        // Full-size eyes with horizontal line (sleeping)
-  EYE_DIAMOND,       // Rotated square (rhombus) pupils inside normal white ellipse
-  EYE_HALF,          // Half-closed lid (top portion covered by bgColor)
-  EYE_DOT,           // Tiny fixed-center pupils (no tracking), highlight glint
-  EYE_CURVED,        // Downward crescent arc (anime ^^ satisfied eyes, no pupils)
-  EYE_WINK,          // Asymmetric: left eye normal+pupil, right eye closed line
-  EYE_GLITCH         // Animated offset rectangular slices (digital malfunction)
-};
 
 // Mouth shape types
 enum BotMouthType : uint8_t {
@@ -79,9 +63,6 @@ struct BotExpression {
   int16_t mouthOffsetY;    // Mouth Y position below eye center
   int16_t mouthCurve;      // Curve amount for smile/frown (arc height)
 
-  // Special modes
-  BotEyeMode eyeMode;
-
   // Animation hints
   uint16_t transitionMs;   // Default transition time to this expression
 };
@@ -92,8 +73,8 @@ struct BotExpression {
 // Screen: 240x280. Face centered around (120, 125) — slightly above center
 // to leave room for mouth and speech bubbles below.
 //
-// Eye whites: ~48-55px radius horizontally, overlapping at center.
-// Pupils: ~12-14px radius. Brows: thick arcs above eyes.
+// Brows: thick bars above the eyes, angle and length per face. The eye
+// white / pupil columns are the pre-2026-10 ellipse eyes, kept as data only.
 // ============================================================================
 
 // Face center coordinates (default for 240x280 portrait; overridden per board in config.h)
@@ -142,7 +123,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -12, .browLength = 30, .browThickness = 6,
     .browAngleL = 0, .browAngleR = 0, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 18, .mouthOffsetY = 62, .mouthCurve = 6,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 300
   },
 
@@ -153,7 +133,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -18, .browLength = 28, .browThickness = 5,
     .browAngleL = 10, .browAngleR = 10, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 24, .mouthOffsetY = 58, .mouthCurve = 12,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 250
   },
 
@@ -164,7 +143,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -10, .browLength = 28, .browThickness = 6,
     .browAngleL = -18, .browAngleR = -18, .browVisible = true,
     .mouthType = MOUTH_FROWN, .mouthWidth = 16, .mouthOffsetY = 65, .mouthCurve = 8,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 400
   },
 
@@ -175,7 +153,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -20, .browLength = 26, .browThickness = 5,
     .browAngleL = 12, .browAngleR = 12, .browVisible = true,
     .mouthType = MOUTH_OPEN_O, .mouthWidth = 14, .mouthOffsetY = 62, .mouthCurve = 14,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 150
   },
 
@@ -186,7 +163,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -8, .browLength = 28, .browThickness = 5,
     .browAngleL = -3, .browAngleR = -3, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 22, .mouthOffsetY = 56, .mouthCurve = 10,
-    .eyeMode = EYE_HALF,
     .transitionMs = 400
   },
 
@@ -197,7 +173,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -6, .browLength = 32, .browThickness = 7,
     .browAngleL = 22, .browAngleR = 22, .browVisible = true,
     .mouthType = MOUTH_LINE, .mouthWidth = 20, .mouthOffsetY = 62, .mouthCurve = 0,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 200
   },
 
@@ -208,7 +183,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -14, .browLength = 28, .browThickness = 5,
     .browAngleL = 8, .browAngleR = 8, .browVisible = false,
     .mouthType = MOUTH_SMILE, .mouthWidth = 20, .mouthOffsetY = 60, .mouthCurve = 10,
-    .eyeMode = EYE_HEART,
     .transitionMs = 300
   },
 
@@ -219,7 +193,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -10, .browLength = 26, .browThickness = 5,
     .browAngleL = -8, .browAngleR = 12, .browVisible = true,
     .mouthType = MOUTH_WAVY, .mouthWidth = 18, .mouthOffsetY = 62, .mouthCurve = 6,
-    .eyeMode = EYE_SPIRAL,
     .transitionMs = 200
   },
 
@@ -230,7 +203,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -14, .browLength = 28, .browThickness = 6,
     .browAngleL = 0, .browAngleR = 15, .browVisible = true,
     .mouthType = MOUTH_LINE, .mouthWidth = 10, .mouthOffsetY = 62, .mouthCurve = 0,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 350
   },
 
@@ -241,7 +213,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -18, .browLength = 26, .browThickness = 5,
     .browAngleL = 12, .browAngleR = 12, .browVisible = false,
     .mouthType = MOUTH_SMILE, .mouthWidth = 26, .mouthOffsetY = 56, .mouthCurve = 14,
-    .eyeMode = EYE_STAR,
     .transitionMs = 200
   },
 
@@ -252,7 +223,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -12, .browLength = 28, .browThickness = 6,
     .browAngleL = -6, .browAngleR = 14, .browVisible = true,
     .mouthType = MOUTH_SMIRK, .mouthWidth = 18, .mouthOffsetY = 62, .mouthCurve = 8,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 300
   },
 
@@ -263,7 +233,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -12, .browLength = 28, .browThickness = 6,
     .browAngleL = -10, .browAngleR = 18, .browVisible = true,
     .mouthType = MOUTH_LINE, .mouthWidth = 14, .mouthOffsetY = 62, .mouthCurve = 0,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 300
   },
 
@@ -274,7 +243,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -16, .browLength = 26, .browThickness = 5,
     .browAngleL = -14, .browAngleR = -14, .browVisible = true,
     .mouthType = MOUTH_FROWN, .mouthWidth = 12, .mouthOffsetY = 64, .mouthCurve = 6,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 350
   },
 
@@ -285,7 +253,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -12, .browLength = 26, .browThickness = 5,
     .browAngleL = 10, .browAngleR = -8, .browVisible = true,
     .mouthType = MOUTH_WAVY, .mouthWidth = 14, .mouthOffsetY = 62, .mouthCurve = 4,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 350
   },
 
@@ -296,7 +263,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -10, .browLength = 30, .browThickness = 6,
     .browAngleL = 6, .browAngleR = 6, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 22, .mouthOffsetY = 60, .mouthCurve = 10,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 350
   },
 
@@ -307,7 +273,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -10, .browLength = 24, .browThickness = 5,
     .browAngleL = -4, .browAngleR = 4, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 12, .mouthOffsetY = 62, .mouthCurve = 4,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 400
   },
 
@@ -318,7 +283,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -4, .browLength = 30, .browThickness = 7,
     .browAngleL = 10, .browAngleR = 10, .browVisible = true,
     .mouthType = MOUTH_LINE, .mouthWidth = 16, .mouthOffsetY = 60, .mouthCurve = 0,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 250
   },
 
@@ -329,7 +293,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -8, .browLength = 28, .browThickness = 6,
     .browAngleL = 4, .browAngleR = 4, .browVisible = true,
     .mouthType = MOUTH_NONE, .mouthWidth = 0, .mouthOffsetY = 62, .mouthCurve = 0,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 300
   },
 
@@ -340,7 +303,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -14, .browLength = 28, .browThickness = 5,
     .browAngleL = 6, .browAngleR = 10, .browVisible = true,
     .mouthType = MOUTH_SMILE, .mouthWidth = 20, .mouthOffsetY = 60, .mouthCurve = 8,
-    .eyeMode = EYE_WINK,
     .transitionMs = 200
   },
 
@@ -351,7 +313,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -6, .browLength = 30, .browThickness = 6,
     .browAngleL = 12, .browAngleR = 12, .browVisible = true,
     .mouthType = MOUTH_TEETH, .mouthWidth = 22, .mouthOffsetY = 60, .mouthCurve = 10,
-    .eyeMode = EYE_HALF,
     .transitionMs = 300
   },
 
@@ -362,7 +323,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -20, .browLength = 26, .browThickness = 5,
     .browAngleL = 12, .browAngleR = 12, .browVisible = true,
     .mouthType = MOUTH_OPEN_O, .mouthWidth = 16, .mouthOffsetY = 62, .mouthCurve = 16,
-    .eyeMode = EYE_DOT,
     .transitionMs = 100
   },
 
@@ -373,7 +333,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -12, .browLength = 26, .browThickness = 5,
     .browAngleL = 6, .browAngleR = 6, .browVisible = true,
     .mouthType = MOUTH_POUT, .mouthWidth = 10, .mouthOffsetY = 60, .mouthCurve = 8,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 250
   },
 
@@ -384,7 +343,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -14, .browLength = 26, .browThickness = 5,
     .browAngleL = -10, .browAngleR = -10, .browVisible = true,
     .mouthType = MOUTH_ZIGZAG, .mouthWidth = 18, .mouthOffsetY = 64, .mouthCurve = 5,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 200
   },
 
@@ -395,7 +353,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -12, .browLength = 28, .browThickness = 5,
     .browAngleL = 0, .browAngleR = 0, .browVisible = false,
     .mouthType = MOUTH_WAVY, .mouthWidth = 20, .mouthOffsetY = 62, .mouthCurve = 6,
-    .eyeMode = EYE_GLITCH,
     .transitionMs = 100
   },
 
@@ -406,7 +363,6 @@ const BotExpression botExpressions[BOT_NUM_EXPRESSIONS] PROGMEM = {
     .browOffsetY = -12, .browLength = 28, .browThickness = 6,
     .browAngleL = -4, .browAngleR = 14, .browVisible = true,
     .mouthType = MOUTH_TONGUE, .mouthWidth = 20, .mouthOffsetY = 60, .mouthCurve = 10,
-    .eyeMode = EYE_NORMAL,
     .transitionMs = 250
   }
 };
@@ -426,6 +382,9 @@ inline int8_t lerpI8(int8_t a, int8_t b, uint8_t t) {
   return a + (((int16_t)(b - a) * t) >> 8);
 }
 
+// The parametric eye model (bot_eye_model.h) follows every expression change
+void botEyesSetExpression(uint8_t index);
+
 // Runtime expression state (interpolated values — not in PROGMEM)
 struct BotFaceState {
   // Interpolated parameters
@@ -436,14 +395,6 @@ struct BotFaceState {
   bool    browVisible;
   BotMouthType mouthType;
   int16_t mouthWidth, mouthOffsetY, mouthCurve;
-  BotEyeMode eyeMode;
-
-  // Dynamic offsets (from IMU, look-around, etc.)
-  int16_t dynamicPupilX;   // Added to pupilOffsetX for final pupil position
-  int16_t dynamicPupilY;   // Added to pupilOffsetY
-
-  // Blink state
-  float blinkAmount;       // 0.0 = open, 1.0 = fully closed
 
   // Transition state
   uint8_t currentExpr;
@@ -473,7 +424,6 @@ struct BotFaceState {
     mouthWidth = e.mouthWidth;
     mouthOffsetY = e.mouthOffsetY;
     mouthCurve = e.mouthCurve;
-    eyeMode = e.eyeMode;
 
     currentExpr = index;
     targetExpr = index;
@@ -501,6 +451,9 @@ struct BotFaceState {
 
     // Drive transition via tween with easing
     tweenManager.start(&transitionProgress, 0.0f, 1.0f, durationMs, EASE_OUT_QUAD);
+
+    // Eyes and brows spring to the new face at its own tuned speed
+    botEyesSetExpression(index);
   }
 
   // Update transition (call each frame — tween drives transitionProgress)
@@ -542,14 +495,10 @@ struct BotFaceState {
     bool pastHalf = (blendT >= 128);
     browVisible = pastHalf ? to.browVisible : from.browVisible;
     mouthType = pastHalf ? to.mouthType : from.mouthType;
-    eyeMode = pastHalf ? to.eyeMode : from.eyeMode;
   }
 
   // Initialize to neutral
   void init() {
-    dynamicPupilX = 0;
-    dynamicPupilY = 0;
-    blinkAmount = 0.0f;
     transitionProgress = 1.0f;
     transitioning = false;
     loadExpression(EXPR_NEUTRAL);

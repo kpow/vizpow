@@ -28,6 +28,7 @@
 extern GfxDevice *gfx;
 extern float accelX, accelY, accelZ;
 extern bool menuVisible;
+extern bool lowPowerMode;   // vizbot.ino: pendant mode on HAS_LOW_POWER_MODE boards
 
 // Forward declarations (defined in vizbot.ino)
 SayingCategory pickPersonalitySayCategory();
@@ -48,6 +49,8 @@ enum BotState : uint8_t {
 
 #define BOT_WAKE_THRESHOLD     1.8f      // Acceleration magnitude to wake from sleep
 #define BOT_FRAME_DELAY_MS     33        // ~30 FPS target
+#define BOT_IMU_GAZE           0         // 1 = tilt steers the gaze (eye model look pad); off since cc0ee4d
+#define BOT_PENDANT_REFRESH_MS 1000      // pendant mode redraws a resting face at least this often
 
 // Idle chirp: once nobody has touched the bot for a while, it now and then makes
 // a small sound with a matching face. Randomized so it never feels like a timer.
@@ -169,8 +172,6 @@ void initBuiltinPersonalities() {
 struct BotModeState {
   BotState state;
   BotFaceState face;
-  BotBlinkState blink;
-  BotLookAround lookAround;
   BotIMUTracker imuTracker;
 
   // Overlays
@@ -230,8 +231,7 @@ struct BotModeState {
   void init() {
     state = BOT_ACTIVE;
     face.init();
-    blink.init();
-    lookAround.init();
+    botEyes.init(millis());
     imuTracker.init();
     speechBubble.init();
     notification.init();
@@ -405,6 +405,22 @@ void voiceShowBubble(const char* text, uint32_t ms) {
   voiceBubbleText[MAX_SAY_LEN - 1] = '\0';
   voiceBubbleMs = ms > 60000 ? 60000 : ms;
   voiceBubblePending = true;
+}
+
+// ============================================================================
+// Eye model step (bot mode, and info mode while its face is still up)
+// ============================================================================
+
+void botStepEyes(unsigned long now) {
+  botEyes.sleeping = (botMode.state == BOT_SLEEPING);   // shut via the model, no blinks
+  #ifdef HAS_LOW_POWER_MODE
+  botEyes.pendant = lowPowerMode;
+  #endif
+  botEyes.lastInteractMs = botMode.lastInteraction;
+  #if BOT_IMU_GAZE
+  if (sysStatus.imuReady) botMode.imuTracker.update(botEyes.padX, botEyes.padY);
+  #endif
+  botEyes.step(now);
 }
 
 // ============================================================================
@@ -603,31 +619,10 @@ void updateBotMode() {
 
   // ---- Update animation systems ----
 
-  // Blink (not while sleeping or during non-blinkable eye modes)
-  {
-    BotEyeMode em = botMode.face.eyeMode;
-    bool canBlink = (em == EYE_NORMAL || em == EYE_DIAMOND || em == EYE_HALF ||
-                     em == EYE_DOT || em == EYE_WINK);
-    if (botMode.state != BOT_SLEEPING && canBlink) {
-      botMode.face.blinkAmount = botMode.blink.update();
-    } else if (botMode.state == BOT_SLEEPING) {
-      botMode.face.blinkAmount = 0.0f;  // Don't squish — EYE_CLOSED handles it
-      botMode.face.eyeMode = EYE_CLOSED;
-    }
-  }
+  // Eyes and brows: blinks, gaze, idle fidgets, springs (bot_eye_model.h)
+  botStepEyes(millis());
 
-  // Look-around (only when active or idle, and not reacting)
-  int16_t lookX = 0, lookY = 0;
-  if ((botMode.state == BOT_ACTIVE || botMode.state == BOT_IDLE) &&
-      !botMode.shakeReacting) {
-    botMode.lookAround.update(lookX, lookY);
-  }
-
-  // Dynamic pupil offsets — random look-around only (IMU tracking disabled for now)
-  botMode.face.dynamicPupilX = lookX;
-  botMode.face.dynamicPupilY = lookY;
-
-  // Update expression transition
+  // Update expression transition (mouth)
   botMode.face.update();
 
   // Voice lip-sync: open the mouth with the reply audio's loudness, then put
@@ -709,35 +704,26 @@ void renderBotAmbientBackground() {
 static bool botFirstFrame = true;
 
 // Draw the face scaled about a new center. The touch UI shrinks the face into
-// the top of the screen while a sheet is open; the mood sheet also uses this
-// for its expression chips. Scale 1 at the default center is the normal path.
+// the top of the screen while a sheet is open, and album art puts it small in
+// a corner. Scale 1 at the default center is the normal path. The eye model
+// scales R and the brows by s itself; the scaled copy carries the mouth.
 void renderBotFaceAt(BotFaceState &src, int16_t cx, int16_t cy, float s, uint16_t bgColor) {
   if (s > 0.999f && cx == BOT_FACE_CX && cy == BOT_FACE_CY) {
     renderBotFace(src, bgColor);
     return;
   }
-  prevFrame.invalidate();  // erase rects from another scale/center would be wrong
   BotFaceState f = src;
   auto sc = [s](int16_t v) { return (int16_t)lroundf(v * s); };
-  f.eyeWhiteW = sc(f.eyeWhiteW);
-  f.eyeWhiteH = sc(f.eyeWhiteH);
-  f.eyeSpacing = sc(f.eyeSpacing);
-  f.pupilRadius = max((int16_t)2, sc(f.pupilRadius));
-  f.pupilOffsetX = sc(f.pupilOffsetX);
-  f.pupilOffsetY = sc(f.pupilOffsetY);
-  f.dynamicPupilX = sc(f.dynamicPupilX);
-  f.dynamicPupilY = sc(f.dynamicPupilY);
-  f.browOffsetY = sc(f.browOffsetY);
-  f.browLength = sc(f.browLength);
-  f.browThickness = max((int16_t)1, sc(f.browThickness));
   f.mouthWidth = sc(f.mouthWidth);
   f.mouthOffsetY = sc(f.mouthOffsetY);
   f.mouthCurve = sc(f.mouthCurve);
   botFaceDrawCX = cx;
   botFaceDrawCY = cy;
+  botFaceDrawScale = s;
   renderBotFace(f, bgColor);
   botFaceDrawCX = BOT_FACE_CX;
   botFaceDrawCY = BOT_FACE_CY;
+  botFaceDrawScale = 1.0f;
 }
 
 #ifdef TOUCH_UI_V2
@@ -746,7 +732,49 @@ void uiFaceTransform(int16_t &cx, int16_t &cy, float &scale);
 bool uiHidesBotOverlays();
 bool uiFullScreen();
 void uiRenderOverlay();
+bool uiNeedsRedraw();
 #endif
+
+// Pendant (low power) mode leaves the last frame on screen while the face is at
+// rest and nothing else on it moves, as the eye lab's afterAtRest() does. A
+// resting face is still redrawn every BOT_PENDANT_REFRESH_MS so clocks and
+// status icons keep up.
+static unsigned long botLastRenderMs = 0;
+static uint32_t botLastRenderKey = 0;
+
+static uint32_t botRenderKey() {
+  return (uint32_t)botFaceColor ^ ((uint32_t)botBackgroundStyle << 16) ^
+         ((uint32_t)botMode.face.targetExpr << 20) ^ ((uint32_t)botMode.face.mouthType << 26);
+}
+
+static bool botFrameCanSkip(unsigned long now) {
+#ifdef HAS_LOW_POWER_MODE
+  if (!lowPowerMode || botFirstFrame) return false;
+  if (now - botLastRenderMs >= BOT_PENDANT_REFRESH_MS || botRenderKey() != botLastRenderKey) return false;
+  if (botBackgroundStyle > 1) return false;                        // breathing, stars, ambient move
+  if (!botEyes.atRest() || botMode.face.transitioning) return false;
+  if (botMode.state == BOT_SLEEPING || voiceSpeakT0 != 0) return false;  // Zzz, lip-sync
+  if (botMode.speechBubble.active || botMode.notification.active || artShowing()) return false;
+  #ifdef TOUCH_UI_V2
+  if (uiNeedsRedraw()) return false;
+  #endif
+  return true;
+#else
+  (void)now;
+  return false;
+#endif
+}
+
+// Face render cost for GET /state; reading starts a fresh window
+String botFaceRenderStatsJson() {
+  BotFaceRenderStats &st = botFaceRenderStats;
+  String json = "{\"avgUs\":" + String(st.count ? st.sumUs / st.count : 0) +
+                ",\"maxUs\":" + String(st.maxUs) +
+                ",\"renders\":" + String(st.count) +
+                ",\"skipped\":" + String(st.skipped) + "}";
+  st.sumUs = st.count = st.maxUs = st.skipped = 0;
+  return json;
+}
 
 // Dev screenshot endpoint (web_server.h) pauses rendering while it reads the
 // canvas so it gets a whole frame, not a half-drawn one.
@@ -757,6 +785,14 @@ void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
   if (botRenderHold) return;
+  unsigned long frameNow = millis();
+  if (botFrameCanSkip(frameNow)) {
+    botFaceRenderStats.skipped++;
+    return;
+  }
+  botLastRenderMs = frameNow;
+  botLastRenderKey = botRenderKey();
+  botFirstFrame = false;
   botFrameInProgress = true;
 
   // ---- Canvas management (both targets use DisplayProxy with LGFX_Sprite) ----
@@ -827,14 +863,11 @@ void renderBotMode() {
       gfx->fillScreen(BOT_COLOR_BG);  // Clear first — pixel grid doesn't cover full screen
     }
     renderBotAmbientBackground();
-    bgColor = 0x0000;  // Face erase uses black (though prevFrame is invalidated)
+    bgColor = 0x0000;  // Mouth cut-outs use black on top of the effect
   } else {
     // Out-of-range style (stale NVS value etc.) — always clear to avoid overlay
     gfx->fillScreen(BOT_COLOR_BG);
   }
-
-  // Since we redraw everything fresh each frame, skip the old targeted-erase logic
-  prevFrame.invalidate();
 
   // ---- Render the face ----
   #ifdef TOUCH_UI_V2
@@ -894,7 +927,6 @@ void renderBotMode() {
 
 void enterBotMode() {
   botFirstFrame = true;
-  prevFrame.invalidate();
 
   if (!botMode.initialized) {
     #ifdef MIDI_SYNTH_ENABLED
@@ -1020,6 +1052,7 @@ inline uint8_t getBotExpression() { return 0; }
 inline uint8_t getBotState() { return 0; }
 inline void setBotBackgroundStyle(uint8_t style) {}
 inline uint8_t getBotBackgroundStyle() { return 0; }
+inline String botFaceRenderStatsJson() { return "{}"; }
 
 #endif // DISPLAY_LCD_ONLY || DISPLAY_DUAL
 
