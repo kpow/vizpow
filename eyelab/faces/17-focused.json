@@ -1,0 +1,49 @@
+{
+  "index": 17,
+  "name": "FOCUSED",
+  "kevinTuned": false,
+  "eye": {
+    "aspect": [0.92, 0.92],
+    "scale": [1, 1],
+    "lidTop": [0.2, 0.2],
+    "slant": [0.08, 0.08],
+    "sag": [0, 0],
+    "lidBot": [0.1, 0.1],
+    "bow": [0, 0],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0, 0],
+    "pw": [0.18, 0.18],
+    "ph": [0.18, 0.18],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "small",
+    "gazeX": 0,
+    "gazeY": 0,
+    "pop": 0,
+    "transitionMs": 300,
+    "overlay": "none",
+    "gaze": "focused",
+    "pulse": false,
+    "exitBlink": false,
+    "entry": "",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -8,
+    "length": 28,
+    "thickness": 6,
+    "angleL": 4,
+    "angleR": 4,
+    "visible": true
+  },
+  "mouth": {
+    "type": "NONE",
+    "width": 0,
+    "offsetY": 62,
+    "curve": 0
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

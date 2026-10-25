@@ -1,0 +1,49 @@
+{
+  "index": 20,
+  "name": "SHOCKED",
+  "kevinTuned": false,
+  "eye": {
+    "aspect": [1.12, 1.12],
+    "scale": [1.12, 1.12],
+    "lidTop": [0, 0],
+    "slant": [0, 0],
+    "sag": [0, 0],
+    "lidBot": [0, 0],
+    "bow": [0, 0],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0, 0],
+    "pw": [0.08, 0.08],
+    "ph": [0.08, 0.08],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "dot",
+    "gazeX": 0,
+    "gazeY": 0,
+    "pop": 1,
+    "transitionMs": 200,
+    "overlay": "none",
+    "gaze": "shocked",
+    "pulse": false,
+    "exitBlink": true,
+    "entry": "",
+    "noBlinkMs": 1500,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -20,
+    "length": 26,
+    "thickness": 5,
+    "angleL": 12,
+    "angleR": 12,
+    "visible": true
+  },
+  "mouth": {
+    "type": "OPEN_O",
+    "width": 16,
+    "offsetY": 62,
+    "curve": 16
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

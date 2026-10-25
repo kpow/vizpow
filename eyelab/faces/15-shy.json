@@ -1,0 +1,49 @@
+{
+  "index": 15,
+  "name": "SHY",
+  "kevinTuned": false,
+  "eye": {
+    "aspect": [0.92, 0.92],
+    "scale": [1, 0.97],
+    "lidTop": [0.16, 0.16],
+    "slant": [0, 0],
+    "sag": [0, 0],
+    "lidBot": [0.3, 0.3],
+    "bow": [0.4, 0.4],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0, 0],
+    "pw": [0.27, 0.27],
+    "ph": [0.27, 0.27],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "circle",
+    "gazeX": 0,
+    "gazeY": 0,
+    "pop": 0,
+    "transitionMs": 400,
+    "overlay": "none",
+    "gaze": "shy",
+    "pulse": false,
+    "exitBlink": false,
+    "entry": "",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -10,
+    "length": 24,
+    "thickness": 5,
+    "angleL": -4,
+    "angleR": 4,
+    "visible": true
+  },
+  "mouth": {
+    "type": "SMILE",
+    "width": 12,
+    "offsetY": 62,
+    "curve": 4
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

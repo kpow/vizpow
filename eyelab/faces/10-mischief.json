@@ -1,0 +1,49 @@
+{
+  "index": 10,
+  "name": "MISCHIEF",
+  "kevinTuned": false,
+  "eye": {
+    "aspect": [0.92, 0.92],
+    "scale": [1, 1],
+    "lidTop": [0.32, 0.08],
+    "slant": [0.2, 0.05],
+    "sag": [0, 0],
+    "lidBot": [0.2, 0.12],
+    "bow": [0.35, 0.35],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0, 0],
+    "pw": [0.27, 0.27],
+    "ph": [0.27, 0.27],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "circle",
+    "gazeX": 0.32,
+    "gazeY": 0,
+    "pop": 0.5,
+    "transitionMs": 300,
+    "overlay": "none",
+    "gaze": "idle",
+    "pulse": false,
+    "exitBlink": false,
+    "entry": "",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -12,
+    "length": 28,
+    "thickness": 6,
+    "angleL": -6,
+    "angleR": 14,
+    "visible": true
+  },
+  "mouth": {
+    "type": "SMIRK",
+    "width": 18,
+    "offsetY": 62,
+    "curve": 8
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

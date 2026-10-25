@@ -1,0 +1,49 @@
+{
+  "index": 4,
+  "name": "CHILL",
+  "kevinTuned": true,
+  "eye": {
+    "aspect": [0.92, 0.92],
+    "scale": [1, 1],
+    "lidTop": [0.38, 0.38],
+    "slant": [-0.05, -0.05],
+    "sag": [0.08, 0.08],
+    "lidBot": [0, 0],
+    "bow": [0, 0],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0.05, 0.05],
+    "pw": [0.27, 0.27],
+    "ph": [0.27, 0.27],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "circle",
+    "gazeX": 0,
+    "gazeY": 0,
+    "pop": 0,
+    "transitionMs": 400,
+    "overlay": "none",
+    "gaze": "idle",
+    "pulse": false,
+    "exitBlink": false,
+    "entry": "",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -8,
+    "length": 28,
+    "thickness": 5,
+    "angleL": -3,
+    "angleR": -3,
+    "visible": true
+  },
+  "mouth": {
+    "type": "SMILE",
+    "width": 22,
+    "offsetY": 56,
+    "curve": 10
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

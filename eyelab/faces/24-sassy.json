@@ -1,0 +1,49 @@
+{
+  "index": 24,
+  "name": "SASSY",
+  "kevinTuned": false,
+  "eye": {
+    "aspect": [0.92, 0.92],
+    "scale": [1, 1],
+    "lidTop": [0.25, 0.15],
+    "slant": [0, 0],
+    "sag": [0, 0],
+    "lidBot": [0, 0],
+    "bow": [0, 0],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0, 0],
+    "pw": [0.27, 0.27],
+    "ph": [0.27, 0.27],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "circle",
+    "gazeX": 0.2,
+    "gazeY": -0.05,
+    "pop": 0.5,
+    "transitionMs": 250,
+    "overlay": "none",
+    "gaze": "idle",
+    "pulse": false,
+    "exitBlink": false,
+    "entry": "eyeroll",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -12,
+    "length": 28,
+    "thickness": 6,
+    "angleL": -4,
+    "angleR": 14,
+    "visible": true
+  },
+  "mouth": {
+    "type": "TONGUE",
+    "width": 20,
+    "offsetY": 60,
+    "curve": 10
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

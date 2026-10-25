@@ -1,0 +1,49 @@
+{
+  "index": 5,
+  "name": "ANGRY",
+  "kevinTuned": false,
+  "eye": {
+    "aspect": [0.85, 0.85],
+    "scale": [1, 1],
+    "lidTop": [0.3, 0.3],
+    "slant": [0.45, 0.45],
+    "sag": [0, 0],
+    "lidBot": [0.12, 0.12],
+    "bow": [0, 0],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0, 0],
+    "pw": [0.18, 0.18],
+    "ph": [0.18, 0.18],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "small",
+    "gazeX": 0,
+    "gazeY": 0,
+    "pop": 0.5,
+    "transitionMs": 230,
+    "overlay": "none",
+    "gaze": "idle",
+    "pulse": false,
+    "exitBlink": false,
+    "entry": "",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -6,
+    "length": 32,
+    "thickness": 7,
+    "angleL": 22,
+    "angleR": 22,
+    "visible": true
+  },
+  "mouth": {
+    "type": "LINE",
+    "width": 20,
+    "offsetY": 62,
+    "curve": 0
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

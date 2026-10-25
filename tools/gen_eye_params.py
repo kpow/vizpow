@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 """Generate vizbot/bot_eye_params.h from an eye lab export.
 
-The eye lab (docs/eye-art-direction.md, docs/eye-art-review-r4.md) is where the
-eye parameters are designed and tuned. Its "Copy JSON (all 25)" export, or the
-frozen snapshot in tools/eye_params_r4.json, is the input here.
+The eye lab (eyelab/, docs/eye-art-direction.md, docs/eye-art-review-r4.md) is
+where the eye parameters are designed and tuned. The input is either the lab's
+face files (a directory: eyelab/faces/NN-name.json plus globals.json), its
+"Copy JSON" export, or the frozen snapshot in tools/eye_params_r4.json.
 
-    python3 tools/gen_eye_params.py tools/eye_params_r4.json > vizbot/bot_eye_params.h
+    python3 tools/gen_eye_params.py eyelab/faces > vizbot/bot_eye_params.h
+
+Until a face is edited, eyelab/faces and tools/eye_params_r4.json produce the
+same header byte for byte.
 """
 import json
+import os
+import re
 import sys
+
+# The header's Source and Regenerate lines when it is built from eyelab/faces. They still
+# name the round 4 snapshot so that, before any face is edited, the regenerated header is
+# byte-identical to the committed one. Change both together once the faces diverge.
+FACES_SOURCE = 'vizBot eye lab round 4 baseline + Kevin saved tweaks, frozen 2026-10-24'
+REGEN = 'python3 tools/gen_eye_params.py tools/eye_params_r4.json > vizbot/bot_eye_params.h'
 
 PAIR_KEYS = ['aspect', 'scale', 'lidTop', 'slant', 'sag', 'lidBot', 'bow', 'shut', 'cup',
              'inset', 'pdy', 'pw', 'ph', 'heart', 'star']
@@ -27,8 +39,20 @@ def pair(v):
     return '{%s, %s}' % (f(v[0]), f(v[1]))
 
 
+def load_faces(folder):
+    """eyelab/faces as the export's shape: one entry per face file, eye params flattened."""
+    exprs = []
+    for name in sorted(os.listdir(folder)):
+        if not re.match(r'^\d{2}-[a-z0-9-]+\.json$', name):
+            continue
+        face = json.load(open(os.path.join(folder, name)))
+        exprs.append(dict(index=face['index'], name=face['name'], kevinTuned=face['kevinTuned'], **face['eye']))
+    globals_ = json.load(open(os.path.join(folder, 'globals.json')))
+    return {'source': FACES_SOURCE, 'globals': globals_, 'expressions': exprs}
+
+
 def main(path):
-    data = json.load(open(path))
+    data = load_faces(path) if os.path.isdir(path) else json.load(open(path))
     exprs = sorted(data['expressions'], key=lambda e: e['index'])
     if [e['index'] for e in exprs] != list(range(25)):
         sys.exit('expected expressions 0..24 in firmware order')
@@ -42,7 +66,7 @@ def main(path):
     w('// Bot Eye Parameters (generated: do not edit by hand)')
     w('// ============================================================================')
     w('// Source: %s' % data.get('source', path))
-    w('// Regenerate: python3 tools/gen_eye_params.py tools/eye_params_r4.json > vizbot/bot_eye_params.h')
+    w('// Regenerate: %s' % REGEN)
     w('//')
     w('// One parametric eye per side, drawn as one vertical span per pixel column.')
     w('// Sizes are x R (eye half-width). [0] = screen-left eye, [1] = screen-right.')

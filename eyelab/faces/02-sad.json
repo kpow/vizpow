@@ -1,0 +1,49 @@
+{
+  "index": 2,
+  "name": "SAD",
+  "kevinTuned": true,
+  "eye": {
+    "aspect": [0.92, 0.92],
+    "scale": [0.96, 0.96],
+    "lidTop": [0.22, 0.22],
+    "slant": [-0.45, -0.45],
+    "sag": [0, 0],
+    "lidBot": [0, 0],
+    "bow": [0.3, 0.3],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0.1, 0.1],
+    "pw": [0.32, 0.32],
+    "ph": [0.34, 0.34],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "plead",
+    "gazeX": 0,
+    "gazeY": 0.2,
+    "pop": 0,
+    "transitionMs": 400,
+    "overlay": "none",
+    "gaze": "idle",
+    "pulse": false,
+    "exitBlink": false,
+    "entry": "",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -10,
+    "length": 28,
+    "thickness": 6,
+    "angleL": -18,
+    "angleR": -18,
+    "visible": true
+  },
+  "mouth": {
+    "type": "FROWN",
+    "width": 16,
+    "offsetY": 65,
+    "curve": 8
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

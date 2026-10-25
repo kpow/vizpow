@@ -1,0 +1,49 @@
+{
+  "index": 16,
+  "name": "ANNOYED",
+  "kevinTuned": false,
+  "eye": {
+    "aspect": [0.88, 0.88],
+    "scale": [1, 1],
+    "lidTop": [0.5, 0.5],
+    "slant": [0.03, 0.03],
+    "sag": [0, 0],
+    "lidBot": [0, 0],
+    "bow": [0, 0],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0.02, 0.02],
+    "pw": [0.2, 0.2],
+    "ph": [0.2, 0.2],
+    "heart": [0, 0],
+    "star": [0, 0],
+    "preset": "peek",
+    "gazeX": 0,
+    "gazeY": 0,
+    "pop": 0,
+    "transitionMs": 350,
+    "overlay": "none",
+    "gaze": "annoyed",
+    "pulse": false,
+    "exitBlink": true,
+    "entry": "",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -4,
+    "length": 30,
+    "thickness": 7,
+    "angleL": 10,
+    "angleR": 10,
+    "visible": true
+  },
+  "mouth": {
+    "type": "LINE",
+    "width": 16,
+    "offsetY": 60,
+    "curve": 0
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}

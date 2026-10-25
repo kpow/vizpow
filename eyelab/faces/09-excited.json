@@ -1,0 +1,49 @@
+{
+  "index": 9,
+  "name": "EXCITED",
+  "kevinTuned": true,
+  "eye": {
+    "aspect": [0.92, 0.92],
+    "scale": [1.08, 1.08],
+    "lidTop": [0.14, 0.14],
+    "slant": [-0.35, -0.35],
+    "sag": [0, 0],
+    "lidBot": [0, 0],
+    "bow": [0, 0],
+    "shut": [0, 0],
+    "cup": [0, 0],
+    "inset": [0.08, 0.08],
+    "pdy": [0, 0],
+    "pw": [0.42, 0.42],
+    "ph": [0.42, 0.42],
+    "heart": [0, 0],
+    "star": [1, 1],
+    "preset": "star",
+    "gazeX": 0,
+    "gazeY": 0,
+    "pop": 1,
+    "transitionMs": 200,
+    "overlay": "none",
+    "gaze": "idle",
+    "pulse": false,
+    "exitBlink": false,
+    "entry": "",
+    "noBlinkMs": 0,
+    "blinkRate": 1
+  },
+  "brow": {
+    "offsetY": -18,
+    "length": 26,
+    "thickness": 5,
+    "angleL": 12,
+    "angleR": 12,
+    "visible": false
+  },
+  "mouth": {
+    "type": "SMILE",
+    "width": 26,
+    "offsetY": 56,
+    "curve": 14
+  },
+  "scorecard": [0, 0, 0, 0, 0, 0]
+}
