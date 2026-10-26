@@ -256,13 +256,26 @@ async function parity(ctx: Ctx, log: (l: string) => void): Promise<StepResult> {
 }
 
 // 3. Version
-const VERSION_RE = /(#define\s+FIRMWARE_VERSION\s+")(\d+)\.(\d+)\.(\d+)(")/;
+// Plain x.y.z belongs to GitHub releases only. A lab deploy is a test build of the next
+// release, tagged -eyes.N, so it never takes a release number and never collides with
+// another branch's test builds (party mode uses -party.N). See PLAN.md, "Version rule".
+const VERSION_RE = /(#define\s+FIRMWARE_VERSION\s+")([^"]+)(")/;
+export function nextVersion(current: string): string {
+  const plain = /^(\d+)\.(\d+)\.(\d+)$/.exec(current);
+  if (plain) return `${plain[1]}.${plain[2]}.${Number(plain[3]) + 1}-eyes.1`;
+  const eyes = /^(\d+\.\d+\.\d+)-eyes\.(\d+)$/.exec(current);
+  if (eyes) return `${eyes[1]}-eyes.${Number(eyes[2]) + 1}`;
+  const tag = /^\d+\.\d+\.\d+-([a-z]+)\.\d+$/.exec(current)?.[1];
+  throw new Error(tag
+    ? `FIRMWARE_VERSION is ${current}, a ${tag} test build; the eye lab only bumps a release or its own -eyes.N builds. Merge or release that branch first.`
+    : `FIRMWARE_VERSION is ${current}; expected x.y.z or x.y.z-eyes.N`);
+}
 async function bumpVersion(ctx: Ctx, log: (l: string) => void): Promise<StepResult> {
   const text = await readFile(rel(CONFIG), "utf8");
   const m = VERSION_RE.exec(text);
-  if (!m) throw new Error(`no #define FIRMWARE_VERSION "x.y.z" in ${CONFIG}`);
-  const from = `${m[2]}.${m[3]}.${m[4]}`, to = `${m[2]}.${m[3]}.${Number(m[4]) + 1}`;
-  await writeFile(rel(CONFIG), text.replace(VERSION_RE, `$1${to}$5`));
+  if (!m) throw new Error(`no #define FIRMWARE_VERSION "…" in ${CONFIG}`);
+  const from = m[2], to = nextVersion(from);
+  await writeFile(rel(CONFIG), text.replace(VERSION_RE, `$1${to}$3`));
   ctx.version = to;
   log(`${CONFIG}: FIRMWARE_VERSION ${from} -> ${to}`);
   return { summary: `${from} → ${to}` };
