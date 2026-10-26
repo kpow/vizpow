@@ -153,7 +153,7 @@ struct PartyBlob {
   BotSpring Q;               // corner run progress 0..1
   float pkL, pkJ, pkD;       // kick normalisers
 
-  bool active, ready;
+  bool active, ready, haveCorner;
   uint8_t corner;
   unsigned long lastMs, fieldUntil, evAt, nextWander, nextPulse;
   float fieldT, alT, phiV, bulgeA, B, t;
@@ -222,7 +222,7 @@ struct PartyBlob {
   // First party frame: he picks a corner and lands there (the enter morph is phase 3)
   void enter(unsigned long now) {
     if (!ready) init();
-    corner = random(4);
+    if (!haveCorner) { corner = random(4); haveCorner = true; }
     float hx, hy;
     home(corner, hx, hy);
     wx.snap(hx); wy.snap(hy); wTx = hx; wTy = hy;
@@ -244,9 +244,11 @@ struct PartyBlob {
     botEyes.blinkStart(now, BW_SWAP);
     active = true;
   }
-  void leave() {
+  // keepCorner: party is only paused (a sheet is open), so he comes back to the same corner
+  void leave(bool keepCorner) {
     if (active && run) { botEyes.padX = botEyes.padY = 0; }
     active = false;
+    if (!keepCorner) haveCorner = false;
   }
 
   bool contains(int16_t x, int16_t y) const { return hypotf(x - icx, y - icy) < tier().r * 1.05f; }

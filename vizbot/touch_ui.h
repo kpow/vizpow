@@ -877,6 +877,7 @@ static const char* const UI_TZ_NAME[] = {
   "Eastern", "Central", "Mountain", "Arizona", "Pacific", "Alaska", "Hawaii", "UTC", "UK", "C. Europe"};
 #define UI_NUM_TZ 10
 static const char* const UI_KSCOPE_NAME[KSCOPE_MODE_COUNT] = {"Off", "Vert", "Horiz", "Quad", "6-Slice", "8-Slice"};
+static const char* const UI_PARTY_SIZE_NAME[3] = {"Small", "Medium", "Large"};
 static const uint16_t UI_FACE_COLORS[5] = {0xFFFF, 0x07FF, 0x07E0, 0xF81F, 0xFFE0};
 static const uint32_t UI_ROT_MS[] = {0, 60000UL, 300000UL, 900000UL, 3600000UL};
 static const char* const UI_ROT_NAME[] = {"Off", "1 min", "5 min", "15 min", "1 hour"};
@@ -896,7 +897,7 @@ static int8_t uiRotIndex() {
 
 enum UiRowKind : uint8_t { ROW_NAV, ROW_TOGGLE, ROW_STEP, ROW_INFO, ROW_SWATCH, ROW_DOTS, ROW_HOLD, ROW_SLIDER };
 enum UiRowKey : uint8_t {
-  RK_SCENE, RK_PALETTE, RK_HIRES, RK_KSCOPE, RK_FACE, RK_AUTO,
+  RK_SCENE, RK_PARTY, RK_PARTY_SIZE, RK_PALETTE, RK_HIRES, RK_KSCOPE, RK_FACE, RK_AUTO,
   RK_PERSONALITY, RK_ROTATE, RK_EXPRESSIONS,
   RK_WEATHER, RK_CLOCK, RK_TZ, RK_SCHEDULE,
   RK_SCREEN,
@@ -949,6 +950,8 @@ static void uiBuildRows(uint8_t cat) {
   switch (cat) {
     case CAT_LOOK:
       uiAddRow("Scene", ROW_NAV, RK_SCENE, uiSceneName(uiSceneIndex()));
+      uiAddRow("Party mode", ROW_TOGGLE, RK_PARTY, "", partyMode);
+      if (partyMode) uiAddRow("Party size", ROW_STEP, RK_PARTY_SIZE, UI_PARTY_SIZE_NAME[partySize % 3]);
       uiAddRow("Palette", ROW_SWATCH, RK_PALETTE, paletteNames[paletteIndex % NUM_PALETTES]);
       uiAddRow("Hi-res", ROW_TOGGLE, RK_HIRES, "", hiResMode);
       uiAddRow("Kaleido", ROW_STEP, RK_KSCOPE, UI_KSCOPE_NAME[kaleidoscopeMode % KSCOPE_MODE_COUNT]);
@@ -1436,6 +1439,17 @@ static void uiRowAction(uint8_t i, int16_t x) {
       paletteIndex = (paletteIndex + 1) % NUM_PALETTES;
       currentPalette = palettes[paletteIndex];
       autoCycle = false;
+      markSettingsDirty();
+      break;
+    case RK_PARTY:
+      partyMode = !partyMode;
+      // Party mode only shows on the ambient scene, so turning it on from Black switches to it
+      if (partyMode && botBackgroundStyle != 4) setBotBackgroundStyle(4);
+      markSettingsDirty();
+      uiToast(partyMode ? "Party on" : "Party off", UI_C_LOOK);
+      break;
+    case RK_PARTY_SIZE:
+      partySize = (partySize + 3 + dir) % 3;
       markSettingsDirty();
       break;
     case RK_HIRES: toggleHiResMode(); break;

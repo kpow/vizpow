@@ -880,7 +880,7 @@ void renderBotMode() {
   if (party) {
     partyBlob.render(frameNow);
   } else {
-    partyBlob.leave();
+    partyBlob.leave(partyWanted());
     #ifdef TOUCH_UI_V2
     int16_t fcx, fcy;
     float fs;
