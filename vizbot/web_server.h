@@ -154,6 +154,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
               <button id="autoCycleBtn" onclick="toggleAutoCycle()" style="font-size:11px;padding:3px 10px"></button>
             </div>
             <div class="grid3" id="ambientEffects" style="margin-top:6px"></div>
+            <div class="trow" style="margin-top:10px"><span>Party mode</span><div class="tog" id="partyToggle" onclick="toggleParty()"></div></div>
+            <div class="row" id="partySizes" style="margin-top:6px;gap:6px"></div>
             <div id="audioFxRow" style="display:none;margin-top:10px">
               <div class="trow"><span>Audio FX</span><div class="tog" id="audioFxToggle" onclick="toggleAudioFx()"></div></div>
               <div style="margin-top:8px">
@@ -422,6 +424,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     let curColor = 0;
     let autoCycleOn = true;
     let audioFxOn = false;
+    let partyOn = false;
+    let partySizeCur = 1;
     let kscopeMode = 0;
     const kscopeNames = ['Off','Vertical','Horizontal','H+V','6-Slice','8-Slice'];
     let wifiSelectedSSID = '';
@@ -441,6 +445,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       ambSec.style.display = curBgStyle === 4 ? 'block' : 'none';
       document.getElementById('ambientEffects').innerHTML = ambientNames.map((name, i) =>
         `<button class="${curAmbient===i?'active':''}" onclick="setAmbient(${i})">${name}</button>`
+      ).join('');
+      document.getElementById('partyToggle').className = 'tog ' + (partyOn ? 'on' : '');
+      document.getElementById('partySizes').style.display = partyOn ? '' : 'none';
+      document.getElementById('partySizes').innerHTML = ['Small','Medium','Large'].map((name, i) =>
+        `<button class="${partySizeCur===i?'active':''}" onclick="setPartySize(${i})">${name}</button>`
       ).join('');
       const acBtn = document.getElementById('autoCycleBtn');
       if (acBtn) acBtn.textContent = autoCycleOn ? '⏸ Stop Auto' : '▶ Auto';
@@ -634,6 +643,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     function setBotBgStyle(i) { curBgStyle = i; render(); api('/bot/background?style=' + i); }
     function setAmbient(i) { curAmbient = i; autoCycleOn = false; render(); api('/bot/ambient?v=' + i + '&lock=1'); }
     function toggleAutoCycle() { autoCycleOn = !autoCycleOn; render(); api('/bot/autocycle?v=' + (autoCycleOn ? '1' : '0')); }
+    function toggleParty() { partyOn = !partyOn; render(); api('/bot/party?v=' + (partyOn ? '1' : '0')); }
+    function setPartySize(i) { partySizeCur = i; render(); api('/bot/party?size=' + 'sml'[i]); }
     function toggleAudioFx() { audioFxOn = !audioFxOn; document.getElementById('audioFxToggle').className = 'tog ' + (audioFxOn ? 'on' : ''); api('/bot/audiofx?v=' + (audioFxOn ? '1' : '0')); }
     function setKscope(v) {
       kscopeMode = parseInt(v);
@@ -725,6 +736,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         }
         if (state.autoCycle !== undefined) {
           autoCycleOn = state.autoCycle;
+        }
+        if (state.party) {
+          partyOn = state.party.on;
+          partySizeCur = 'sml'.indexOf(state.party.size);
         }
         if (state.audioFx !== undefined) {
           audioFxOn = state.audioFx;
@@ -1276,6 +1291,11 @@ void handleState() {
                 ",\"wledEmoji\":" + getWledEmojiJson() +
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
                 ",\"faceRender\":" + botFaceRenderStatsJson() +   // µs per face render since the last read
+                ",\"party\":{\"on\":" + (partyMode ? "true" : "false") +
+                  ",\"size\":\"" + String("sml"[partySize % 3]) + "\"" +
+                  ",\"active\":" + (partyBlob.active ? "true" : "false") +
+                  ",\"corner\":\"" + partyCornerName(partyBlob.corner) + "\"" +   // his choice, read only
+                  ",\"render\":" + partyRenderStatsJson() + "}" +              // µs per blob + eyes render
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
                 ",\"timezone\":\"" + String(timezoneTZ) + "\"" +
@@ -1457,6 +1477,27 @@ void handleBotBackground() {
     cmdSetBgStyle(style);
   }
   server.send(200, "text/plain", "OK");
+}
+
+// GET /bot/party?v=0|1&size=s|m|l — party mode (the face as a blob in a corner
+// over the ambient effect). Turning it on switches to the ambient scene. He
+// picks his own corner, so there is no corner argument.
+extern void cmdSetParty(uint8_t on, uint8_t size);
+
+void handleBotParty() {
+  uint8_t on = 0xFF, size = 0xFF;
+  if (server.hasArg("v")) on = server.arg("v").toInt() == 1 ? 1 : 0;
+  if (server.hasArg("size")) {
+    String s = server.arg("size");
+    int i = String("sml").indexOf(s.charAt(0));
+    if (i < 0 && s.length() == 1 && isDigit(s.charAt(0))) i = s.toInt();
+    if (i >= 0 && i <= 2) size = i;
+  }
+  if (on != 0xFF || size != 0xFF) cmdSetParty(on, size);
+  bool nowOn = on == 0xFF ? partyMode : on == 1;
+  uint8_t nowSize = size == 0xFF ? partySize : size;
+  server.send(200, "application/json", String("{\"party\":") + (nowOn ? "true" : "false") +
+              ",\"size\":\"" + String("sml"[nowSize % 3]) + "\"}");
 }
 
 void handleBotAmbient() {
@@ -2319,7 +2360,7 @@ void handleCaptiveRedirect() {
 // ---- Dev endpoints: drive and inspect the touch UI over WiFi --------------
 // GET /debug/screen → last rendered frame, raw RGB565 (LCD_WIDTH x LCD_HEIGHT,
 //                     byte-swapped as stored in the LovyanGFX sprite)
-// GET /debug/touch?g=tap|long|up|down|left|right&x=&y= → inject a gesture
+// GET /debug/touch?g=tap|long|up|down|left|right|shake&x=&y= → inject a gesture (shake: a quick IMU shake)
 volatile uint8_t uiInjectGesture = 0;
 volatile int16_t uiInjectX = 0, uiInjectY = 0;
 
@@ -2346,8 +2387,8 @@ void handleDebugScreen() {
 void handleDebugTouch() {
   String g = server.arg("g");
   uint8_t code = g == "tap" ? 1 : g == "long" ? 2 : g == "up" ? 3 : g == "down" ? 4 :
-                 g == "left" ? 5 : g == "right" ? 6 : 0;
-  if (!code) { server.send(400, "text/plain", "g=tap|long|up|down|left|right"); return; }
+                 g == "left" ? 5 : g == "right" ? 6 : g == "shake" ? 7 : 0;
+  if (!code) { server.send(400, "text/plain", "g=tap|long|up|down|left|right|shake"); return; }
   uiInjectX = server.arg("x").toInt();
   uiInjectY = server.arg("y").toInt();
   uiInjectGesture = code;
@@ -2592,6 +2633,7 @@ void setupWebServer() {
   server.on("/bot/hires", handleBotHiRes);
   server.on("/bot/background", handleBotBackground);
   server.on("/bot/ambient", handleBotAmbient);
+  server.on("/bot/party", handleBotParty);
   server.on("/bot/autocycle", handleAutoCycle);
   server.on("/bot/kscope", handleKscope);
   server.on("/bot/kscope/spin", handleKscopeSpin);

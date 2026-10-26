@@ -372,6 +372,9 @@ struct BotTimeOverlay {
     int16_t pillW = 72;   // 60px text + 12px padding
     int16_t pillH = 24;   // 16px text + 8px padding
     int16_t pillX = (LCD_WIDTH - pillW) / 2;   // Centered horizontally
+    // Party mode with him up top: the clock moves to the far top corner
+    if (partyBlob.active && partyTop(partyBlob.corner))
+      pillX = partyRight(partyBlob.corner) ? PARTY_CLOCK_INSET : LCD_WIDTH - PARTY_CLOCK_INSET - pillW;
     int16_t pillY = 4;                          // Near top of screen
 
     gfx->fillRoundRect(pillX, pillY, pillW, pillH, 6, 0x2104);  // Dark gray bg

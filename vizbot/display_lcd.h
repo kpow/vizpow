@@ -461,6 +461,13 @@ const uint16_t* lcdCanvasBuffer() {
   return (const uint16_t*)_dp_canvas->getBuffer();
 }
 
+// The frame being drawn, for in-place pixel ops (party mode's shadow and rim).
+// Null unless a 16-bit canvas is active. Pixels are byte-swapped RGB565.
+uint16_t* lcdCanvasPixels() {
+  if (!_dp_canvas || !_dp_canvas_active || _dp_canvas->getColorDepth() != 16) return nullptr;
+  return (uint16_t*)_dp_canvas->getBuffer();
+}
+
 // Set LCD backlight brightness (0-255)
 void setLCDBacklight(uint8_t b) {
   #ifdef TARGET_CORES3

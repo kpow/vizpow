@@ -27,6 +27,7 @@ VIZMAC_TOOLS = {"keyboard_effect", "keyboard_flash", "music_status", "music_cont
 SPOTIFY_TOOLS = {"music_play", "music_volume"}
 
 LED_MODES = ["off", "breathing", "rainbow", "chase", "fire", "twinkle", "pulse", "aurora", "mood", "audio"]
+PARTY_SIZES = ["small", "medium", "large"]
 
 
 @dataclass
@@ -93,6 +94,13 @@ class Toolbox:
             _obj({"color": {"type": "string", "description": f"a name ({', '.join(COLOR_NAMES)}) or #RRGGBB"},
                   "mode": {"type": "string", "enum": LED_MODES}}),
             self._base_leds)
+
+        add("party_mode",
+            "Party mode: the light show takes vizBot's whole screen and his face becomes a little blob in a "
+            "corner. Turn it on for music, dancing or a party, off to talk face to face. size: small, medium or large.",
+            _obj({"on": {"type": "boolean"},
+                  "size": {"type": "string", "enum": PARTY_SIZES}}),
+            self._party)
 
         add("list_lab_devices",
             "List the lab devices you can control: WLED light names and whether the vizMac keyboard is online.",
@@ -256,6 +264,13 @@ class Toolbox:
             raise ValueError(f"unknown gesture {name}")
         threading.Thread(target=lambda: _quiet(bot.gesture, name), daemon=True).start()
         return f"doing {name}"
+
+    def _party(self, on: bool | None = None, size: str | None = None) -> str:
+        if on is None and size is None:
+            return "nothing to change"
+        r = self._bot().party(on, size)
+        names = dict(zip("sml", PARTY_SIZES))
+        return f"party mode {'on' if r.get('party') else 'off'}, size {names.get(r.get('size', 'm'), 'medium')}"
 
     def _base_leds(self, color: str | None = None, mode: str | None = None) -> str:
         bot = self._bot()

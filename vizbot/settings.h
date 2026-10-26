@@ -20,6 +20,8 @@ extern uint8_t effectIndex;
 extern uint8_t paletteIndex;
 extern bool    autoCycle;
 extern uint8_t botBackgroundStyle;
+extern bool    partyMode;
+extern uint8_t partySize;
 extern uint8_t lcdBrightness;
 extern bool    lowPowerMode;
 extern bool    hiResMode;
@@ -80,6 +82,9 @@ void loadSettings() {
   autoCycle          = prefs.getBool ("autoCyc",  autoCycle);
   botBackgroundStyle = prefs.getUChar("bgStyle",  botBackgroundStyle);
   if (botBackgroundStyle > 4) botBackgroundStyle = 0;  // clamp stale NVS values
+  partyMode          = prefs.getBool ("party",    partyMode);
+  partySize          = prefs.getUChar("pSize",    partySize);
+  if (partySize > 2) partySize = 1;
   hiResMode          = prefs.getBool ("hiRes",    hiResMode);
   kaleidoscopeMode   = prefs.getUChar("kscope",   0);
   if (kaleidoscopeMode >= KSCOPE_MODE_COUNT) kaleidoscopeMode = 0;
@@ -158,6 +163,8 @@ void saveSettings() {
   prefs.putUChar("palette", paletteIndex);
   prefs.putBool ("autoCyc", autoCycle);
   prefs.putUChar("bgStyle", botBackgroundStyle);
+  prefs.putBool ("party",   partyMode);
+  prefs.putUChar("pSize",   partySize);
   prefs.putBool ("hiRes",   hiResMode);
   prefs.putUChar("kscope",  kaleidoscopeMode);
   prefs.putUChar("kscopeSpin",  kaleidoscopeSpin);

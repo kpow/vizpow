@@ -148,7 +148,7 @@ static const char* const uiExprNames[BOT_NUM_EXPRESSIONS] = {
 };
 
 // Injected gestures from the dev endpoint /debug/touch (web_server.h)
-extern volatile uint8_t uiInjectGesture;   // 0 none, 1 tap, 2 long, 3..6 swipe up/down/left/right
+extern volatile uint8_t uiInjectGesture;   // 0 none, 1 tap, 2 long, 3..6 swipe up/down/left/right, 7 shake
 extern volatile int16_t uiInjectX, uiInjectY;
 
 // ---- State ----------------------------------------------------------------
@@ -496,9 +496,11 @@ static void uiDrawToast() {
   int16_t w = uiTextW(ui.toast, &fonts::DejaVu12) + 28;
   if (w < 84) w = 84;
   if (w > 216) w = 216;
-  UiRect r = {(int16_t)(UI_CX - w / 2), 6, w, 24};
+  // Party mode with him up top: the toast drops to the bottom band, clear of the blob
+  int16_t y = (ui.screen == UI_HOME && partyBlob.active && partyTop(partyBlob.corner)) ? PARTY_TOAST_LOW_Y : 6;
+  UiRect r = {(int16_t)(UI_CX - w / 2), y, w, 24};
   uiPill(r, ui.toastHue, ui.toastHue);
-  uiText(ui.toast, UI_CX, 18, &fonts::DejaVu12, UI_C_BG, UI_MC, true);
+  uiText(ui.toast, UI_CX, y + 12, &fonts::DejaVu12, UI_C_BG, UI_MC, true);
 }
 
 static void uiDrawBackPill(const char* label, uint16_t hue, uint16_t bg, int16_t x = -1) {
@@ -877,6 +879,7 @@ static const char* const UI_TZ_NAME[] = {
   "Eastern", "Central", "Mountain", "Arizona", "Pacific", "Alaska", "Hawaii", "UTC", "UK", "C. Europe"};
 #define UI_NUM_TZ 10
 static const char* const UI_KSCOPE_NAME[KSCOPE_MODE_COUNT] = {"Off", "Vert", "Horiz", "Quad", "6-Slice", "8-Slice"};
+static const char* const UI_PARTY_SIZE_NAME[3] = {"Small", "Medium", "Large"};
 static const uint16_t UI_FACE_COLORS[5] = {0xFFFF, 0x07FF, 0x07E0, 0xF81F, 0xFFE0};
 static const uint32_t UI_ROT_MS[] = {0, 60000UL, 300000UL, 900000UL, 3600000UL};
 static const char* const UI_ROT_NAME[] = {"Off", "1 min", "5 min", "15 min", "1 hour"};
@@ -896,7 +899,7 @@ static int8_t uiRotIndex() {
 
 enum UiRowKind : uint8_t { ROW_NAV, ROW_TOGGLE, ROW_STEP, ROW_INFO, ROW_SWATCH, ROW_DOTS, ROW_HOLD, ROW_SLIDER };
 enum UiRowKey : uint8_t {
-  RK_SCENE, RK_PALETTE, RK_HIRES, RK_KSCOPE, RK_FACE, RK_AUTO,
+  RK_SCENE, RK_PARTY, RK_PARTY_SIZE, RK_PALETTE, RK_HIRES, RK_KSCOPE, RK_FACE, RK_AUTO,
   RK_PERSONALITY, RK_ROTATE, RK_EXPRESSIONS,
   RK_WEATHER, RK_CLOCK, RK_TZ, RK_SCHEDULE,
   RK_SCREEN,
@@ -949,6 +952,8 @@ static void uiBuildRows(uint8_t cat) {
   switch (cat) {
     case CAT_LOOK:
       uiAddRow("Scene", ROW_NAV, RK_SCENE, uiSceneName(uiSceneIndex()));
+      uiAddRow("Party mode", ROW_TOGGLE, RK_PARTY, "", partyMode);
+      if (partyMode) uiAddRow("Party size", ROW_STEP, RK_PARTY_SIZE, UI_PARTY_SIZE_NAME[partySize % 3]);
       uiAddRow("Palette", ROW_SWATCH, RK_PALETTE, paletteNames[paletteIndex % NUM_PALETTES]);
       uiAddRow("Hi-res", ROW_TOGGLE, RK_HIRES, "", hiResMode);
       uiAddRow("Kaleido", ROW_STEP, RK_KSCOPE, UI_KSCOPE_NAME[kaleidoscopeMode % KSCOPE_MODE_COUNT]);
@@ -1438,6 +1443,17 @@ static void uiRowAction(uint8_t i, int16_t x) {
       autoCycle = false;
       markSettingsDirty();
       break;
+    case RK_PARTY:
+      partyMode = !partyMode;
+      // Party mode only shows on the ambient scene, so turning it on from Black switches to it
+      if (partyMode && botBackgroundStyle != 4) setBotBackgroundStyle(4);
+      markSettingsDirty();
+      uiToast(partyMode ? "Party on" : "Party off", UI_C_LOOK);
+      break;
+    case RK_PARTY_SIZE:
+      partySize = (partySize + 3 + dir) % 3;
+      markSettingsDirty();
+      break;
     case RK_HIRES: toggleHiResMode(); break;
     case RK_KSCOPE:
       kaleidoscopeMode = (kaleidoscopeMode + KSCOPE_MODE_COUNT + dir) % KSCOPE_MODE_COUNT;
@@ -1710,6 +1726,26 @@ static void uiOnTap(int16_t x, int16_t y) {
   if (infoMode.active) { infoMode.nextPage(); return; }
 
   if (ui.screen == UI_HOME) {
+    // Party mode: tap the blob and he dashes to another corner; tap anywhere else and he reaches for it
+    if (partyBlob.active) {
+      if (partyBlob.contains(x, y)) {
+        if (!partyBlob.busy()) {
+          unsigned long now = millis();
+          botMode.registerInteraction();
+          partyBlob.poke(x, y, now);
+          botMode.face.transitionTo(EXPR_SURPRISED, 150);
+          botMode.shakeReacting = true;   // back to neutral once he's landed
+          botMode.shakeReactEnd = now + 1500;
+          #ifdef HAS_SOUND
+          botSounds.play(SEQ_TAP_BOOP);
+          #endif
+        }
+      } else {
+        partyBlob.tapAt(x, y, millis());
+        botMode.onTap();
+      }
+      return;
+    }
     botMode.onTap();
     return;
   }
@@ -1836,6 +1872,7 @@ void handleTouch() {
     ui.idleHintDone = false;
     if (inj == 1) { uiOnDown(ix, iy); uiOnTap(ix, iy); }
     else if (inj == 2) uiOnLongPress(ix, iy);
+    else if (inj == 7) botMode.onShake();   // stands in for a quick IMU shake
     else uiOnSwipe(inj - 2);
     ui.pressedId = UI_ID_NONE;
     ui.dragging = false;

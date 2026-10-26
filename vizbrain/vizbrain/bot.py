@@ -100,6 +100,19 @@ class Bot:
             params["brightness"] = max(0, min(255, int(brightness)))
         return self._get("/bot/base_leds/mode", params)
 
+    def party(self, on: bool | None = None, size: str | None = None) -> dict:
+        """Party mode: the ambient show takes the screen and the face is a blob
+        in a corner. Firmware without it answers 404, which _get reports as text."""
+        params: dict = {}
+        if on is not None:
+            params["v"] = 1 if on else 0
+        if size:
+            params["size"] = size[0].lower()
+        r = self._get("/bot/party", params)
+        if not isinstance(r, dict):
+            raise BotError("this vizBot's firmware has no party mode yet")
+        return r
+
     def sound(self, name: str):
         if name not in SOUNDS:
             raise BotError(f"unknown sound {name}")
