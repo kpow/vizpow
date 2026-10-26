@@ -2360,7 +2360,7 @@ void handleCaptiveRedirect() {
 // ---- Dev endpoints: drive and inspect the touch UI over WiFi --------------
 // GET /debug/screen → last rendered frame, raw RGB565 (LCD_WIDTH x LCD_HEIGHT,
 //                     byte-swapped as stored in the LovyanGFX sprite)
-// GET /debug/touch?g=tap|long|up|down|left|right&x=&y= → inject a gesture
+// GET /debug/touch?g=tap|long|up|down|left|right|shake&x=&y= → inject a gesture (shake: a quick IMU shake)
 volatile uint8_t uiInjectGesture = 0;
 volatile int16_t uiInjectX = 0, uiInjectY = 0;
 
@@ -2387,8 +2387,8 @@ void handleDebugScreen() {
 void handleDebugTouch() {
   String g = server.arg("g");
   uint8_t code = g == "tap" ? 1 : g == "long" ? 2 : g == "up" ? 3 : g == "down" ? 4 :
-                 g == "left" ? 5 : g == "right" ? 6 : 0;
-  if (!code) { server.send(400, "text/plain", "g=tap|long|up|down|left|right"); return; }
+                 g == "left" ? 5 : g == "right" ? 6 : g == "shake" ? 7 : 0;
+  if (!code) { server.send(400, "text/plain", "g=tap|long|up|down|left|right|shake"); return; }
   uiInjectX = server.arg("x").toInt();
   uiInjectY = server.arg("y").toInt();
   uiInjectGesture = code;

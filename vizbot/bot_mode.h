@@ -335,6 +335,7 @@ struct BotModeState {
   void onShake() {
     registerInteraction();
     face.transitionTo(EXPR_DIZZY, 150);
+    if (partyBlob.active) partyBlob.shake(millis());   // spikes all round
 
     #ifdef HAS_SOUND
     botSounds.play(SEQ_SHAKE_RATTLE);
@@ -813,7 +814,9 @@ void renderBotMode() {
   // Album art from vizbrain covers the face for a few seconds (album_art.h),
   // with his face still on, small, in a black circle in the top right corner.
   if (artRender()) {
-    const int16_t r = ART_FACE_R, ccx = LCD_WIDTH - r - 3, ccy = r + 3;
+    // In party mode the cover's face circle sits in his corner
+    uint8_t c = (partyWanted() && partyBlob.haveCorner) ? partyBlob.corner : 0;
+    const int16_t r = ART_FACE_R, ccx = partyRight(c) ? LCD_WIDTH - r - 3 : r + 3, ccy = partyTop(c) ? r + 3 : LCD_HEIGHT - r - 3;
     gfx->fillCircle(ccx, ccy, r + 2, ART_FACE_RING);
     gfx->fillCircle(ccx, ccy, r, BOT_COLOR_BG);
     // The face reaches further below its centre (mouth) than above (brows): nudge it up.
@@ -873,13 +876,19 @@ void renderBotMode() {
   // ---- Render the face ----
   // Party mode puts him in a corner as a blob, but only on the home screen:
   // with a sheet open the face is the usual mini preview.
-  bool party = partyWanted();
+  // Turned off, he keeps drawing until the exit morph has him back in the middle.
+  bool party = false;
   #ifdef TOUCH_UI_V2
-  if (uiHidesBotOverlays()) party = false;
+  bool partyPaused = uiHidesBotOverlays();
+  #else
+  bool partyPaused = false;
   #endif
-  if (party) {
+  if (!partyPaused && (partyWanted() || partyBlob.active)) {
+    if (partyWanted()) partyBlob.cancelExit(); else if (partyBlob.active) partyBlob.beginExit(frameNow);
     partyBlob.render(frameNow);
-  } else {
+    party = true;
+  }
+  if (!party) {
     partyBlob.leave(partyWanted());
     #ifdef TOUCH_UI_V2
     int16_t fcx, fcy;

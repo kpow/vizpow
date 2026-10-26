@@ -17,6 +17,12 @@
 // Party mode is a flag on the ambient scene (botBackgroundStyle 4), not a
 // style of its own. He picks his own corner; there is no corner setting.
 //
+// Turning it on, he blinks and hops from the middle of the screen into his
+// corner as the outline around his eyes shrinks into the drop; turning it off
+// runs that backwards. Shake him for spikes all round; tap for a spike fan,
+// tap the blob and he dashes to another corner. On the CoreS3 / Stackchan the
+// spikes pump to the music; the 1.69 has no mic, so it sends itself a pulse.
+//
 // The outline is a 120-point polygon whose radius is a function of angle,
 // filled row by row. Sample angles start at the spike attractor, so every
 // spike tip lands on a vertex and never flickers. Every value moves on a
@@ -32,6 +38,16 @@ uint16_t* lcdCanvasPixels();
 #define PARTY_SPIKES     9       // spike fan slots, 18° (6 vertices) apart
 #define PARTY_MAX_X      16      // edge crossings per row (spikes make concave rows)
 #define PARTY_EDGE_GAP   2       // spike envelope / shadow to the screen edge, px
+#define PARTY_MORPH_R    78.5f   // drop radius at the start of the morph: with squash 0.31 it is the
+#define PARTY_MORPH_J    0.31f   // 103 x 54 px ellipse of the ambient scene's 5 px stroke around the eyes
+
+// Overlays move out of his way (layout spec §3)
+#ifdef BOARD_ESP32S3_LCD_169
+  #define PARTY_CLOCK_INSET 22   // clock pill x from the side edge, clear of the rounded corner
+#else
+  #define PARTY_CLOCK_INSET 8
+#endif
+#define PARTY_TOAST_LOW_Y (LCD_HEIGHT - 44)   // toast slot while he's up top (236 on the 1.69: clears the swipe handle)
 
 bool    partyMode = false;       // NVS "party"
 uint8_t partySize = 1;           // NVS "pSize": 0 S, 1 M, 2 L
@@ -129,7 +145,7 @@ static void partyFillPoly(const float *vx, const float *vy, int n, Span span) {
 
 static float partyVX[PARTY_N], partyVY[PARTY_N], partyRR[PARTY_N], partyC[PARTY_N], partyS[PARTY_N];
 static float partyCos3[PARTY_N], partySin3[PARTY_N];   // cos/sin(i x 3°)
-static float partyStepC[3], partyStepS[3];             // cos/sin(n x 3°) for the n = 3, 4, 5 edge waves
+static float partyStepC[4], partyStepS[4];             // cos/sin(n x 3°) for the n = 3, 4, 5 edge waves and the n = 7 shiver
 static const float PARTY_SPK_LUT[3] = {1.0f, 0.41f, 0.09f};   // (1 - j/3)^2.2: sharp tip, concave flanks
 
 // Two ways to change corner. A poke is a startled dash: a short crouch, a fast
@@ -151,6 +167,9 @@ struct PartyBlob {
   BotSpring ox, oy;          // eye offset inside the drop (trails the body)
   BotSpring D;               // poke dent depth, px (<= 0)
   BotSpring Q;               // corner run progress 0..1
+  BotSpring P;               // enter / exit morph: 0 = the face, 1 = the drop in its corner
+  BotSpring hP;              // porcupine spikes all round (shake), px
+  BotSpring beatSm;          // smoothed beat envelope
   float pkL, pkJ, pkD;       // kick normalisers
 
   bool active, ready, haveCorner;
@@ -170,6 +189,11 @@ struct PartyBlob {
   uint8_t runTo;
   unsigned long goAt;
   float fromX, fromY, dstX, dstY;
+  // Morph, shake, fidgets, beat
+  uint8_t morph;                // 0 none, 1 entering, 2 exiting
+  unsigned long exitAt, porcUntil, shakeAt, shiverAt, nextFidget, padUntil, lastHop, lastPop;
+  uint8_t lastFidget;
+  float prevEnv;
 
   const PartyTier &tier() const { return PARTY_TIERS[partySize < 3 ? partySize : 1]; }
 
@@ -204,7 +228,8 @@ struct PartyBlob {
 
   void init() {
     for (int i = 0; i < PARTY_N; i++) { partyCos3[i] = cosf(i * 3 * DEG_TO_RAD); partySin3[i] = sinf(i * 3 * DEG_TO_RAD); }
-    for (int h = 0; h < 3; h++) { partyStepC[h] = cosf((h + 3) * 3 * DEG_TO_RAD); partyStepS[h] = sinf((h + 3) * 3 * DEG_TO_RAD); }
+    const int harm[4] = {3, 4, 5, 7};
+    for (int h = 0; h < 4; h++) { partyStepC[h] = cosf(harm[h] * 3 * DEG_TO_RAD); partyStepS[h] = sinf(harm[h] * 3 * DEG_TO_RAD); }
     wx.init(0, 0.55f, 0.75f); wy.init(0, 0.55f, 0.75f);
     J.init(0.05f, 2.2f, 0.45f); L.init(0, 1.9f, 0.42f); St.init(0, 4, 0.8f);
     al.init(0, 1.2f, 0.9f); F.init(0, 3, 0.8f);
@@ -212,6 +237,7 @@ struct PartyBlob {
     g.init(0, 1.5f, 0.9f); E.init(0, 1.2f, 1);
     ox.init(0, 2.4f, 0.5f); oy.init(0, 2.4f, 0.5f);
     D.init(0, 3.2f, 0.32f); Q.init(0, 1.5f, 0.85f);
+    P.init(1, 1.4f, 0.82f); hP.init(0, 5, 0.6f); beatSm.init(0, 3, 0.7f);
     pkL = botSpringPeak(1.9f, 0.42f);
     pkJ = botSpringPeak(2.2f, 0.45f);
     pkD = botSpringPeak(3.2f, 0.32f);
@@ -219,10 +245,12 @@ struct PartyBlob {
     ready = true;
   }
 
-  // First party frame: he picks a corner and lands there (the enter morph is phase 3)
+  // First party frame. When party mode has just started he picks a corner and
+  // morphs into it from the face; back from a sheet he is simply there again.
   void enter(unsigned long now) {
     if (!ready) init();
-    if (!haveCorner) { corner = random(4); haveCorner = true; }
+    bool fresh = !haveCorner;
+    if (fresh) { corner = random(4); haveCorner = true; }
     float hx, hy;
     home(corner, hx, hy);
     wx.snap(hx); wy.snap(hy); wTx = hx; wTy = hy;
@@ -239,15 +267,60 @@ struct PartyBlob {
     lastMs = now;
     nextWander = now + 1000;
     nextPulse = now + (unsigned long)eyeRnd(5000, 12000);
-    J.v += 0.14f / pkJ;              // land with a squash
-    field(alT, 0.7f, 300, now);      // and a spike burst
-    botEyes.blinkStart(now, BW_SWAP);
+    nextFidget = now + (unsigned long)eyeRnd(12000, 25000);
+    porcUntil = shakeAt = shiverAt = padUntil = lastHop = lastPop = 0;
+    hP.snap(0); beatSm.snap(0); prevEnv = 0;
+    botEyes.blinkStart(now, BW_SWAP);   // every swap between face and drop hides under a blink
     active = true;
+    if (fresh) {
+      morph = 1;
+      P.snap(0); P.t = 1;
+      J.snap(PARTY_MORPH_J);
+      wx.snap(BOT_FACE_CX); wy.snap(BOT_FACE_CY);
+      icx = BOT_FACE_CX; icy = BOT_FACE_CY;
+    } else {
+      morph = 0;
+      P.snap(1);
+      J.v += 0.14f / pkJ;              // land with a squash
+      field(alT, 0.7f, 300, now);      // and a spike burst
+    }
   }
+  // Party mode turned off: a beat reaching for the middle, then the hop back
+  void beginExit(unsigned long now) {
+    if (morph == 2) return;
+    if (run) { run = nullptr; }
+    morph = 2; exitAt = now;
+    field(alphaHome(), 0.6f, 200, now);
+    J.v += 0.10f / pkJ;
+    botEyes.padX = constrain((LCD_WIDTH / 2.0f - wx.x) / 40, -1.0f, 1.0f);
+    botEyes.padY = constrain((LCD_HEIGHT / 2.0f - wy.x) / 40, -1.0f, 1.0f);
+  }
+  // Turned back on mid-exit: head for the corner again
+  void cancelExit() {
+    if (morph != 2) return;
+    morph = 1; P.t = 1;
+    botEyes.padX = botEyes.padY = 0;
+  }
+  bool busy() const { return run || morph; }
+  void shake(unsigned long now) {
+    if (morph) return;
+    porcUntil = now + 450; shakeAt = now; tapT = 1;
+    botEyes.blinkStart(now, BW_SWAP);
+  }
+  // Morph shapes: radius, eye scale, and how much of the corner behaviour is on
+  float morphR() const {
+    float e = constrain(P.x, 0.0f, 1.0f);
+    return PARTY_MORPH_R + (tier().r - PARTY_MORPH_R) * eyeSmooth(min(1.0f, 2 * e));
+  }
+  float morphK() const {
+    float e = constrain(P.x, 0.0f, 1.0f);
+    return 1 + (tier().k - 1) * eyeSmooth(min(1.0f, 1.3f * e));
+  }
+  float morphOn() const { return eyeSmooth(min(1.0f, 2 * constrain(P.x, 0.0f, 1.0f))); }
   // keepCorner: party is only paused (a sheet is open), so he comes back to the same corner
   void leave(bool keepCorner) {
-    if (active && run) { botEyes.padX = botEyes.padY = 0; }
-    active = false;
+    if (active && (run || morph || padUntil)) { botEyes.padX = botEyes.padY = 0; }
+    active = false; run = nullptr; morph = 0;
     if (!keepCorner) haveCorner = false;
   }
 
@@ -256,7 +329,7 @@ struct PartyBlob {
 
   // Tap on the blob: dent where the finger lands, then dash to another corner
   void poke(int16_t x, int16_t y, unsigned long now) {
-    if (run) return;
+    if (busy()) return;
     thD = atan2f(y - icy, x - icx);
     D.v += -0.18f * tier().r / pkD;
     J.v += 0.16f / pkJ;
@@ -266,7 +339,7 @@ struct PartyBlob {
   }
   // Tap elsewhere: a spike fan reaches for the finger, and he hops
   void tapAt(int16_t x, int16_t y, unsigned long now) {
-    if (run) return;
+    if (busy()) return;
     field(atan2f(y - icy, x - icx), 1.0f, 500, now);
     L.v += 0.22f * tier().r / pkL;
     J.v -= 0.10f / pkJ;
@@ -287,8 +360,9 @@ struct PartyBlob {
   }
 
   // An event pulls a spike fan toward dir, at strength F, for holdMs
-  void field(float dir, float f, unsigned long holdMs, unsigned long now, bool free = false) {
+  void field(float dir, float f, unsigned long holdMs, unsigned long now, bool free = false, bool slow = false) {
     alT = free ? dir : clampInward(dir); fieldT = f; fieldUntil = now + holdMs; evAt = now;
+    F.f = slow ? 1.2f : 3;
     for (int k = 0; k < PARTY_SPIKES; k++) jit[k] = eyeRnd(0.85f, 1.15f);
   }
 
@@ -298,15 +372,20 @@ struct PartyBlob {
     lastMs = now;
     if (dt <= 0) return;
     t = eyeSecs(now);
-    const PartyTier &T = tier();
-    const float R = T.r;
+    if (morph) stepMorph(now, dt);
+    const float R = morphR();
+    bool free = !run && !morph;   // settled in his corner
 
     // Corner run: crouch for the lead-in, then follow an arc to the new corner's home
     if (run) stepRun(now, dt);
-    else if (eyeReached(now, nextRoam)) roam(now);
+    else if (free && eyeReached(now, nextRoam)) roam(now);
+    free = !run && !morph;
+
+    if (padUntil && eyeReached(now, padUntil)) { padUntil = 0; if (!run && !morph) botEyes.padX = botEyes.padY = 0; }
+    if (free && eyeReached(now, nextFidget)) fidget(now);
 
     // Wander: a new spot in the corner box every 3.5-8 s; half the long moves are a scoot hop
-    if (!run && eyeReached(now, nextWander)) {
+    if (free && eyeReached(now, nextWander)) {
       float x0, x1, y0, y1;
       box(corner, x0, x1, y0, y1);
       float nx = eyeRnd(min(x0, x1), max(x0, x1)), ny = eyeRnd(min(y0, y1), max(y0, y1));
@@ -314,16 +393,32 @@ struct PartyBlob {
       wTx = nx; wTy = ny;
       nextWander = now + (unsigned long)eyeRnd(3500, 8000);
     }
-    if (!run || !going) { wx.step(wTx, dt); wy.step(wTy, dt); }
+    if (!morph && (!run || !going)) { wx.step(wTx, dt); wy.step(wTy, dt); }
 
-    // No mic on this board in phase 2: a spike fan every 5-12 s keeps the drop alive
-    if (!run && eyeReached(now, nextPulse)) {
+    // Music: on the CoreS3 / Stackchan the spikes pump on the beat (smoothed, so
+    // fast tempos pump instead of strobing). Without a mic, a spike fan every 5-12 s.
+    #ifdef TARGET_CORES3
+    bool heard = audioSpectrum.alive;
+    float env = heard ? audioSpectrum.beatEnv : 0, bass = heard ? constrain(audioSpectrum.bass, 0.0f, 1.0f) : 0;
+    #else
+    bool heard = false;
+    float env = 0, bass = 0;
+    #endif
+    beatSm.step(env, dt);
+    if (heard) {
+      if (free && env > 0.9f && prevEnv < 0.5f) {
+        field(alphaHome(), 0.3f + 0.5f * bass, 120, now);
+        if (bass > 0.6f && now - lastHop > 450) { L.v += 0.06f * R / pkL; lastHop = now; }
+        if (bass > 0.7f && now - lastPop > 600) { botEyes.popS.v += 0.03f / botEyes.pkPopS; lastPop = now; }
+      }
+    } else if (free && eyeReached(now, nextPulse)) {
       field(alphaHome() + eyeRnd(-40, 40) * DEG_TO_RAD, 0.5f, (unsigned long)eyeRnd(500, 900), now);
       nextPulse = now + (unsigned long)eyeRnd(5000, 12000);
     }
+    prevEnv = env;
 
     // Gaze reach: 40 % of big saccades send a small fan where he looks
-    if (hypotf(botEyes.tx - prevTx, botEyes.ty - prevTy) > 0.07f && eyeReached(now, fieldUntil) && random(10) < 4)
+    if (free && hypotf(botEyes.tx - prevTx, botEyes.ty - prevTy) > 0.07f && eyeReached(now, fieldUntil) && random(10) < 4)
       field(atan2f(botEyes.ty, botEyes.tx), 0.25f, 400, now);
     prevTx = botEyes.tx; prevTy = botEyes.ty;
 
@@ -341,8 +436,14 @@ struct PartyBlob {
       if (s.x < -0.05f * R) { s.x = -0.05f * R; s.v = 0; }   // the snap-back dimple stays shallow
     }
 
+    // Porcupine: spikes all round for 450 ms after a shake, then the snap back
+    bool porc = !eyeReached(now, porcUntil);
+    hP.f = porc ? 5 : 4.5f; hP.z = porc ? 0.6f : 0.38f;
+    hP.step(porc ? 0.22f * R : 0, dt);
+
     // Squash, hop, stretch. The lift spring's undershoot is the landing splat.
-    float jT = 0.05f;
+    // Mid-morph the drop is the wide ellipse of the stroke around his eyes.
+    float jT = 0.05f + (PARTY_MORPH_J - 0.05f) * (1 - morphOn());
     if (L.x < 0) jT += -L.x / R * 0.9f;
     J.step(jT, dt);
     L.step(0, dt);
@@ -351,7 +452,7 @@ struct PartyBlob {
     St.step(0.10f * constrain(speed / (2.5f * R), 0.0f, 1.0f), dt);
     tapT *= expf(-dt / 0.6f);
     D.step(0, dt);
-    E.step(run && going ? 0.8f : constrain(speed / (3 * R) + 0.6f * tapT, 0.0f, 1.0f), dt);
+    E.step((run && going) || morph ? 0.8f : constrain(speed / (3 * R) + 0.6f * tapT + 0.25f * beatSm.x, 0.0f, 1.0f), dt);
 
     // Bulge toward the gaze, or toward the spikes while a field is up
     float gx = botEyes.gxOut, gy = botEyes.gyOut;
@@ -361,8 +462,67 @@ struct PartyBlob {
 
     // Eyes trail the body, look with the whole face, ride the squash and the breath
     B = 1 + 0.04f * sinf(TWO_PI * 0.21f * t);
-    ox.step(0.20f * R * gx / 0.35f, dt);
-    oy.step(0.15f * R * gy / 0.25f + 0.6f * J.x * R - 0.3f * (B - 1) * R, dt);
+    // (mid-morph they stay centred, where the face's eyes are)
+    float on = morphOn();
+    ox.step(0.20f * R * gx / 0.35f * on, dt);
+    oy.step((0.15f * R * gy / 0.25f + 0.6f * J.x * R - 0.3f * (B - 1) * R) * on, dt);
+  }
+
+  // The hop between the face's place and his corner, along an arc that rises a
+  // quarter of the way, while the outline shrinks (or grows) and the eyes scale
+  void stepMorph(unsigned long now, float dt) {
+    if (morph == 2 && now - exitAt > 200 && P.t != 0) {   // anticipation over: launch
+      J.v += -0.12f / pkJ; L.v += 0.10f * tier().r / pkL;
+      P.t = 0;
+    }
+    P.step(P.t, dt);
+    float hx, hy;
+    home(corner, hx, hy);
+    float p = constrain(P.x, 0.0f, 1.03f), cx = BOT_FACE_CX, cy = BOT_FACE_CY;
+    float mx = (cx + hx) / 2, my = (cy + hy) / 2 - 0.25f * hypotf(hx - cx, hy - cy);
+    float x = (1 - p) * (1 - p) * cx + 2 * (1 - p) * p * mx + p * p * hx;
+    float y = (1 - p) * (1 - p) * cy + 2 * (1 - p) * p * my + p * p * hy;
+    wx.v = (x - wx.x) / dt; wy.v = (y - wy.x) / dt;
+    wx.x = wx.t = x; wy.x = wy.t = y;
+    wTx = hx; wTy = hy;
+    if (morph == 1 && P.x > 0.97f) {   // landed in the corner
+      morph = 0;
+      J.v += 0.14f / pkJ;
+      field(alphaHome(), 0.7f, 300, now);
+      botEyes.blinkStart(now, BW_SWAP);
+      nextWander = now + 1000;
+    } else if (morph == 2 && P.t == 0 && P.x < 0.03f) {   // back to the face
+      morph = 0;
+      active = false; haveCorner = false;
+      botEyes.padX = botEyes.padY = 0;
+      botEyes.blinkStart(now, BW_SWAP);
+    }
+  }
+
+  // Idle fidgets every 12-25 s, never the same one twice running
+  void fidget(unsigned long now) {
+    uint8_t f;
+    do { f = random(3); } while (f == lastFidget);
+    lastFidget = f;
+    nextFidget = now + (unsigned long)eyeRnd(12000, 25000);
+    if (f == 0) {   // probe: one slow spike reaches out, and he looks along it
+      float a = alphaHome() + eyeRnd(-50, 50) * DEG_TO_RAD;
+      field(a, 0.6f, 800, now, false, true);
+      look(cosf(a), sinf(a), 1200, now);
+    } else if (f == 1) {   // shiver: a quick n = 7 ripple round the rim
+      shiverAt = now;
+    } else {   // scoot: a hop to a new spot in his corner, with a glance that way
+      float x0, x1, y0, y1;
+      box(corner, x0, x1, y0, y1);
+      wTx = eyeRnd(min(x0, x1), max(x0, x1)); wTy = eyeRnd(min(y0, y1), max(y0, y1));
+      L.v += 0.10f * tier().r / pkL; J.v -= 0.06f / pkJ;
+      look(wTx > wx.x ? 0.9f : -0.9f, 0, 700, now);
+      nextWander = now + (unsigned long)eyeRnd(3500, 8000);
+    }
+  }
+  void look(float x, float y, unsigned long ms, unsigned long now) {
+    botEyes.padX = constrain(x, -1.0f, 1.0f); botEyes.padY = constrain(y, -1.0f, 1.0f);
+    padUntil = now + ms;
   }
 
   void stepRun(unsigned long now, float dt) {
@@ -400,13 +560,19 @@ struct PartyBlob {
   // Per-frame constants of the radius function
   float a3, a4, a5, w3, w4, w5, cPhi, sPhi, cBul, sBul, cDent, sDent;
   void prepShape(float R) {
-    float A = (1 + 1.5f * E.x) * R;
+    float A = (1 + 1.5f * E.x) * R * min(1.0f, 2 * constrain(P.x, 0.0f, 1.0f));   // no wobble while it's still the face's outline
     a3 = A * 0.045f * (0.6f + 0.4f * sinf(TWO_PI * 0.050f * t + ph[3]));   // edge waves n = 3, 4, 5, each
     a4 = A * 0.030f * (0.6f + 0.4f * sinf(TWO_PI * 0.071f * t + ph[4]));   // with a slow amplitude drift so
     a5 = A * 0.018f * (0.6f + 0.4f * sinf(TWO_PI * 0.037f * t + ph[5]));   // the pattern never repeats
     w3 = TWO_PI * 0.13f * t + ph[0]; w4 = -TWO_PI * 0.19f * t + ph[1]; w5 = TWO_PI * 0.29f * t + ph[2];
     cPhi = cosf(phiV); sPhi = sinf(phiV); cBul = cosf(bulgeA); sBul = sinf(bulgeA); cDent = cosf(thD); sDent = sinf(thD);
+    float sp = (millis() - shiverAt) / 600.0f;   // shiver: n = 7 at 1.1 Hz under a 600 ms sin² envelope
+    a7 = (shiverAt && sp < 1) ? 0.02f * R * sq(sinf(PI * sp)) : 0;
+    w7 = TWO_PI * 1.1f * t;
+    floorOn = morphOn() > 0.99f;
   }
+  float a7, w7;
+  bool floorOn;
 
   // Radius at angle th (c, s = its cos and sin), before the spike fan
   float radiusAt(float th, float c, float s, float R) const {
@@ -421,6 +587,8 @@ struct PartyBlob {
     float cd = c * cDent + s * sDent;
     if (cd > 0.825f && D.x < -0.05f) { float u = (cd - 0.825f) / 0.175f; r += D.x * u * u; }
     // Floor: the eyes reach 2.47 R on a mood pop, so the sides never pull in past 0.97 r
+    // (mid-morph the drop is the stroke's flat ellipse, so no floor then)
+    if (!floorOn) return r;
     float fl = fabsf(s) < 0.5736f ? 0.97f : 0.85f;   // within 35° of horizontal
     return max(r, fl * R);
   }
@@ -430,15 +598,17 @@ struct PartyBlob {
   // sin and cos at θ), so the whole outline costs 6 sinf/cosf, not 360.
   void buildOutline(float R) {
     float a0 = al.x, ca = cosf(a0), sa = sinf(a0);
-    float ws[3], wc[3];
-    const float amp[3] = {a3, a4, a5}, w[3] = {w3, w4, w5};
-    for (int h = 0; h < 3; h++) { ws[h] = sinf((h + 3) * a0 + w[h]); wc[h] = cosf((h + 3) * a0 + w[h]); }
+    float ws[4], wc[4];
+    const float amp[4] = {a3, a4, a5, a7}, w[4] = {w3, w4, w5, w7};
+    const int harm[4] = {3, 4, 5, 7};
+    int nh = a7 > 0 ? 4 : 3;
+    for (int h = 0; h < nh; h++) { ws[h] = sinf(harm[h] * a0 + w[h]); wc[h] = cosf(harm[h] * a0 + w[h]); }
     for (int i = 0; i < PARTY_N; i++) {
       float c = ca * partyCos3[i] - sa * partySin3[i];
       float s = sa * partyCos3[i] + ca * partySin3[i];
       partyC[i] = c; partyS[i] = s;
       float wob = 0;
-      for (int h = 0; h < 3; h++) {
+      for (int h = 0; h < nh; h++) {
         wob += amp[h] * ws[h];
         float s2 = ws[h] * partyStepC[h] + wc[h] * partyStepS[h];
         wc[h] = wc[h] * partyStepC[h] - ws[h] * partyStepS[h];
@@ -452,6 +622,15 @@ struct PartyBlob {
       if (fabsf(hk) < 0.05f) continue;
       int idx = ((k - 4) * 6 + PARTY_N) % PARTY_N;
       for (int d = -2; d <= 2; d++) partyRR[(idx + d + PARTY_N) % PARTY_N] += hk * PARTY_SPK_LUT[abs(d)];
+    }
+    // Porcupine: 12 spikes every 30°; the ones pointing at a screen edge stay short
+    if (hP.x > 0.05f) {
+      float h = alphaHome();
+      for (int j = 0; j < 12; j++) {
+        int idx = j * 10;
+        float len = fabsf(wrapPi(a0 + idx * 3 * DEG_TO_RAD - h)) > 100 * DEG_TO_RAD ? 0.4f : 1.0f;
+        for (int d = -2; d <= 2; d++) partyRR[(idx + d + PARTY_N) % PARTY_N] += hP.x * len * PARTY_SPK_LUT[abs(d)];
+      }
     }
   }
   // The outline polygon around (cx, cy), grown outward by grow px
@@ -472,12 +651,14 @@ struct PartyBlob {
     stage(0);
 
     const PartyTier &T = tier();
-    const float R = T.r;
+    const float R = morphR(), on = morphOn();
     prepShape(R);
     uint16_t *buf = lcdCanvasPixels();   // null on an 8-bit canvas: no shadow or rim then
 
     // One integer centre for body, shadow and eyes, moved only past 0.6 px so nothing shimmers
-    float fcx = wx.x, fcy = wy.x - L.x + J.x * R;   // planted bottom: squash keeps the base on the floor
+    float fcx = wx.x, fcy = wy.x - L.x + J.x * R * on;   // planted bottom: squash keeps the base on the floor
+    float st = (now - shakeAt) / 1000.0f;   // shake: a sideways jiggle at 5.7 Hz dying away
+    if (shakeAt && st < 1.5f) fcx += 0.12f * R * expf(-5 * st) * sinf(TWO_PI * 5.7f * st);
     if (fabsf(fcx - icx) > 0.6f) icx = (int16_t)lroundf(fcx);
     if (fabsf(fcy - icy) > 0.6f) icy = (int16_t)lroundf(fcy);
 
@@ -490,7 +671,7 @@ struct PartyBlob {
 
     buildOutline(R);
     stage(1);
-    if (buf) drawShadow(buf, R);
+    if (buf && P.x > 0.6f) drawShadow(buf, R);
     stage(2);
     if (buf) drawRimAndBody(buf);
     else {
@@ -498,17 +679,17 @@ struct PartyBlob {
       partyFillPoly(partyVX, partyVY, PARTY_N, [&](int y, int xa, int xb) { gfx->drawFastHLine(xa, y, xb - xa + 1, BOT_COLOR_BG); });
     }
     stage(3);
-    drawSheen(R);
+    if (P.x > 0.8f) drawSheen(R);
     stage(4);
 
     // Eyes: the firmware model, no mouth, clamped inside the drop
-    float k = T.k, hw = 2.04f * 48 * k, hh = 1.22f * 48 * k;
+    float k = morphK(), hw = 2.04f * 48 * k, hh = 1.22f * 48 * k;
     float ex = ox.x, ey = oy.x;
     float ax = max(1.0f, R * (1 + J.x) - hw - 3), ay = max(1.0f, R * (1 - J.x) - hh - 3), q = hypotf(ex / ax, ey / ay);
-    if (q > 1) { ex /= q; ey /= q; }
+    if (q > 1 && on > 0.99f) { ex /= q; ey /= q; }
     if (fabsf(ex - iox) > 0.6f) iox = (int16_t)lroundf(ex);
     if (fabsf(ey - ioy) > 0.6f) ioy = (int16_t)lroundf(ey);
-    botEyes.render(icx + iox, icy + ioy, k, botFaceColor, false, now, T.brows);
+    botEyes.render(icx + iox, icy + ioy, k, botFaceColor, false, now, T.brows || P.x < 0.9f);
     stage(5);
 
     uint32_t us = micros() - t0;

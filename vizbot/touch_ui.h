@@ -148,7 +148,7 @@ static const char* const uiExprNames[BOT_NUM_EXPRESSIONS] = {
 };
 
 // Injected gestures from the dev endpoint /debug/touch (web_server.h)
-extern volatile uint8_t uiInjectGesture;   // 0 none, 1 tap, 2 long, 3..6 swipe up/down/left/right
+extern volatile uint8_t uiInjectGesture;   // 0 none, 1 tap, 2 long, 3..6 swipe up/down/left/right, 7 shake
 extern volatile int16_t uiInjectX, uiInjectY;
 
 // ---- State ----------------------------------------------------------------
@@ -496,9 +496,11 @@ static void uiDrawToast() {
   int16_t w = uiTextW(ui.toast, &fonts::DejaVu12) + 28;
   if (w < 84) w = 84;
   if (w > 216) w = 216;
-  UiRect r = {(int16_t)(UI_CX - w / 2), 6, w, 24};
+  // Party mode with him up top: the toast drops to the bottom band, clear of the blob
+  int16_t y = (ui.screen == UI_HOME && partyBlob.active && partyTop(partyBlob.corner)) ? PARTY_TOAST_LOW_Y : 6;
+  UiRect r = {(int16_t)(UI_CX - w / 2), y, w, 24};
   uiPill(r, ui.toastHue, ui.toastHue);
-  uiText(ui.toast, UI_CX, 18, &fonts::DejaVu12, UI_C_BG, UI_MC, true);
+  uiText(ui.toast, UI_CX, y + 12, &fonts::DejaVu12, UI_C_BG, UI_MC, true);
 }
 
 static void uiDrawBackPill(const char* label, uint16_t hue, uint16_t bg, int16_t x = -1) {
@@ -1727,7 +1729,7 @@ static void uiOnTap(int16_t x, int16_t y) {
     // Party mode: tap the blob and he dashes to another corner; tap anywhere else and he reaches for it
     if (partyBlob.active) {
       if (partyBlob.contains(x, y)) {
-        if (!partyBlob.running()) {
+        if (!partyBlob.busy()) {
           unsigned long now = millis();
           botMode.registerInteraction();
           partyBlob.poke(x, y, now);
@@ -1870,6 +1872,7 @@ void handleTouch() {
     ui.idleHintDone = false;
     if (inj == 1) { uiOnDown(ix, iy); uiOnTap(ix, iy); }
     else if (inj == 2) uiOnLongPress(ix, iy);
+    else if (inj == 7) botMode.onShake();   // stands in for a quick IMU shake
     else uiOnSwipe(inj - 2);
     ui.pressedId = UI_ID_NONE;
     ui.dragging = false;
