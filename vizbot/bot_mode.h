@@ -6,6 +6,7 @@
 #include "layout.h"
 #include "bot_faces.h"
 #include "bot_eyes.h"
+#include "party_blob.h"
 #include "bot_sayings.h"
 #include "bot_overlays.h"
 #ifdef HAS_BASE_LEDS
@@ -870,19 +871,28 @@ void renderBotMode() {
   }
 
   // ---- Render the face ----
+  // Party mode puts him in a corner as a blob, but only on the home screen:
+  // with a sheet open the face is the usual mini preview.
+  bool party = partyWanted();
   #ifdef TOUCH_UI_V2
-  {
+  if (uiHidesBotOverlays()) party = false;
+  #endif
+  if (party) {
+    partyBlob.render(frameNow);
+  } else {
+    partyBlob.leave();
+    #ifdef TOUCH_UI_V2
     int16_t fcx, fcy;
     float fs;
     uiFaceTransform(fcx, fcy, fs);
     renderBotFaceAt(botMode.face, fcx, fcy, fs, bgColor);
+    #else
+    renderBotFace(botMode.face, bgColor);
+    #endif
   }
-  #else
-  renderBotFace(botMode.face, bgColor);
-  #endif
 
-  // ---- Sleeping: draw Zzz animation ----
-  if (botMode.state == BOT_SLEEPING) {
+  // ---- Sleeping: draw Zzz animation (not in party mode: it's placed for the centred face) ----
+  if (botMode.state == BOT_SLEEPING && !party) {
     unsigned long now = millis();
     float t = (float)(now % 3000) / 3000.0f;
 
@@ -909,7 +919,7 @@ void renderBotMode() {
   if (!uiHidesBotOverlays())
   #endif
   {
-    botMode.speechBubble.render();
+    if (!party) botMode.speechBubble.render();   // no bubbles in party mode: the show is the point
     botMode.notification.render();
     botMode.timeOverlay.render();
   }

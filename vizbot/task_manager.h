@@ -81,6 +81,7 @@ enum CommandType : uint8_t {
   CMD_MESH_SCAN,
   CMD_SET_PERSONALITY_LIST,
   CMD_PLAY_SEQUENCE,
+  CMD_SET_PARTY,
 };
 
 // ~100-byte command payload — fits all command types including a full MAX_SAY_LEN phrase
@@ -178,6 +179,14 @@ void cmdSetAutoCycle(bool enabled) {
   Command cmd;
   cmd.type = CMD_SET_AUTOCYCLE;
   cmd.u8val = enabled ? 1 : 0;
+  pushCommand(cmd);
+}
+
+// Party mode on/off (0, 1, or 0xFF to leave it) and size (0-2, or 0xFF to leave it)
+void cmdSetParty(uint8_t on, uint8_t size) {
+  Command cmd;
+  cmd.type = CMD_SET_PARTY;
+  cmd.u16val = (uint16_t)on | ((uint16_t)size << 8);
   pushCommand(cmd);
 }
 
@@ -334,6 +343,17 @@ void drainCommandQueue() {
         autoCycle = (cmd.u8val == 1);
         markSettingsDirty();
         break;
+      case CMD_SET_PARTY: {
+        uint8_t on = cmd.u16val & 0xFF, size = cmd.u16val >> 8;
+        if (on <= 1) {
+          partyMode = (on == 1);
+          // Party mode only shows on the ambient scene, so turning it on from Black switches to it
+          if (partyMode && botBackgroundStyle != 4) setBotBackgroundStyle(4);
+        }
+        if (size <= 2) partySize = size;
+        markSettingsDirty();
+        break;
+      }
       case CMD_SET_HIRES_MODE:
         if ((cmd.u8val == 1) != hiResMode) {
           toggleHiResMode();  // handles screen clear + markSettingsDirty

@@ -1710,6 +1710,26 @@ static void uiOnTap(int16_t x, int16_t y) {
   if (infoMode.active) { infoMode.nextPage(); return; }
 
   if (ui.screen == UI_HOME) {
+    // Party mode: tap the blob and he dashes to another corner; tap anywhere else and he reaches for it
+    if (partyBlob.active) {
+      if (partyBlob.contains(x, y)) {
+        if (!partyBlob.running()) {
+          unsigned long now = millis();
+          botMode.registerInteraction();
+          partyBlob.poke(x, y, now);
+          botMode.face.transitionTo(EXPR_SURPRISED, 150);
+          botMode.shakeReacting = true;   // back to neutral once he's landed
+          botMode.shakeReactEnd = now + 1500;
+          #ifdef HAS_SOUND
+          botSounds.play(SEQ_TAP_BOOP);
+          #endif
+        }
+      } else {
+        partyBlob.tapAt(x, y, millis());
+        botMode.onTap();
+      }
+      return;
+    }
     botMode.onTap();
     return;
   }
