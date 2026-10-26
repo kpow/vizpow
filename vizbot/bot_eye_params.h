@@ -4,8 +4,8 @@
 // ============================================================================
 // Bot Eye Parameters (generated: do not edit by hand)
 // ============================================================================
-// Source: vizBot eye lab round 4 baseline + Kevin saved tweaks, frozen 2026-10-24
-// Regenerate: python3 tools/gen_eye_params.py tools/eye_params_r4.json > vizbot/bot_eye_params.h
+// Source: eyelab/faces (the vizBot eye lab face files)
+// Regenerate: python3 tools/gen_eye_params.py eyelab/faces > vizbot/bot_eye_params.h
 //
 // One parametric eye per side, drawn as one vertical span per pixel column.
 // Sizes are x R (eye half-width). [0] = screen-left eye, [1] = screen-right.
