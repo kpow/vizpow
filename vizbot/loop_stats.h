@@ -6,7 +6,7 @@
 // ============================================================================
 // Loop timing for GET /state — the real frame rate, not the 33 ms target
 // ============================================================================
-// period: loop start to the next loop start (work + BOT_FRAME_DELAY_MS + any
+// period: loop start to the next loop start (work + the pacing wait + any
 // time the scheduler takes away). work: loop start to just before the delay.
 // push: one canvas pushSprite to the panel. fps counts loops, pushFps counts
 // frames that actually reached the screen. Reading starts a fresh window.

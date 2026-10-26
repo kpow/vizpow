@@ -144,8 +144,8 @@ volatile bool meshScanRequested = false;
 unsigned long shakeStartTime = 0;        // When continuous shaking began
 bool shakeSustainedTriggered = false;    // Whether sustained shake already fired
 uint8_t shakeAboveCount = 0;            // Total frames above threshold
-uint8_t shakeGapFrames = 0;             // Frames below threshold (grace period)
-#define SHAKE_GAP_TOLERANCE 6           // Allow up to 6 frames (~200ms) below threshold
+unsigned long shakeGapStart = 0;         // When the reading dipped below threshold (0 = not in a gap)
+#define SHAKE_GAP_TOLERANCE_MS 460      // Grace below threshold: the 6 frames it was tuned on at the old 77 ms loop
 
 // Fisher-Yates shuffle
 void shuffleArray(uint8_t* arr, uint8_t size) {
@@ -505,6 +505,7 @@ void setup() {
 }
 
 void loop() {
+  uint32_t loopStartMs = millis();
   loopStatsBegin();
 
   // Only read IMU if it initialized successfully
@@ -524,7 +525,7 @@ void loop() {
         shakeAboveCount = 0;
       }
       shakeAboveCount++;
-      shakeGapFrames = 0;  // Reset gap counter on any above-threshold frame
+      shakeGapStart = 0;  // Any above-threshold frame ends the gap
 
       // Check if sustained shake threshold met (~2 seconds of shaking)
       if (!shakeSustainedTriggered && shakeAboveCount >= 8 &&
@@ -550,8 +551,8 @@ void loop() {
       }
     } else if (shakeStartTime > 0) {
       // Below threshold but we were shaking — allow brief gaps
-      shakeGapFrames++;
-      if (shakeGapFrames > SHAKE_GAP_TOLERANCE) {
+      if (!shakeGapStart) shakeGapStart = millis();
+      if (millis() - shakeGapStart > SHAKE_GAP_TOLERANCE_MS) {
         // Shake truly ended — if it was short, treat as quick shake (dizzy)
         if (!shakeSustainedTriggered && !infoMode.active) {
           bool quiet = false;
@@ -566,7 +567,7 @@ void loop() {
         }
         shakeStartTime = 0;
         shakeAboveCount = 0;
-        shakeGapFrames = 0;
+        shakeGapStart = 0;
         shakeSustainedTriggered = false;
       }
     }
@@ -741,5 +742,9 @@ void loop() {
   #endif
 
   loopStatsWorkDone();
-  delay(BOT_FRAME_DELAY_MS);
+  // Deadline pacing: wait out only what is left of the frame, so a slow frame
+  // isn't made slower by a fixed delay. delay(1) at least, so the idle task
+  // on this core still runs.
+  uint32_t workMs = millis() - loopStartMs;
+  delay(workMs + 1 < BOT_FRAME_PERIOD_MS ? BOT_FRAME_PERIOD_MS - workMs : 1);
 }

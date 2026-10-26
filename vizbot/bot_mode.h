@@ -49,7 +49,7 @@ enum BotState : uint8_t {
 // ============================================================================
 
 #define BOT_WAKE_THRESHOLD     1.8f      // Acceleration magnitude to wake from sleep
-#define BOT_FRAME_DELAY_MS     33        // ~30 FPS target
+#define BOT_FRAME_PERIOD_MS    33        // loop frame period target (~30 FPS); vizbot.ino waits out what is left
 #define BOT_IMU_GAZE           0         // 1 = tilt steers the gaze (eye model look pad); off since cc0ee4d
 #define BOT_PENDANT_REFRESH_MS 1000      // pendant mode redraws a resting face at least this often
 
