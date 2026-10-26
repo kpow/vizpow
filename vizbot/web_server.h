@@ -2385,6 +2385,40 @@ void handleDebugScreen() {
   botRenderHold = false;
 }
 
+#if defined(BOARD_ESP32S3_LCD_169) || defined(BOARD_ESP32S3_LCD_13)
+// GET /debug/panelcheck → reads the panel's GRAM back (slow read clock) and
+// compares it with the canvas that was last pushed, to prove the write clock
+// lands every pixel. Pauses rendering for the ~0.2 s it takes.
+void handleDebugPanelCheck() {
+  extern const uint16_t* lcdCanvasBuffer();
+  const uint16_t* buf = lcdCanvasBuffer();
+  if (!buf) { server.send(503, "text/plain", "no canvas"); return; }
+  extern volatile bool botRenderHold, botFrameInProgress;
+  botRenderHold = true;
+  for (int i = 0; i < 50 && botFrameInProgress; i++) delay(2);
+  delay(5);
+  static uint16_t row[LCD_WIDTH];
+  uint32_t same = 0, swapped = 0, badRows = 0, firstBadY = 0xFFFF, zeros = 0;
+  for (int y = 0; y < LCD_HEIGHT; y++) {
+    _lcd_display.readRect(0, y, LCD_WIDTH, 1, row);
+    const uint16_t* want = buf + y * LCD_WIDTH;
+    uint32_t rowSame = 0;
+    for (int x = 0; x < LCD_WIDTH; x++) {
+      if (row[x] == want[x]) rowSame++;
+      if (row[x] == (uint16_t)((want[x] << 8) | (want[x] >> 8))) swapped++;
+      if (row[x] == 0) zeros++;
+    }
+    same += rowSame;
+    if (rowSame != LCD_WIDTH) { badRows++; if (firstBadY == 0xFFFF) firstBadY = y; }
+  }
+  botRenderHold = false;
+  server.send(200, "application/json",
+    "{\"pixels\":" + String(LCD_WIDTH * LCD_HEIGHT) + ",\"match\":" + String(same) +
+    ",\"matchSwapped\":" + String(swapped) + ",\"zeros\":" + String(zeros) +
+    ",\"badRows\":" + String(badRows) + ",\"firstBadY\":" + String(firstBadY) + "}");
+}
+#endif
+
 void handleDebugTouch() {
   String g = server.arg("g");
   uint8_t code = g == "tap" ? 1 : g == "long" ? 2 : g == "up" ? 3 : g == "down" ? 4 :
@@ -2617,6 +2651,9 @@ void setupWebServer() {
   #endif
   #ifdef TOUCH_UI_V2
   server.on("/debug/screen", handleDebugScreen);
+#if defined(BOARD_ESP32S3_LCD_169) || defined(BOARD_ESP32S3_LCD_13)
+  server.on("/debug/panelcheck", handleDebugPanelCheck);
+#endif
   server.on("/debug/touch", handleDebugTouch);
   #endif
   server.on("/brightness", handleBrightness);

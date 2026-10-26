@@ -210,7 +210,11 @@ public:
       auto cfg = _bus_instance.config();
       cfg.spi_host    = SPI2_HOST;
       cfg.spi_mode    = 0;
+#ifdef BOARD_ESP32S3_LCD_169
+      cfg.freq_write  = 80000000;    // 80MHz: halves the 30 ms full-frame push (checked with GET /debug/panelcheck)
+#else
       cfg.freq_write  = 40000000;    // 40MHz SPI clock
+#endif
       cfg.freq_read   = 16000000;
       cfg.spi_3wire   = true;
       cfg.use_lock    = true;
