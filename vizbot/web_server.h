@@ -1290,6 +1290,7 @@ void handleState() {
                 "},\"wled\":" + getWledStatusJson() +
                 ",\"wledEmoji\":" + getWledEmojiJson() +
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
+                ",\"loop\":" + loopStatsJson() +                  // real fps, loop work and panel push µs since the last read
                 ",\"faceRender\":" + botFaceRenderStatsJson() +   // µs per face render since the last read
                 ",\"party\":{\"on\":" + (partyMode ? "true" : "false") +
                   ",\"size\":\"" + String("sml"[partySize % 3]) + "\"" +

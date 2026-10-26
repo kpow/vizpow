@@ -37,6 +37,7 @@
 #include "config.h"
 #include "device_id.h"  // Per-device unique SSID + mDNS hostname (from eFuse MAC)
 #include "palettes.h"
+#include "loop_stats.h"     // Real loop/push timing for GET /state (must come before display_lcd.h)
 #include "display_lcd.h"    // Must come before any file that calls gfx->methods() (defines DisplayProxy)
 #include "buzzer.h"         // 1.69 passive piezo (LEDC square wave); no-op without BUZZER_PIN
 #include "battery_adc.h"    // 1.69 battery level on ADC1 (must come before the touch UI); no-op without BAT_ADC_PIN
@@ -504,6 +505,8 @@ void setup() {
 }
 
 void loop() {
+  loopStatsBegin();
+
   // Only read IMU if it initialized successfully
   if (sysStatus.imuReady) {
     readIMU();
@@ -737,5 +740,6 @@ void loop() {
   facesChordPoll();
   #endif
 
+  loopStatsWorkDone();
   delay(BOT_FRAME_DELAY_MS);
 }

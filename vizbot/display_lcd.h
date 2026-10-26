@@ -162,7 +162,9 @@ struct DisplayProxy {
   }
   void flushCanvas() {
     if (_dp_canvas && _dp_canvas_active) {
+      uint32_t pushT0 = micros();
       _dp_canvas->pushSprite(0, 0);
+      loopStatsPush(micros() - pushT0);
     }
     _dp_canvas_active = false;
   }
@@ -386,7 +388,9 @@ struct DisplayProxy {
           }
         }
       }
+      uint32_t pushT0 = micros();
       _dp_canvas->pushSprite(0, 0);
+      loopStatsPush(micros() - pushT0);
     }
     _dp_canvas_active = false;
   }
