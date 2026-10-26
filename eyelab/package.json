@@ -7,7 +7,8 @@
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx scripts/seed-faces.ts"
+    "seed": "tsx scripts/seed-faces.ts",
+    "parity": "tsx parity/cli.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",

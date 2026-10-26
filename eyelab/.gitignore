@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .DS_Store
+# parity check build outputs and frame dumps
+parity/build/
+parity/**/*.bin

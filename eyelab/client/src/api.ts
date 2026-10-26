@@ -1,6 +1,8 @@
-// Fetch helpers for the eyelab server's face-file API (server/index.ts). Errors come back
-// as ApiError with the server's own message, or status 0 when the server did not answer.
+// Fetch helpers for the eyelab server's API (server/index.ts): face files and the deploy
+// pipeline. Errors come back as ApiError with the server's own message, or status 0 when the
+// server did not answer.
 
+import type { BotInfo, DeployRequest } from "../../shared/deploy";
 import type { Face, Globals } from "../../shared/faces";
 
 export class ApiError extends Error {
@@ -26,3 +28,8 @@ export const getFaceBaseline = (i: number) => call<{ face: Face | null }>("GET",
 export const getGlobalsBaseline = () => call<{ globals: Globals | null }>("GET", "/api/globals/baseline");
 export const resetFace = (i: number) => call<{ ok: true; face: Face }>("POST", `/api/faces/${i}/reset`);
 export const resetGlobals = () => call<{ ok: true; globals: Globals }>("POST", "/api/globals/reset");
+
+export const getBots = () => call<{ bots: BotInfo[] }>("GET", "/api/bots");
+export const startDeploy = (req: DeployRequest) => call<{ ok: true; id: string; logFile: string }>("POST", "/api/deploy", req);
+export const cancelDeploy = () => call<{ ok: boolean }>("POST", "/api/deploy/cancel");
+export const ackDeploy = () => call<{ ok: boolean }>("POST", "/api/deploy/ack");

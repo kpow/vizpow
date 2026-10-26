@@ -2,10 +2,16 @@
 
 ## Where we are (2026-10-25)
 
-Phase 1 in progress on branch `feat/eyelab-app`, stacked on `feat/eye-model-r4` (PR #115: the
-firmware eye model, v3.7.39). The eye lab began as a claude.ai artifact
+Branch `feat/eyelab-app`, stacked on `feat/eye-model-r4` (PR #115: the firmware eye model,
+v3.7.39). The eye lab began as a claude.ai artifact
 (https://claude.ai/artifact/EDGxtjiEETp2j2d3x1Y66q); this app replaces it as part of the vizpow
 toolset.
+
+- Phase 1 (standalone lab) is committed.
+- Phase 2 (deploy pipeline) is built and tested short of a real flash: dry run passes (389 frames,
+  388 identical, worst 2 px), a deliberately wrong firmware value fails parity, and a full lcd-169
+  run (bump, build, commit) worked in a throwaway worktree. **Next: Kevin runs the first real
+  flash** from the Deploy section (one 1.69 first, then the Stackchan with its power-cycle pause).
 
 ## Context
 The eyes were redesigned in four review rounds (docs/eye-art-direction.md, docs/eye-art-review-r2.md,
@@ -30,12 +36,14 @@ hand like kpow-dash. Same methodology as kpow-dash: scripts do the work, Claude 
 - The artifact lab stays until this app replaces it.
 
 ## Architecture (one package)
-- `server/` — Hono. Reads and writes `faces/*.json`; later runs the pipeline and the Claude panel.
+- `server/` — Hono. Reads and writes `faces/*.json` and runs the deploy pipeline; later the Claude panel.
   Origin allowlist on POSTs like kpow-dash.
 - `client/` — Vite + React. The lab UI: before/after device canvases, face list, tuning panel,
   look pad, scorecard.
 - `shared/` — the eye model and the old-renderer port, as plain TypeScript with no DOM: frame
-  buffer, raster, springs, motion. Used by the client now, and by the pipeline's parity check later.
+  buffer, raster, springs, motion. Used by the client and by the pipeline's parity check.
+- `parity/` — the firmware model host-compiled against the lab (`test.cpp`, `lab.ts`, `parity.ts`).
+- `config/bots.json` — the allowlist of Kevin's bots.
 - `faces/` — `NN-name.json` per face (eye params + brows/mouth), `globals.json`.
 
 ## Phases
@@ -49,12 +57,19 @@ hand like kpow-dash. Same methodology as kpow-dash: scripts do the work, Claude 
 - Done when: `npm run dev` shows the same faces and motion as the artifact, edits land in
   `faces/*.json`, and the regenerated `bot_eye_params.h` is byte-identical before any edit.
 
-### Phase 2 — deploy pipeline
+### Phase 2 — deploy pipeline (built; first real flash pending)
 One Deploy button, each step streamed with logs, stop on first failure: generate
 `bot_eye_params.h` → host-compile the firmware model and diff it against the lab → bump
-`FIRMWARE_VERSION` → `~/.platformio/penv/bin/pio` build → OTA-flash chosen bots (found by a `/state`
-scan; Stackchan gets the cold-boot reminder) → read `faceRender` back. A GitHub release stays a
-separate step Kevin approves.
+`FIRMWARE_VERSION` → `~/.platformio/penv/bin/pio` build → commit → OTA-flash chosen bots (found by
+a `/state` scan; Stackchan gets the cold-boot reminder) → read `faceRender` back. A GitHub release
+stays a separate step Kevin approves. Details in README.md, "Deploy".
+- `server/deploy.ts` runs it (one run at a time, events kept for the stream, a log file per run);
+  `server/bots.ts` scans and uploads; `parity/` is the firmware-vs-lab check (8 px per frame budget).
+- Allowlist: `config/bots.json` by `deviceName`. Unlisted bots show but cannot be chosen, and the
+  server refuses them. The `faces` board refuses OTA (shared flash with kFun), so it is USB only.
+- Dry run = generate + parity, header restored. A run that stops before the commit restores
+  `config.h`. The commit holds only the header, `config.h`, `eyelab/faces/` and the generator.
+- Done when: a real deploy flashes a 1.69 and the Stackchan and reads `faceRender` back.
 
 ### Phase 3 — Claude panel
 Same two modes as kpow-dash. **Ask**: read-only tools (read faces, render a face to PNG, run the

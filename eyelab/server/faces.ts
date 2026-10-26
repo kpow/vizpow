@@ -17,14 +17,14 @@ export const FACES_DIR = join(ROOT, "faces");
 const GLOBALS = "globals.json";
 const FACE_FILE = /^(\d{2})-[a-z0-9-]+\.json$/;
 
-/** A request problem the client should see as-is (400/404/409). */
+/** A request problem the client should see as-is (400/403/404/409). */
 export class HttpError extends Error {
-  constructor(public status: 400 | 404 | 409, message: string) { super(message); }
+  constructor(public status: 400 | 403 | 404 | 409, message: string) { super(message); }
 }
 
-async function faceFiles(): Promise<Map<number, string>> {
+async function faceFiles(dir = FACES_DIR): Promise<Map<number, string>> {
   const out = new Map<number, string>();
-  for (const name of await readdir(FACES_DIR)) {
+  for (const name of await readdir(dir)) {
     const m = FACE_FILE.exec(name);
     if (m) out.set(Number(m[1]), name);
   }
@@ -36,16 +36,17 @@ async function fileFor(index: number) {
   return name;
 }
 
-export async function readFaces(): Promise<{ faces: Face[]; globals: Globals }> {
-  const files = [...(await faceFiles()).entries()].sort((a, b) => a[0] - b[0]);
+/** Every face file in index order plus globals, validated. `dir` defaults to eyelab/faces (the parity check passes its own). */
+export async function readFaces(dir = FACES_DIR): Promise<{ faces: Face[]; globals: Globals }> {
+  const files = [...(await faceFiles(dir)).entries()].sort((a, b) => a[0] - b[0]);
   const faces: Face[] = [];
   for (const [index, name] of files) {
-    const face = validateFace(JSON.parse(await readFile(join(FACES_DIR, name), "utf8")));
+    const face = validateFace(JSON.parse(await readFile(join(dir, name), "utf8")));
     if (face.index !== index) throw new Error(`${name}: index ${face.index} does not match the file name`);
     faces.push(face);
   }
   faces.forEach((f, n) => { if (f.index !== n) throw new Error(`faces/: face ${n} is missing`); });
-  const globals = validateGlobals(JSON.parse(await readFile(join(FACES_DIR, GLOBALS), "utf8")));
+  const globals = validateGlobals(JSON.parse(await readFile(join(dir, GLOBALS), "utf8")));
   return { faces, globals };
 }
 

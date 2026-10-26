@@ -8,19 +8,21 @@ face files (a directory: eyelab/faces/NN-name.json plus globals.json), its
 
     python3 tools/gen_eye_params.py eyelab/faces > vizbot/bot_eye_params.h
 
-Until a face is edited, eyelab/faces and tools/eye_params_r4.json produce the
-same header byte for byte.
+Built from eyelab/faces, the header's Source and Regenerate lines name
+eyelab/faces. Until a face is edited, the rest of the header is the same as
+the one tools/eye_params_r4.json produces. The eye lab's Deploy button runs
+this, then diffs the firmware model against the lab (eyelab/parity).
 """
 import json
 import os
 import re
 import sys
 
-# The header's Source and Regenerate lines when it is built from eyelab/faces. They still
-# name the round 4 snapshot so that, before any face is edited, the regenerated header is
-# byte-identical to the committed one. Change both together once the faces diverge.
-FACES_SOURCE = 'vizBot eye lab round 4 baseline + Kevin saved tweaks, frozen 2026-10-24'
-REGEN = 'python3 tools/gen_eye_params.py tools/eye_params_r4.json > vizbot/bot_eye_params.h'
+# The header's Source line when it is built from the face files; the Regenerate line names
+# whichever input was used, so the header always says how to rebuild it.
+FACES_DIR = 'eyelab/faces'
+FACES_SOURCE = 'eyelab/faces (the vizBot eye lab face files)'
+REGEN = 'python3 tools/gen_eye_params.py %s > vizbot/bot_eye_params.h'
 
 PAIR_KEYS = ['aspect', 'scale', 'lidTop', 'slant', 'sag', 'lidBot', 'bow', 'shut', 'cup',
              'inset', 'pdy', 'pw', 'ph', 'heart', 'star']
@@ -52,7 +54,8 @@ def load_faces(folder):
 
 
 def main(path):
-    data = load_faces(path) if os.path.isdir(path) else json.load(open(path))
+    is_dir = os.path.isdir(path)
+    data = load_faces(path) if is_dir else json.load(open(path))
     exprs = sorted(data['expressions'], key=lambda e: e['index'])
     if [e['index'] for e in exprs] != list(range(25)):
         sys.exit('expected expressions 0..24 in firmware order')
@@ -66,7 +69,7 @@ def main(path):
     w('// Bot Eye Parameters (generated: do not edit by hand)')
     w('// ============================================================================')
     w('// Source: %s' % data.get('source', path))
-    w('// Regenerate: %s' % REGEN)
+    w('// Regenerate: %s' % (REGEN % (FACES_DIR if is_dir else path)))
     w('//')
     w('// One parametric eye per side, drawn as one vertical span per pixel column.')
     w('// Sizes are x R (eye half-width). [0] = screen-left eye, [1] = screen-right.')

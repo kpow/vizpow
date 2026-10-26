@@ -1,0 +1,4 @@
+{
+  "about": "Why: the deploy pipeline flashes only Kevin's own bots, never a friend's. These are deviceName values from each bot's GET /state. IPs come from the LAN scan, never from this file.",
+  "bots": ["vizBot-old-dino", "vizBot-skunky", "vizBot-dino", "vizBot-01FC"]
+}

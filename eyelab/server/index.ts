@@ -1,12 +1,15 @@
 // The eye lab's local server: a small JSON API over the face files in eyelab/faces/, so
-// a slider in the browser lands in a file git can diff. Loopback only. Later phases add
-// the deploy pipeline and the Claude panel here.
+// a slider in the browser lands in a file git can diff, plus the deploy pipeline that takes
+// those faces to Kevin's bots. Loopback only. Phase 3 adds the Claude panel here.
 
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { streamSSE } from "hono/streaming";
 import { relative } from "node:path";
+import { scanBots } from "./bots";
+import { ackDeploy, cancelDeploy, currentRun, startDeploy } from "./deploy";
 import { HttpError, ROOT, faceBaseline, globalsBaseline, readFaces, resetFace, resetGlobals, writeFace, writeGlobals } from "./faces";
 
 // 4060, not 4050: vizbrain owns *:4050 on this Mac, and a 127.0.0.1 bind would quietly shadow it.
@@ -49,6 +52,25 @@ app.post("/api/faces/:index/reset", (c) => answer(c, async () => ({ ok: true, fa
 app.put("/api/globals", (c) => answer(c, async () => ({ ok: true, ...(await writeGlobals(await body(c))) })));
 app.get("/api/globals/baseline", (c) => answer(c, async () => ({ globals: await globalsBaseline() })));
 app.post("/api/globals/reset", (c) => answer(c, async () => ({ ok: true, globals: await resetGlobals() })));
+
+// Deploy pipeline (server/deploy.ts). POSTs go through the Origin allowlist above.
+app.get("/api/bots", (c) => answer(c, async () => ({ bots: await scanBots() })));
+app.post("/api/deploy", (c) => answer(c, async () => ({ ok: true, ...(await startDeploy(await body(c))) })));
+app.post("/api/deploy/cancel", (c) => c.json({ ok: cancelDeploy() }));
+app.post("/api/deploy/ack", (c) => c.json({ ok: ackDeploy() }));
+// The current or last run: every event so far, then live ones until it finishes. A page that
+// reconnects mid-run gets the whole run replayed and carries on from there.
+app.get("/api/deploy/stream", (c) => streamSSE(c, async (sse) => {
+  const run = currentRun();
+  if (!run) { await sse.writeSSE({ data: JSON.stringify({ type: "idle" }) }); return; }
+  let i = 0, gone = false;
+  sse.onAbort(() => { gone = true; run.wake(false); });
+  while (!gone) {
+    while (i < run.events.length && !gone) await sse.writeSSE({ data: JSON.stringify(run.events[i++]) });
+    if (run.finished && i >= run.events.length) break;
+    if (!(await run.next(15_000)) && !gone) await sse.writeSSE({ data: JSON.stringify({ type: "ping" }) });
+  }
+}));
 
 if (process.env.NODE_ENV === "production") {
   const dist = relative(process.cwd(), `${ROOT}dist`);

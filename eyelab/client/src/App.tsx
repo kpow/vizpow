@@ -1,6 +1,6 @@
 // The eye lab page: before/after device canvases, the face grid, look pad, scorecard and
-// tuning panel, laid out and worded as the artifact lab was. Edits change the shared model
-// in place (LabRunner) and are saved to eyelab/faces/ by the Saver.
+// tuning panel, laid out and worded as the artifact lab was, then the Deploy section. Edits
+// change the shared model in place (LabRunner) and are saved to eyelab/faces/ by the Saver.
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -15,6 +15,7 @@ import { LabRunner } from "./runner";
 import { Saver, facePath } from "./saver";
 import type { SavePath } from "./saver";
 import { CRIT, GSPEC, NOTES, PSPEC, cf, fmt } from "./text";
+import Deploy from "./Deploy";
 
 /** Everything the page works on, created once the face files have loaded. */
 interface Model { runner: LabRunner; saver: Saver; faces: Face[]; ticks: Ticks[] }
@@ -50,6 +51,7 @@ export default function App() {
         <p className="sub"><b>Round 4: all 25 faces.</b> Before: <code>renderBotFace()</code> from <code>vizbot/bot_eyes.h</code> with the <code>bot_faces.h</code> table and blend, as shipped. After: the parametric model from <code>docs/eye-art-direction.md</code> with the art director's reviews applied: round 2 for the 8 P1 faces (one lid-line closing path for blinks and winks, a calmer idle budget), round 3's startle window, and round 4 for the 17 P2 faces (<code>docs/eye-art-review-r4.md</code>: exit blinks, slower springs out of the size extremes, bolder overlays). Both sides are drawn at device pixels in RGB565, one simulated device frame at a time.</p>
       </header>
       {model ? <Lab m={model} /> : <p className="savestat" data-s={loadError ? "error" : "pending"} role="status"><span className="dotst" aria-hidden="true"></span><span>{loadError || "Loading faces…"}</span></p>}
+      <Deploy saveStatus={model ? model.saver.status() : null} />
     </div>
   );
 }
