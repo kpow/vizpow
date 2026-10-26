@@ -133,14 +133,35 @@ corner. He lands with a squash and a spike burst. Exit runs the same way in reve
    - The hook in `renderBotMode`, the NVS keys and `/bot/party`.
    - Bump `FIRMWARE_VERSION`, OTA-flash vizBot-old-dino, and read the render cost from `/state`
      (budget: 3 ms on top of the effect).
-3. **Interaction (about 2 h).** Tap and shake wiring, the poke dash and the idle roam (one
-   corner-run routine with two tunings), idle fidgets,
-   gaze reach, and the enter/exit morph with blink swaps.
-4. **Overlays and album art (about 1–2 h).** Move the clock, toast and bubble, and put album art
-   in the party corner.
-5. **CoreS3 / Stackchan and release (about 2 h).** Beat input from `audioSpectrum`, the touch
-   settings row, the vizbrain tool, bench checks on skunky (cold boot after flashing), then the
-   release flow.
+3. **Interaction. Done 2026-10-26** (`3.7.41-party.8`). Tested on old-dino over WiFi.
+   - The poke dash and the idle roam share one corner-run routine with two tunings.
+   - Tapping elsewhere sends a spike fan toward the finger and he hops.
+   - Shake (porcupine spikes, a sideways jiggle, DIZZY). `GET /debug/touch?g=shake` fakes one.
+   - Idle fidgets: probe, shiver, scoot.
+   - Gaze reach.
+   - The enter/exit morph: a blink, then the 5 px stroke ellipse around the eyes becomes the drop
+     and hops into a fresh random corner; exit reverses it. Party only shows on the ambient
+     scene, so the morph starts from the stroked face (the iris reveal from the prototype is not
+     used).
+   - Speech bubbles and the Zzz are hidden in party mode (Kevin).
+4. **Overlays and album art. Done 2026-10-26.**
+   - While he's in a top corner, the clock moves to the far top corner (22 px inset on the 1.69,
+     8 elsewhere) and toasts drop to y = H − 44.
+   - An album cover's face circle sits in his corner.
+   - The touch settings: Look → Party mode, plus Party size while it's on. Kevin asked for these
+     2026-10-25. He keeps his corner when a sheet or settings page closes.
+5. **CoreS3 / Stackchan. Done 2026-10-26, except a music test.**
+   - The spikes pump on `audioSpectrum` beats (smoothed, with a hop on bass above 0.6 and an eye
+     pop above 0.7); the 1.69 keeps its synthetic pulse. The beat path isn't tested with music
+     yet.
+   - Tested on skunky over WiFi: blob + eyes 4.3 ms avg (his full-size face costs 7.4 ms); poke
+     dash and shake both work. Skunky needs a cold boot after the OTA flash.
+   - All five envs compile (lcd-169, lcd-13, m5cores3, stackchan, faces).
+   - vizbrain: `Bot.party()` and a `party_mode(on, size)` tool. The 290 tests pass, and the call
+     was tested against skunky.
+6. **Release (needs Kevin's go).** Merge, set the real firmware version (the eyelab pipeline has
+   used 3.7.40 and 3.7.41), build the 4 release envs, GitHub release, then the kpow.xyz docs.
+   vizbrain ships the `party_mode` tool in its own next release.
 
 ## Decisions (Kevin, 2026-10-25)
 
@@ -150,9 +171,7 @@ corner. He lands with a squash and a spike burst. Exit runs the same way in reve
 
 ## Open questions for Kevin
 
-1. Keep the "puddle peek" fidget? In it the blob flattens and the eyes poke out above it. It is
-   the only time the eyes leave the body.
+1. The "puddle peek" fidget (the blob flattens and the eyes poke out above it) is not built. Say
+   if you want it.
 2. Rounded corners on the 1.69: draw arcs at r 30/35/40/45 on the bench to confirm the 40 px
    estimate.
-3. Entering from the ambient scene: the iris reveal, or start as a wide blob that matches the old
-   5 px stroke around the eyes? (The prototype does the iris.)
