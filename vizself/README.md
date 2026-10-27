@@ -7,10 +7,13 @@ describes the code the bots run, never a half-finished branch. Nothing is hosted
 ## Install and run
 
 ```bash
-uv tool install --editable ~/projects/vizpow/vizself
+uv tool install --python 3.14 "vizself @ git+https://github.com/kpow/vizpow@vizbrain-v1.4.0#subdirectory=vizself"
+git -C ~/projects/vizpow fetch --tags   # it reads the newest firmware tag from this checkout
 vizself fetch-model   # once: the embedding model, BAAI/bge-small-en-v1.5 (~130 MB, Hugging Face cache)
 vizself index         # optional: embed the current release now (~1 minute) instead of on first start
 ```
+
+It ships with vizbrain (same tag). To work on it: `uv tool install --editable <checkout>/vizself`.
 
 Add it to vizbrain's `~/Library/Application Support/vizbrain/connectors.json`:
 
