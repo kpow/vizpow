@@ -368,6 +368,15 @@ struct PartyBlob {
   int16_t brightX, brightY;
   int8_t beatSide;
   unsigned long nextRoam;
+  bool holdCorner;              // a voice turn or its bubble is up: no roams, a poke only flinches
+  // Voice turn (set by bot_mode each frame): 0 none, 1 listening, 2 thinking, 3 speaking
+  uint8_t talk, talkWas;
+  float talkEnv, talkPrev;      // the reply's loudness 0..1, and last frame's
+  BotSpring talkSm;             // smoothed loudness: the body swells with it
+  float swC, swS;               // thinking swirl: the n = 3 mode's rotating target
+  int8_t earI;                  // the listening tentacle (slot, generation)
+  uint16_t earG;
+  unsigned long lastSyl;
   // Corner run (poke dash or roam)
   const PartyRun *run;          // null when not running
   bool going;
@@ -454,7 +463,7 @@ struct PartyBlob {
     g.init(0, 1.5f, 0.9f); E.init(0, 1.2f, 1);
     ox.init(0, 2.0f, 0.38f); oy.init(0, 2.0f, 0.38f);
     D.init(0, 3.2f, 0.28f); Q.init(0, 1.5f, 0.85f);
-    P.init(1, 1.4f, 0.82f); hP.init(0, 5, 0.6f); beatSm.init(0, 3, 0.7f);
+    P.init(1, 1.4f, 0.82f); hP.init(0, 5, 0.6f); beatSm.init(0, 3, 0.7f); talkSm.init(0, 5, 0.7f);
     pkL = botSpringPeak(1.9f, 0.42f);
     pkD = botSpringPeak(3.2f, 0.28f);
     pkE = botSpringPeak(1.2f, 1);
@@ -517,6 +526,7 @@ struct PartyBlob {
     porcUntil = shakeAt = shiverAt = padUntil = lastHop = lastPop = lastBeatGrab = 0;
     guardAt = now; guardMax = 0; calmSince = 0;
     hP.snap(0); beatSm.snap(0); prevEnv = 0;
+    talkWas = 0; talkPrev = 0; talkSm.snap(0); swC = swS = 0; earI = -1;
     botEyes.blinkStart(now, BW_SWAP);   // every swap between face and drop hides under a blink
     active = true;
     if (fresh) {
@@ -601,7 +611,7 @@ struct PartyBlob {
     tapT = 1;
     botEyes.blinkStart(now, BW_SWAP);
     later(now, 300, PE_PEEK, -1, 0, x, y);
-    startRun((corner + 1 + random(3)) % 4, PARTY_POKE, now, 820);
+    if (!holdCorner) startRun((corner + 1 + random(3)) % 4, PARTY_POKE, now, 820);   // mid-turn he stays by his bubble
   }
   // Tap on the show: a spike fan and a tentacle reach for the finger, boop, and let go
   void tapAt(int16_t x, int16_t y, unsigned long now) {
@@ -620,6 +630,46 @@ struct PartyBlob {
   void roam(unsigned long now) {
     uint8_t to = random(4) ? (corner + (random(2) ? 1 : 3)) % 4 : (corner + 2) % 4;
     startRun(to, PARTY_ROAM, now, 0);
+  }
+
+  // Voice turn: the blob shows what the brain is doing, even with the sound off.
+  // Listening: he perks up, an ear tentacle reaches into the room and he looks out.
+  // Thinking: a slow swirl round the rim, a small spike fan circling, eyes up and away.
+  // Speaking: the body swells with the reply's loudness, spikes puff on each syllable.
+  void stepTalk(unsigned long now, float dt, float r, bool free) {
+    if (talk != talkWas) {
+      PartyTent *ear = tentOf(earI, earG);
+      if (ear) retract(*ear, false);
+      earI = -1;
+      if (!talkWas) abortSeqs(now);
+      if (talk == 1 && free) {
+        L.v += 0.10f * r / pkL; modeKick(2, -0.08f, 0);   // perk up
+        PartyTentOpt o;
+        o.track = true; o.tx = LCD_WIDTH / 2.0f; o.ty = LCD_HEIGHT / 2.0f; o.L = 0.9f * r;
+        o.hold = -1; o.free = true; o.curl = 0.2f; o.swA = 0.35f; o.swF = 0.6f; o.boops = 2;
+        if (PARTY_TENTS) { earI = spawnTent(o, now); earG = tentGen; }
+      }
+      talkWas = talk;
+    }
+    talkSm.step(talk == 3 ? talkEnv : 0, dt);
+    swC = swS = 0;
+    if (!talk || !free) { talkPrev = 0; return; }
+    float toCx = partyRight(corner) ? -0.6f : 0.6f;   // eyes look toward the screen, away from the wall
+    if (talk == 1) {
+      lookAt(LCD_WIDTH / 2.0f, LCD_HEIGHT / 2.0f, 300, now);
+    } else if (talk == 2) {
+      float th = TWO_PI * 0.35f * t;
+      swC = 0.07f * cosf(3 * th); swS = 0.07f * sinf(3 * th);
+      alT = th; fieldT = 0.3f; fieldUntil = now + 200; F.f = 1.2f;
+      look(toCx, -0.8f, 300, now);
+    } else if (talk == 3) {
+      if (talkEnv > 0.4f && talkPrev < 0.25f && now - lastSyl > 140) {
+        field(alphaHome(), 0.3f + 0.35f * talkEnv, 160, now);
+        modeKick(2, 0.04f, 0);
+        lastSyl = now;
+      }
+    }
+    talkPrev = talkEnv;
   }
   // The arc bows toward the screen centre; its middle is where the grab tentacle latches
   void bowPoint(const PartyRun &m, float &kx, float &ky) const {
@@ -1535,6 +1585,7 @@ struct PartyBlob {
     // Corner run: crouch for the lead-in, then follow an arc to the new corner's home
     free = !run && !morph;
     if (run) stepRun(now, dt);
+    else if (holdCorner) { if (eyeReached(now, nextRoam)) nextRoam = now + 4000; }   // a roam waits until 4 s after the turn
     else if (free && eyeReached(now, nextRoam) && !nSeqs()) roam(now);   // a roam waits for the patterns to finish
     free = !run && !morph;
 
@@ -1563,7 +1614,9 @@ struct PartyBlob {
     float env = 0, bass = 0;
     #endif
     beatSm.step(env, dt);
-    if (heard) {
+    if (talk) {
+      // a voice turn owns the spikes (stepTalk)
+    } else if (heard) {
       if (free && env > 0.9f && prevEnv < 0.5f && nSeqs()) {   // a pattern owns the spikes: the beat throbs it
         throbUntil = now + 250; modeKick(2, 0.03f + 0.04f * bass, 0);
       } else if (free && env > 0.9f && prevEnv < 0.5f) {
@@ -1584,9 +1637,10 @@ struct PartyBlob {
       nextPulse = now + (unsigned long)eyeRnd(5000, 12000);
     }
     prevEnv = env;
+    stepTalk(now, dt, r, free);
 
-    // The pattern library's scheduler (feeler groups are one of its entries now)
-    if (free) scheduleSeq(now, heard);
+    // The pattern library's scheduler (feeler groups are one of its entries now); it rests during a voice turn
+    if (free && !talk) scheduleSeq(now, heard);
     stepSlots(now, dt);
 
     // Field, attractor, spikes (up to 0.55 r). Spike k starts |k-4| x 35 ms late so the fan opens outward.
@@ -1619,8 +1673,8 @@ struct PartyBlob {
     if (L.x < 0) c2 += -L.x / R * 0.9f;
     float msq = 0;
     for (int k = 0; k < PARTY_MODES; k++) {
-      mc[k].step(k == 0 ? c2 + Sv * cosf(2 * phiV) : 0, dt);
-      ms[k].step(k == 0 ? Sv * sinf(2 * phiV) : 0, dt);
+      mc[k].step(k == 0 ? c2 + Sv * cosf(2 * phiV) : k == 1 ? swC : 0, dt);
+      ms[k].step(k == 0 ? Sv * sinf(2 * phiV) : k == 1 ? swS : 0, dt);
       float cl = PARTY_MODE_DEF[k].cl * max(1.0f, PARTY_JIGGLE);
       mc[k].x = constrain(mc[k].x, -cl, cl); ms[k].x = constrain(ms[k].x, -cl, cl);
       msq += mc[k].x * mc[k].x + ms[k].x * ms[k].x;
@@ -1638,7 +1692,7 @@ struct PartyBlob {
     g.step(max(max(gG, 0.10f * F.x), seqG), dt);
 
     // Volume: the modes and the tentacles borrow from the body (motion spec §3.3)
-    B = 1 + 0.05f * sinf(TWO_PI * 0.21f * t);
+    B = 1 + 0.05f * sinf(TWO_PI * 0.21f * t) + 0.08f * talkSm.x;   // speaking: he swells with the words
     Reff = R * B / sqrtf(1 + 0.5f * msq) * sqrtf(1 - borrow);
 
     // One integer centre for body, shadow, tentacles and eyes, moved only past 0.6 px so nothing shimmers
