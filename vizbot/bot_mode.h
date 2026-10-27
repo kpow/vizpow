@@ -607,7 +607,7 @@ void updateBotMode() {
 
   // ---- Voice: bubble hand-off from Core 0, and stay awake during a turn ----
   if (voiceBubblePending) {
-    botMode.speechBubble.show(voiceBubbleText, voiceBubbleMs, true);
+    botMode.speechBubble.show(voiceBubbleText, voiceBubbleMs, true, true);
     voiceBubblePending = false;
   }
   if (voiceHoldsFace) botMode.registerInteraction();
@@ -885,6 +885,7 @@ void renderBotMode() {
   #endif
   if (!partyPaused && (partyWanted() || partyBlob.active)) {
     if (partyWanted()) partyBlob.cancelExit(); else if (partyBlob.active) partyBlob.beginExit(frameNow);
+    partyBlob.holdCorner = voiceHoldsFace || (botMode.speechBubble.active && botMode.speechBubble.voice);
     partyBlob.render(frameNow);
     party = true;
     if (partyBlob.exprReq != 0xFF) {   // a face for a hero moment (wake-up stretch), then back to neutral
@@ -934,7 +935,8 @@ void renderBotMode() {
   if (!uiHidesBotOverlays())
   #endif
   {
-    if (!party) botMode.speechBubble.render();   // no bubbles in party mode: the show is the point
+    // Party mode keeps only voice bubbles (the show is the point, but a turn needs its words)
+    if (!party || botMode.speechBubble.voice) botMode.speechBubble.render(botMode.timeOverlay.enabled);
     botMode.notification.render();
     botMode.timeOverlay.render();
   }

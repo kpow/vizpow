@@ -8,6 +8,9 @@
 #ifdef TARGET_CORES3
 #include "bot_sounds.h"
 #endif
+#ifdef TOUCH_UI_V2
+static bool uiToastActive();   // touch_ui.h: the party bubble sits above a bottom-band toast
+#endif
 
 // ============================================================================
 // Bot Overlays — Speech Bubbles, Notifications, Time Display
@@ -38,6 +41,7 @@ extern void wledQueueText(const char* text, uint16_t durationMs);
 struct BotSpeechBubble {
   char text[MAX_SAY_LEN];      // Current text content
   bool active;                 // Whether bubble is showing
+  bool voice;                  // From a vizbrain turn: the only kind party mode shows
   unsigned long fadeOutTime;   // When to start fade-out (0 = not scheduled)
   float scale;                 // Tween-driven: 0→1 pop-in, 1→0 fade-out
 
@@ -55,6 +59,7 @@ struct BotSpeechBubble {
 
   void init() {
     active = false;
+    voice = false;
     text[0] = '\0';
     numLines = 0;
     scale = 0.0f;
@@ -120,10 +125,12 @@ struct BotSpeechBubble {
 
   // Show a text bubble.
   // skipWled=true when wledQueueText was already called upstream (e.g. showBotSaying pre-delay path)
-  void show(const char* msg, uint16_t durationMs = DEFAULT_DURATION, bool skipWled = false) {
+  // fromVoice=true for vizbrain turns (voiceShowBubble), which still show in party mode
+  void show(const char* msg, uint16_t durationMs = DEFAULT_DURATION, bool skipWled = false, bool fromVoice = false) {
     strncpy(text, msg, MAX_SAY_LEN - 1);
     text[MAX_SAY_LEN - 1] = '\0';
     active = true;
+    voice = fromVoice;
     scale = 0.0f;
     fadeOutTime = millis() + POP_IN_MS + durationMs;
 
@@ -181,7 +188,8 @@ struct BotSpeechBubble {
   }
 
   // Render the bubble (scale is driven by tween system)
-  void render() {
+  // clockOn: the time pill is up, so a top-band bubble starts below it
+  void render(bool clockOn = false) {
     if (!active || gfx == nullptr) return;
 
     float s = scale;
@@ -192,12 +200,13 @@ struct BotSpeechBubble {
     int16_t renderY = bubbleY;
     int16_t renderX = bubbleX;
     bool flipPointer = false;
+    bool party = partyBlob.active;
 
     #if defined(TARGET_CORES3) || defined(TARGET_LCD)
     {
       extern float accelX, accelY;
-      // Upside-down detection: move bubble to top, flip pointer
-      if (accelX < -0.3f) {
+      // Upside-down detection: move bubble to top, flip pointer (not in party mode: it could land on him)
+      if (accelX < -0.3f && !party) {
         renderY = 8;
         flipPointer = true;
       }
@@ -209,6 +218,22 @@ struct BotSpeechBubble {
       if (renderX + bubbleW > LCD_WIDTH - 2) renderX = LCD_WIDTH - 2 - bubbleW;
     }
     #endif
+
+    // Party mode (layout spec §3): the band away from his corner, tail toward him
+    if (party) {
+      if (partyTop(partyBlob.corner)) {
+        const PartyTier &T = partyBlob.tier();
+        int16_t floorY = PARTY_EDGE_GAP + T.env + T.wanderH + T.below + 8;   // under his wander box, tail included
+        renderY = min((int16_t)bubbleY, (int16_t)(LCD_HEIGHT - 4 - bubbleH));   // long replies stay on screen
+        #ifdef TOUCH_UI_V2
+        if (uiToastActive()) renderY = min(renderY, (int16_t)(PARTY_TOAST_LOW_Y - 6 - bubbleH));
+        #endif
+        if (renderY < floorY) renderY = floorY;
+      } else {
+        renderY = clockOn ? 34 : 8;
+        flipPointer = true;
+      }
+    }
 
     // Calculate scaled dimensions
     int16_t sw = (int16_t)(bubbleW * s);
@@ -224,6 +249,7 @@ struct BotSpeechBubble {
 
     // Draw triangle pointer
     int16_t triCX = sx + sw / 2;
+    if (party) triCX = constrain(partyBlob.icx, sx + 16, sx + sw - 16);
     if (!flipPointer) {
       // Pointing up toward face
       int16_t triTop = sy - 8;
@@ -390,12 +416,12 @@ struct BotTimeOverlay {
 
 // Stubs when LCD not available
 struct BotSpeechBubble {
-  bool active;
-  void init() { active = false; }
-  void show(const char* msg, uint16_t d = 5000, bool skipWled = false) {}
+  bool active, voice;
+  void init() { active = voice = false; }
+  void show(const char* msg, uint16_t d = 5000, bool skipWled = false, bool fromVoice = false) {}
   void showP(const char* p, uint16_t d = 5000) {}
   void update() {}
-  void render() {}
+  void render(bool clockOn = false) {}
 };
 
 struct BotNotification {

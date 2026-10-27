@@ -368,6 +368,7 @@ struct PartyBlob {
   int16_t brightX, brightY;
   int8_t beatSide;
   unsigned long nextRoam;
+  bool holdCorner;              // a voice turn or its bubble is up: no roams, a poke only flinches
   // Corner run (poke dash or roam)
   const PartyRun *run;          // null when not running
   bool going;
@@ -601,7 +602,7 @@ struct PartyBlob {
     tapT = 1;
     botEyes.blinkStart(now, BW_SWAP);
     later(now, 300, PE_PEEK, -1, 0, x, y);
-    startRun((corner + 1 + random(3)) % 4, PARTY_POKE, now, 820);
+    if (!holdCorner) startRun((corner + 1 + random(3)) % 4, PARTY_POKE, now, 820);   // mid-turn he stays by his bubble
   }
   // Tap on the show: a spike fan and a tentacle reach for the finger, boop, and let go
   void tapAt(int16_t x, int16_t y, unsigned long now) {
@@ -1535,6 +1536,7 @@ struct PartyBlob {
     // Corner run: crouch for the lead-in, then follow an arc to the new corner's home
     free = !run && !morph;
     if (run) stepRun(now, dt);
+    else if (holdCorner) { if (eyeReached(now, nextRoam)) nextRoam = now + 4000; }   // a roam waits until 4 s after the turn
     else if (free && eyeReached(now, nextRoam) && !nSeqs()) roam(now);   // a roam waits for the patterns to finish
     free = !run && !morph;
 
