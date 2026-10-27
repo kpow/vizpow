@@ -15,8 +15,13 @@ vizself index         # optional: embed the current release now (~1 minute) inst
 Add it to vizbrain's `~/Library/Application Support/vizbrain/connectors.json`:
 
 ```json
-"vizself": {"command": "vizself", "timeout_s": 10}
+"vizself": {"command": "vizself", "timeout_s": 10, "code_mode": true, "max_lookups": 10, "lookup_budget_s": 60}
 ```
+
+- `code_mode`: while it looks things up, the bot plays code mode ("Ink Reader", `GET /bot/code`) and says a
+  corny line every ~8 s into the turn's live clip (vizbrain `codemode.py`, lines in `docs/vizself/code-quips.md`).
+- `max_lookups`, `lookup_budget_s`: its own look-up budget per turn (1-20 calls, 5-120 s). Other connectors
+  share the turn's 4 calls / 15 s.
 
 Settings (environment): `VIZSELF_REPO` (default `~/projects/vizpow`), `VIZSELF_REF` (default: the
 newest `vX.Y.Z` tag), `VIZSELF_DOCS` (a folder with `self-map.md` and `hardware.md`, overriding

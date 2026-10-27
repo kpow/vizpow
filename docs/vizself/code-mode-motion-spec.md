@@ -1,6 +1,7 @@
 # Code mode: "Ink Reader" (motion spec)
 
-Status: approved by Kevin 2026-10-27 (decisions in §7). No code changed yet. It builds on v3.9.0 "ferrofluid": `vizbot/party_blob.h`,
+Status: approved by Kevin 2026-10-27 (decisions in §7). Built 2026-10-27 on `feat/vizself` (fw 3.9.1-code.3
+on skunky; vizbrain `codemode.py`). Measured cost in §4.3. It builds on v3.9.0 "ferrofluid": `vizbot/party_blob.h`,
 `docs/party2-motion-spec.md` (**MS**), `docs/party2-art-direction.md` (**AD**), `docs/party2-pattern-library.md`
 (**PL**), and on vizbrain's live-clip speech (`server.py` `start_turn`, `brain.py` `FILLERS`).
 
@@ -381,6 +382,18 @@ The backdrop **replaces** the ambient effect (≈ 11 ms of "effect/other" on the
 faster than party mode. First port step: read `stagesUs` and the loop fps on skunky in party mode, then in code
 mode, and record both here.
 
+**Measured on skunky (2026-10-27, fw 3.9.1-code.3, 20 s windows):**
+
+| | Blob per frame | Stages: step, outline, shadows, rim + body, sheen, eyes, backdrop (µs) | Loop fps |
+|---|---|---|---|
+| Party mode, M (v3.9.1) | 6.7 ms avg, 11.7 max | 1128, 515, 629, 2014, 1279, 1139, - | 12.4 |
+| Code mode | 14.0 ms avg, 25.7 max | 1719, 792, 2528, 3906, 812, 1303, 2940 | 12.6 |
+
+About twice the estimate: the canvas is in PSRAM, so cost follows pixels. The body, the shadow and the
+backdrop (written straight into the canvas, not `fillRect`) are the big ones. The loop rate doesn't move,
+because the 36 ms panel push and the rest of the loop dominate the frame either way. It doesn't fit the 9 ms
+guard, so **the Stackchan stays on tier B** (decision 4).
+
 ---
 
 ## 5. Interface
@@ -392,7 +405,7 @@ The handler only sets volatile requests (like `partySeqReq`); the render loop ac
 | Query | Effect |
 |---|---|
 | `v=1` | Start code mode (enter). Optional `why=vizself` (logged in `/state`) |
-| `quip=<ms>` | A quip is coming, about `<ms>` of audio. Optional `expr=<name or index>` for the quip face (default happy), `lead=<ms>` |
+| `quip=<ms>` | A quip is coming, about `<ms>` of audio. Optional `expr=<index>` for the quip face (default happy; vizbrain maps names to indexes) |
 | `found=1` | Found-it hero, then exit into speaking. `exit=0` plays a small "found one" version (no Grand Crown: one `compile`, line flash) and stays in code mode |
 | `v=0` | Exit without the hero (shrug). `fast=1` skips the shrug (cancel) |
 | `seq=<key>` | Play one code-mode pattern now (tuning): `compile`, `aha`, `grand`, or any party key |
@@ -420,6 +433,8 @@ Old firmware answers 404, so vizbrain checks the firmware version (`firmware_ok`
 
 Dependencies to flag (not part of this spec):
 - `LOOKUP_BUDGET_S` is 15 s and `MAX_LOOKUPS` 4 in `brain.py`. A 60 s vizself search needs its own budget.
+- The live clip lands in one PSRAM buffer per turn, quips included: built with 60 s (`VOICE_MAX_PLAY_MS`,
+  2.9 MB), falling back to the old 30 s when PSRAM is short.
 - The bot's live-clip read times out after 45 s of no data (`VOICE_HTTP_TIMEOUT_MS`). The quips every 8 s keep
   that stream fed, so they double as a keep-alive. If quips are ever turned off, a long search ends the turn.
 - `/brain/play` returns 409 during a voice turn, so quips must go into the live clip, not through `/brain/play`.

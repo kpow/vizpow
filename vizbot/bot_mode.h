@@ -637,6 +637,7 @@ void updateBotMode() {
   // Voice lip-sync: open the mouth with the reply audio's loudness, then put
   // the current expression's own mouth back when speech ends.
   int8_t lvl = voiceLevel();
+  if (lvl < 0) lvl = partyBlob.fakeLvl;   // code mode's hero=quip: a made-up level, no audio
   if (lvl >= 0) {
     botMode.face.mouthType = (lvl >= 2) ? MOUTH_OPEN_O : MOUTH_LINE;
     botMode.face.mouthCurve = 4 + lvl;          // MOUTH_OPEN_O radius
@@ -789,6 +790,42 @@ String botFaceRenderStatsJson() {
 volatile bool botRenderHold = false;
 volatile bool botFrameInProgress = false;
 
+// Code mode's outputs (party_blob.h asks, this does): the face's mouth inside the
+// drop, gentle head moves, the LED ring beats, and synth cues (Unit Synth only:
+// on the speaker fallback the speaker belongs to his voice).
+void cmdPlaySequence(uint8_t seqId);   // task_manager.h
+static void codeModeIo() {
+  PartyBlob &b = partyBlob;
+  if (b.mouthOn) {
+    BotFaceState f = botMode.face;
+    float k = b.mouthK;
+    f.mouthWidth = (int16_t)lroundf(f.mouthWidth * k);
+    f.mouthCurve = (int16_t)lroundf(f.mouthCurve * k);
+    int16_t my = min((int16_t)(b.mouthY + lroundf(f.mouthOffsetY * k)), b.mouthFloor);
+    drawBotMouth(f, b.mouthX, my, false, BOT_COLOR_BG);
+  }
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  if (b.headReq) {
+    b.headReq = false;
+    if ((int32_t)(scHeadBusyUntilMs - millis()) < 2500) {   // never during the 5-minute rail cycle
+      scMoveYaw(b.headYaw * 10, b.headMs);
+      scMovePitch((SC_SERVO_Y_HOME_DEG + b.headPitch) * 10, b.headMs);
+    }
+  }
+  #endif
+  #ifdef HAS_BASE_LEDS
+  scLeds.codeBeat = b.code ? b.ledBeat : 0;
+  scLeds.codePos = b.ledPos; scLeds.codeLvl = b.ledLvl; scLeds.codeAt = b.ledAt;
+  #endif
+  #ifdef HAS_SOUND
+  if (b.sndReq) {
+    uint8_t s = b.sndReq;
+    b.sndReq = 0;
+    if (botSounds.useMidi && (s != 1 || !b.mouthOn)) cmdPlaySequence(s == 1 ? SEQ_TYPING : s == 2 ? SEQ_SUCCESS : SEQ_RIMSHOT);
+  }
+  #endif
+}
+
 void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
@@ -834,8 +871,12 @@ void renderBotMode() {
 
   // ---- Clear canvas with background ----
   uint16_t bgColor = BOT_COLOR_BG;
+  partyBlob.codeRequests(frameNow);   // GET /bot/code (party_blob.h)
 
-  if (botBackgroundStyle == 0) {
+  if (codeBackdrop.alpha > 0) {
+    // Code mode: its scrolling code minimap replaces the background (the blob draws it)
+    gfx->fillScreen(BOT_COLOR_BG);
+  } else if (botBackgroundStyle == 0) {
     // Solid black
     gfx->fillScreen(BOT_COLOR_BG);
   } else if (botBackgroundStyle == 1) {
@@ -889,11 +930,14 @@ void renderBotMode() {
   #else
   bool partyPaused = false;
   #endif
-  if (!partyPaused && (partyWanted() || partyBlob.active)) {
-    if (partyWanted()) partyBlob.cancelExit(); else if (partyBlob.active) partyBlob.beginExit(frameNow);
+  // Code mode uses the same blob, party mode or not.
+  bool blobWanted = partyWanted() || partyBlob.codeOn;
+  if (!partyPaused && (blobWanted || partyBlob.active)) {
+    if (blobWanted) partyBlob.cancelExit(); else if (partyBlob.active) partyBlob.beginExit(frameNow);
     partyBlob.holdCorner = voiceHoldsFace || (botMode.speechBubble.active && botMode.speechBubble.voice);
     partyBlob.talk = voicePhase <= 3 ? voicePhase : 0;
-    partyBlob.talkEnv = max(0, (int)voiceLevel()) / 12.0f;
+    partyBlob.talkLvl = voiceLevel();
+    partyBlob.talkEnv = max(0, (int)partyBlob.talkLvl) / 12.0f;
     partyBlob.render(frameNow);
     party = true;
     if (partyBlob.exprReq != 0xFF) {   // a face for a hero moment (wake-up stretch), then back to neutral
@@ -902,6 +946,7 @@ void renderBotMode() {
       botMode.shakeReactEnd = frameNow + partyBlob.exprMs;
       partyBlob.exprReq = 0xFF;
     }
+    codeModeIo();
   }
   if (!party) {
     partyBlob.leave(partyWanted());
@@ -943,8 +988,9 @@ void renderBotMode() {
   if (!uiHidesBotOverlays())
   #endif
   {
-    // Party mode keeps only voice bubbles (the show is the point, but a turn needs its words)
-    if (!party || botMode.speechBubble.voice) botMode.speechBubble.render(botMode.timeOverlay.enabled);
+    // Party mode keeps only voice bubbles (the show is the point, but a turn needs its words);
+    // code mode hides them all (the voice turn's "Hmm..." included)
+    if ((!party || botMode.speechBubble.voice) && !partyBlob.code) botMode.speechBubble.render(botMode.timeOverlay.enabled);
     botMode.notification.render();
     botMode.timeOverlay.render();
   }

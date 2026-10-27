@@ -28,7 +28,7 @@ SOUNDS = {
     "level_up": 12, "coin": 13, "wind_chime": 14, "heartbeat": 15, "mystery": 16,
     "fanfare": 17, "power_up": 18, "power_down": 19, "ping": 20, "whistle": 21,
     "confirm": 29, "happy_hum": 30, "sad_sigh": 31, "curious": 32, "laugh": 33, "yawn": 34,
-    "funky_song": 35, "chill_song": 36, "retro_song": 37,
+    "funky_song": 35, "chill_song": 36, "retro_song": 37, "rimshot": 38,
 }
 
 # Pitch limits in degrees (vizbot/config.h SC_SERVO_Y_MIN_DEG / MAX).
@@ -111,6 +111,15 @@ class Bot:
         r = self._get("/bot/party", params)
         if not isinstance(r, dict):
             raise BotError("this vizBot's firmware has no party mode yet")
+        return r
+
+    def code(self, **params) -> dict:
+        """Code mode, the "Ink Reader" animation while he reads his own code
+        (codemode.py): v=1 start, quip=<ms> with expr=<index>, found=1, v=0.
+        Firmware without it answers 404, which _get reports as text."""
+        r = self._get("/bot/code", params, timeout=2.0)
+        if not isinstance(r, dict):
+            raise BotError("this vizBot's firmware has no code mode yet")
         return r
 
     def sound(self, name: str):
@@ -205,8 +214,9 @@ ART_FIRMWARE = (3, 7, 34)
 
 def firmware_ok(version: str | None, at_least: tuple = MIN_FIRMWARE) -> bool:
     try:
-        return tuple(int(x) for x in str(version).split(".")[:3]) >= at_least
-    except ValueError:
+        # A bench build like 3.9.1-code.3 counts as the release it builds on
+        return tuple(int(x) for x in re.match(r"(\d+)\.(\d+)\.(\d+)", str(version)).groups()) >= at_least
+    except (ValueError, AttributeError):
         return False
 
 

@@ -71,7 +71,7 @@ class StartTurn(unittest.TestCase):
         app.personality = lambda: "Chill"
         app.toolbox = SimpleNamespace(run=lambda *a: None)
 
-        def turn(heard, personality, on_text=None):
+        def turn(heard, personality, on_text=None, on_quip=None):
             on_text(reply_text + " ")
             return {"text": reply_text, "tools": []}
         app.brain = SimpleNamespace(turn=turn, online=True)
