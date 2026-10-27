@@ -1296,6 +1296,8 @@ void handleState() {
                   ",\"size\":\"" + String("sml"[partySize % 3]) + "\"" +
                   ",\"active\":" + (partyBlob.active ? "true" : "false") +
                   ",\"corner\":\"" + partyCornerName(partyBlob.corner) + "\"" +   // his choice, read only
+                  ",\"seq\":\"" + partyBlob.seqNames() + "\"" +                    // library patterns playing, e.g. crown+bloom
+                  ",\"stack\":\"" + String(partyStack == 0 ? "off" : partyStack == 1 ? "some" : "wild") + "\"" +
                   ",\"render\":" + partyRenderStatsJson() + "}" +              // µs per blob + eyes render
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
@@ -1483,6 +1485,9 @@ void handleBotBackground() {
 // GET /bot/party?v=0|1&size=s|m|l — party mode (the face as a blob in a corner
 // over the ambient effect). Turning it on switches to the ambient scene. He
 // picks his own corner, so there is no corner argument.
+// &hero=flick|feeler|big|wake|roam|shake|beat plays one hero moment now, to test and tune.
+// &seq=breath|calm|crown|carousel|split|wave|merge|bloom|feelers|long plays a library pattern
+// (on top of what's playing when stacking is on); &stack=off|some|wild sets how many can stack.
 extern void cmdSetParty(uint8_t on, uint8_t size);
 
 void handleBotParty() {
@@ -1495,6 +1500,19 @@ void handleBotParty() {
     if (i >= 0 && i <= 2) size = i;
   }
   if (on != 0xFF || size != 0xFF) cmdSetParty(on, size);
+  if (server.hasArg("hero")) {
+    static const char *heroes[] = {"flick", "feeler", "big", "wake", "roam", "shake", "beat"};
+    String h = server.arg("hero");
+    for (uint8_t i = 0; i < 7; i++) if (h == heroes[i]) partyHeroReq = i + 1;
+  }
+  if (server.hasArg("seq")) {
+    String q = server.arg("seq");
+    for (uint8_t i = 0; i < SEQ_COUNT; i++) if (q == PARTY_SEQ_DEF[i].key) partySeqReq = i + 1;
+  }
+  if (server.hasArg("stack")) {
+    String k = server.arg("stack");
+    if (k == "off") partyStack = 0; else if (k == "some") partyStack = 1; else if (k == "wild") partyStack = 2;
+  }
   bool nowOn = on == 0xFF ? partyMode : on == 1;
   uint8_t nowSize = size == 0xFF ? partySize : size;
   server.send(200, "application/json", String("{\"party\":") + (nowOn ? "true" : "false") +

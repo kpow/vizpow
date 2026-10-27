@@ -10,23 +10,30 @@
 // ============================================================================
 // The ambient effect gets the whole screen. The face shrinks into a black blob
 // with a wobbling edge, a rim, a sheen, a floor shadow and the real eyes
-// inside. Plan: docs/plan-party-mode.md. Motion numbers come from
-// docs/party-mode-motion-spec.md, sizes and placement from
-// docs/party-mode-layout-spec.md (the plan wins where they differ).
+// inside. Plan: docs/plan-party-mode.md. Round 2 (tentacles, droplets, a
+// jigglier body): docs/party2-motion-spec.md and docs/party2-art-direction.md,
+// with the values Kevin tuned in the Tentacle Lab (spec §6a).
 //
 // Party mode is a flag on the ambient scene (botBackgroundStyle 4), not a
 // style of its own. He picks his own corner; there is no corner setting.
 //
 // Turning it on, he blinks and hops from the middle of the screen into his
-// corner as the outline around his eyes shrinks into the drop; turning it off
-// runs that backwards. Shake him for spikes all round; tap for a spike fan,
-// tap the blob and he dashes to another corner. On the CoreS3 / Stackchan the
-// spikes pump to the music; the 1.69 has no mic, so it sends itself a pulse.
+// corner as the outline around his eyes shrinks into the drop, then stretches
+// two tentacles toward the middle; turning it off runs that backwards. Now and
+// then a tentacle feels its way out (often a big one), or a flick throws a
+// droplet that flows back in. Shake him for spikes all round and a splash of
+// droplets; tap the show and a tentacle reaches for the finger; tap the blob
+// and he flinches, peeks, and slingshots to another corner. On the CoreS3 /
+// Stackchan tentacles drum the beat; the 1.69 has no mic, so it sends itself
+// a pulse.
 //
-// The outline is a 120-point polygon whose radius is a function of angle,
-// filled row by row. Sample angles start at the spike attractor, so every
-// spike tip lands on a vertex and never flickers. Every value moves on a
-// BotSpring stepped with real time. No per-frame heap.
+// The body is a 120-point polygon whose radius is a function of angle: surface
+// modes n = 2..5 on underdamped springs (the jiggle), edge waves, a spike fan,
+// and a mound where each tentacle roots. Tentacles are 10-node spring chains
+// that chase a pose curve; droplets are small ellipses with a bridge back to
+// the rim. Everything is filled as one union (non-zero winding), so overlaps
+// read as one liquid. Every value moves on a spring stepped with real time.
+// No per-frame heap.
 // ============================================================================
 
 extern GfxDevice *gfx;
@@ -36,7 +43,6 @@ uint16_t* lcdCanvasPixels();
 
 #define PARTY_N          120     // outline vertices, 3° apart
 #define PARTY_SPIKES     9       // spike fan slots, 18° (6 vertices) apart
-#define PARTY_MAX_X      16      // edge crossings per row (spikes make concave rows)
 #define PARTY_EDGE_GAP   2       // spike envelope / shadow to the screen edge, px
 #define PARTY_MORPH_R    78.5f   // drop radius at the start of the morph: with squash 0.31 it is the
 #define PARTY_MORPH_J    0.31f   // 103 x 54 px ellipse of the ambient scene's 5 px stroke around the eyes
@@ -44,13 +50,46 @@ uint16_t* lcdCanvasPixels();
 // Overlays move out of his way (layout spec §3)
 #ifdef BOARD_ESP32S3_LCD_169
   #define PARTY_CLOCK_INSET 22   // clock pill x from the side edge, clear of the rounded corner
+  #define PARTY_GLASS_R     40   // the panel's rounded corners: tentacles and droplets stay inside
 #else
   #define PARTY_CLOCK_INSET 8
+  #define PARTY_GLASS_R     0
 #endif
 #define PARTY_TOAST_LOW_Y (LCD_HEIGHT - 44)   // toast slot while he's up top (236 on the 1.69: clears the swipe handle)
 
+// Round 2 tier per board (motion spec §1.3): A 5 tentacles, 6 droplets, modes n = 2..5;
+// B 3 tentacles, 2 droplets, n = 2..4; C the v3.8.0 body with the jiggle only.
+#ifndef PARTY_TIER
+  #ifdef BOARD_ESP32S3_LCD_169
+    #define PARTY_TIER 0
+  #else
+    #define PARTY_TIER 1
+  #endif
+#endif
+#if PARTY_TIER == 0
+  #define PARTY_TENTS 5
+  #define PARTY_DROPS 6
+  #define PARTY_MODES 4
+#elif PARTY_TIER == 1
+  #define PARTY_TENTS 3
+  #define PARTY_DROPS 2
+  #define PARTY_MODES 3
+#else
+  #define PARTY_TENTS 0
+  #define PARTY_DROPS 0
+  #define PARTY_MODES 3
+#endif
+
+// Kevin's Tentacle Lab tune (motion spec §6a)
+#define PARTY_REACH  1.20f   // tentacle length
+#define PARTY_JIGGLE 1.70f   // surface-mode kicks
+#define PARTY_CHUNK  1.30f   // tentacle width
+#define PARTY_BULB   1.30f   // tip bulb
+#define PARTY_BIG    0.60f   // share of random reaches that go big
+
 bool    partyMode = false;       // NVS "party"
 uint8_t partySize = 1;           // NVS "pSize": 0 S, 1 M, 2 L
+volatile uint8_t partyHeroReq = 0;   // GET /bot/party?hero= sets it, the render loop plays it
 
 // Pre-rounded pixels per size (layout spec §1, §6): eye scale, body radius,
 // spike envelope (1.2 r), extent below centre (shadow), wander box.
@@ -66,18 +105,21 @@ static inline bool partyRight(uint8_t c) { return c == 0 || c == 1; }
 static inline bool partyTop(uint8_t c)   { return c == 0 || c == 3; }
 
 // Render cost for GET /state (blob + eyes, not the effect); reading starts a fresh window
-// stageUs: summed per stage (step, outline, shadow, rim + body, sheen, eyes) to find the cost
+// stageUs: summed per stage (step, outline, shadows, rim + body, sheen, eyes) to find the cost
 #define PARTY_STAGES 6
-struct PartyRenderStats { uint32_t sumUs, count, maxUs; uint32_t stageUs[PARTY_STAGES]; };
-PartyRenderStats partyRenderStats = {0, 0, 0, {0}};
+struct PartyRenderStats { uint32_t sumUs, count, maxUs; uint32_t stageUs[PARTY_STAGES]; uint8_t tentsMax; };
+PartyRenderStats partyRenderStats = {0, 0, 0, {0}, 0};
+uint8_t partyTentCap = PARTY_TENTS;   // the cost guard drops it to 3 while frames run long
 
 String partyRenderStatsJson() {
   PartyRenderStats &st = partyRenderStats;
   String json = "{\"avgUs\":" + String(st.count ? st.sumUs / st.count : 0) +
-                ",\"maxUs\":" + String(st.maxUs) + ",\"renders\":" + String(st.count) + ",\"stagesUs\":[";
+                ",\"maxUs\":" + String(st.maxUs) + ",\"renders\":" + String(st.count) +
+                ",\"tentsMax\":" + String(st.tentsMax) + ",\"tentCap\":" + String(partyTentCap) + ",\"stagesUs\":[";
   for (int i = 0; i < PARTY_STAGES; i++) json += String(i ? "," : "") + String(st.count ? st.stageUs[i] / st.count : 0);
   json += "]}";
   st.sumUs = st.count = st.maxUs = 0;
+  st.tentsMax = 0;
   for (int i = 0; i < PARTY_STAGES; i++) st.stageUs[i] = 0;
   return json;
 }
@@ -88,79 +130,220 @@ static inline uint16_t partyDark75(uint16_t p) { return p - ((p >> 2) & 0x39E7);
 static inline uint16_t partyDark50(uint16_t p) { return (p >> 1) & 0x7BEF; }
 
 // ---- Scanline fill ----------------------------------------------------------
-// Each polygon edge drops its crossing into the rows it spans (x in 1/16 px),
-// so a row only sorts the few crossings it has instead of testing every edge.
-// Two tables: the rim (outer) and body (inner) outlines are filled in one pass.
-static int16_t partyRowX[2][LCD_HEIGHT][PARTY_MAX_X];
-static uint8_t partyRowN[2][LCD_HEIGHT];
+// Any number of polygons go into one edge list and fill as their union
+// (non-zero winding), so a tentacle over the body, or one folded over itself,
+// stays one solid shape. Edges are bucketed by first row; a row walks only the
+// edges that span it and sorts their crossings (x in 1/16 px).
+#define PARTY_MAX_EDGES 420      // body 120 + 5 tentacles x 27 + 6 droplets x 18
+#define PARTY_MAX_XR    48       // crossings per row
+#define PARTY_MAX_SPANS (PARTY_MAX_XR / 2)
 
-// Crossings of the polygon at row centres y + 0.5 into table p; ya..yb = rows touched
-static void partyScan(int p, const float *vx, const float *vy, int n, int &ya, int &yb) {
-  memset(partyRowN[p], 0, LCD_HEIGHT);
-  ya = LCD_HEIGHT; yb = -1;
-  for (int i = 0, j = n - 1; i < n; j = i++) {
-    float x0 = vx[j], y0 = vy[j], x1 = vx[i], y1 = vy[i];
-    if (y0 > y1) { float t = x0; x0 = x1; x1 = t; t = y0; y0 = y1; y1 = t; }
-    int r0 = max(0, (int)ceilf(y0 - 0.5f)), r1 = min(LCD_HEIGHT - 1, (int)ceilf(y1 - 0.5f) - 1);   // y0 <= y+.5 < y1
-    if (r1 < r0) continue;
-    float dxdy = (x1 - x0) / (y1 - y0), x = (x0 + (r0 + 0.5f - y0) * dxdy) * 16, dx = dxdy * 16;
-    for (int y = r0; y <= r1; y++, x += dx) {
-      uint8_t &m = partyRowN[p][y];
-      if (m < PARTY_MAX_X) partyRowX[p][y][m++] = (int16_t)lroundf(x);
+struct PartyEdge { float x, dx; int16_t y0, y1; int8_t dir; };
+
+struct PartyRaster {
+  PartyEdge e[PARTY_MAX_EDGES];
+  uint16_t ord[PARTY_MAX_EDGES], act[PARTY_MAX_XR];
+  uint16_t n, nAct, next;
+  int16_t ya, yb;
+
+  void clear() { n = 0; ya = LCD_HEIGHT; yb = -1; }
+  // Edges of polygon (vx, vy) shifted by (ox, oy); row y is crossed at its centre y + 0.5.
+  // Every polygon counts as winding the same way, whatever order its points came
+  // in, so overlaps add up instead of cancelling into a see-through hole.
+  void add(const float *vx, const float *vy, int cnt, float ox = 0, float oy = 0) {
+    float area = 0;
+    for (int i = 0, j = cnt - 1; i < cnt; j = i++) area += (vx[j] - vx[i]) * (vy[j] + vy[i]);
+    int8_t sense = area < 0 ? -1 : 1;
+    for (int i = 0, j = cnt - 1; i < cnt; j = i++) {
+      float x0 = vx[j] + ox, y0 = vy[j] + oy, x1 = vx[i] + ox, y1 = vy[i] + oy;
+      int8_t dir = sense;
+      if (y0 > y1) { float t = x0; x0 = x1; x1 = t; t = y0; y0 = y1; y1 = t; dir = -sense; }
+      int r0 = max(0, (int)ceilf(y0 - 0.5f)), r1 = min(LCD_HEIGHT - 1, (int)ceilf(y1 - 0.5f) - 1);   // y0 <= y+.5 < y1
+      if (r1 < r0 || n >= PARTY_MAX_EDGES) continue;
+      float dxdy = (x1 - x0) / (y1 - y0);
+      PartyEdge &E = e[n++];
+      E.x = x0 + (r0 + 0.5f - y0) * dxdy; E.dx = dxdy; E.y0 = r0; E.y1 = r1; E.dir = dir;
+      if (r0 < ya) ya = r0;
+      if (r1 > yb) yb = r1;
     }
-    ya = min(ya, r0); yb = max(yb, r1);
   }
-}
+  // Order the edges by first row; then call spans() with rising y
+  void begin() {
+    static uint16_t cnt[LCD_HEIGHT + 1];
+    memset(cnt, 0, sizeof(cnt));
+    for (int i = 0; i < n; i++) cnt[e[i].y0 + 1]++;
+    for (int y = 1; y <= LCD_HEIGHT; y++) cnt[y] += cnt[y - 1];
+    for (int i = 0; i < n; i++) ord[cnt[e[i].y0]++] = i;
+    nAct = next = 0;
+  }
+  // Row y as sorted, screen-clipped pixel spans; returns the span count
+  int spans(int y, int16_t *xa, int16_t *xb) {
+    while (next < n && e[ord[next]].y0 <= y) {
+      uint16_t k = ord[next++];
+      if (e[k].y1 >= y && nAct < PARTY_MAX_XR) act[nAct++] = k;
+    }
+    int16_t xs[PARTY_MAX_XR];
+    int8_t ds[PARTY_MAX_XR];
+    int m = 0;
+    for (int i = 0; i < nAct;) {
+      const PartyEdge &E = e[act[i]];
+      if (E.y1 < y) { act[i] = act[--nAct]; continue; }
+      int16_t x = (int16_t)lroundf((E.x + (y - E.y0) * E.dx) * 16);
+      int j = m++ - 1;
+      while (j >= 0 && xs[j] > x) { xs[j + 1] = xs[j]; ds[j + 1] = ds[j]; j--; }
+      xs[j + 1] = x; ds[j + 1] = E.dir;
+      i++;
+    }
+    int k = 0, w = 0, x0 = 0;
+    for (int i = 0; i < m; i++) {
+      int p = w;
+      w += ds[i];
+      if (p == 0 && w != 0) x0 = xs[i];
+      else if (p != 0 && w == 0 && k < PARTY_MAX_SPANS) {
+        int a = max(0, (x0 - 8 + 15) >> 4), b = min(LCD_WIDTH - 1, (xs[i] - 8) >> 4);   // ceil / floor of x - 0.5
+        if (b >= a) { xa[k] = a; xb[k] = b; k++; }
+      }
+    }
+    return k;
+  }
+};
+static PartyRaster partyRA, partyRB;
 
-// Row y of table p as sorted, screen-clipped pixel spans; returns the span count
-static int partySpans(int p, int y, int16_t *xa, int16_t *xb) {
-  int16_t *xs = partyRowX[p][y];
-  int m = partyRowN[p][y];
-  for (int i = 1; i < m; i++) {
-    int16_t v = xs[i];
-    int j = i - 1;
-    while (j >= 0 && xs[j] > v) { xs[j + 1] = xs[j]; j--; }
-    xs[j + 1] = v;
-  }
-  m &= ~1;
-  int k = 0;
-  for (int i = 0; i < m; i += 2) {
-    int a = max(0, (xs[i] - 8 + 15) >> 4), b = min(LCD_WIDTH - 1, (xs[i + 1] - 8) >> 4);   // ceil / floor of x - 0.5
-    if (b >= a) { xa[k] = a; xb[k] = b; k++; }
-  }
-  return k;
-}
-
-// Even-odd fill: span(y, xa, xb) for every inside run, clipped to the screen
+// One polygon: span(y, xa, xb) for every inside run, clipped to the screen
 template <typename Span>
 static void partyFillPoly(const float *vx, const float *vy, int n, Span span) {
-  int ya, yb;
-  partyScan(0, vx, vy, n, ya, yb);
-  int16_t xa[PARTY_MAX_X / 2], xb[PARTY_MAX_X / 2];
-  for (int y = ya; y <= yb; y++) {
-    int k = partySpans(0, y, xa, xb);
+  PartyRaster &R = partyRA;
+  R.clear();
+  R.add(vx, vy, n);
+  R.begin();
+  int16_t xa[PARTY_MAX_SPANS], xb[PARTY_MAX_SPANS];
+  for (int y = R.ya; y <= R.yb; y++) {
+    int k = R.spans(y, xa, xb);
     for (int i = 0; i < k; i++) span(y, xa[i], xb[i]);
   }
 }
 
 static float partyVX[PARTY_N], partyVY[PARTY_N], partyRR[PARTY_N], partyC[PARTY_N], partyS[PARTY_N];
+static float partyTT[PARTY_N];   // sideways offset per vertex: a pattern spike's lean
 static float partyCos3[PARTY_N], partySin3[PARTY_N];   // cos/sin(i x 3°)
 static float partyStepC[4], partyStepS[4];             // cos/sin(n x 3°) for the n = 3, 4, 5 edge waves and the n = 7 shiver
+static float partyModeStepC[4], partyModeStepS[4];     // cos/sin(n x 3°) for the n = 2..5 surface modes
 static const float PARTY_SPK_LUT[3] = {1.0f, 0.41f, 0.09f};   // (1 - j/3)^2.2: sharp tip, concave flanks
 
-// Two ways to change corner. A poke is a startled dash: a short crouch, a fast
-// spring, big kicks. A roam is his own idea: a glance at where he's going, then
-// a stroll on a slower spring. The path bows 45 % toward the screen centre.
-struct PartyRun { uint16_t leadMs; float f, z, jGo, lift, reach, jLand, land; };
-static const PartyRun PARTY_POKE = {260, 1.5f, 0.85f, -0.14f, 0.12f, 0.45f, 0.16f, 0.7f};
-static const PartyRun PARTY_ROAM = {700, 0.95f, 0.9f, -0.08f, 0.07f, 0.30f, 0.10f, 0.45f};
+// Surface modes n = 2..5 (motion spec §3.1): frequency, damping, clamp. Mode 2 is
+// the squash and the velocity stretch, so a run that stops overshoots into a squash.
+struct PartyModeDef { float f, z, cl; };
+static const PartyModeDef PARTY_MODE_DEF[4] = {{2.0f, 0.22f, 0.28f}, {3.0f, 0.25f, 0.14f}, {3.8f, 0.28f, 0.09f}, {4.5f, 0.32f, 0.06f}};
+
+// ---- Tentacles, droplets, timed events -------------------------------------
+#define PARTY_NN 10                         // nodes per tentacle; 0 and 1 ride the body
+#define PARTY_TP (2 * (PARTY_NN - 1) + 9)   // tentacle polygon: both sides and a 9-point bulb
+enum { PT_REACH, PT_FEELER, PT_FLICK, PT_STREAMER, PT_GRAB, PT_PEEK, PT_BEAT, PT_SEQ };   // PT_SEQ: owned by a pattern, never reused
+enum { PT_GROW, PT_HOLD, PT_RETRACT };
+
+struct PartyTentOpt {
+  float dir = 0;              // direction from the body centre, or
+  bool track = false;         // grow toward a point (tx, ty)
+  float tx = 0, ty = 0;
+  float L = 0;                // length past the rim
+  uint8_t kind = PT_REACH;
+  int32_t hold = 1500;        // ms after it arrives; -1 until retracted
+  float gf = 1.6f, gz = 0.5f; // grow spring
+  bool soft = false;          // floppy (streamers)
+  bool free = false;          // may leave the 70° cone into the show
+  float curl = 0.3f, swA = 0.25f, swF = 0.45f;
+  uint8_t boops = 1;          // bulb pulses after it arrives
+  bool mirror = false;        // sway mirrors with side (a symmetric pair)
+  float side = 0;             // ±1, or 0 to take it from the angle
+  float ph = -1;              // sway phase, or < 0 for random (a pair shares one)
+};
+
+struct PartyTent {
+  bool on, track, free, soft, pinching, pinchArmed, mirror;
+  uint8_t kind, phase, boops;
+  uint16_t gen;
+  float tx, ty, dirA, L, Lc, side, curlT, swA, swF, swPh, bulbR, pinchV, area;
+  int32_t holdMs;
+  unsigned long holdUntil, pinchAt, bulbless;
+  BotSpring lam, th, aim, curl, bulb, neck;
+  float nx[PARTY_NN], ny[PARTY_NN], vx[PARTY_NN], vy[PARTY_NN];
+  float hw[PARTY_NN], ux[PARTY_NN], uy[PARTY_NN];   // half-width and unit tangent, once per frame
+};
+
+struct PartyDrop {
+  bool on, sat, bridge;
+  uint8_t phase;              // 0 flying, 1 flowing back, 2 being absorbed
+  float x, y, vx, vy, r, th, gap, rim;
+  unsigned long t0, flyMs;
+  BotSpring rx, ry, rs;
+};
+
+enum { PE_BOOP, PE_KICK2, PE_LOOK, PE_GRAB, PE_PEEK, PE_REACH, PE_FEELER, PE_WAKE, PE_WAKE2, PE_WAKE_END,
+       PE_DROP, PE_RETRACT, PE_BEAT, PE_BEAT_PINCH, PE_FEELER_GO };
+struct PartyEv { unsigned long at; uint8_t kind; int8_t ref; uint16_t gen; float a, b, c; };
+#define PARTY_EVQ 20
+
+static float partyTX[PARTY_TP], partyTY[PARTY_TP];       // one tentacle polygon at a time
+static float partyDX[12], partyDY[12], partyBX[6], partyBY[6];
+static float partyCos30[12], partySin30[12];
+
+// Two ways to change corner, both a slingshot (hero 6.4): a tentacle grabs a
+// point along the path and he pulls himself after it. A poke is a startled
+// dash: a short crouch, a fast spring, big kicks, two streamers trailing. A
+// roam is his own idea: a glance at where he's going, then a stroll.
+struct PartyRun { uint16_t leadMs; float f, z, jGo, lift, bow, jLand, land, gf, gz; uint8_t streamers; };
+static const PartyRun PARTY_POKE = {260, 1.5f, 0.85f, -0.14f, 0.12f, 0.45f, 0.30f, 0.7f, 3.0f, 0.6f, 2};
+static const PartyRun PARTY_ROAM = {700, 0.95f, 0.9f, -0.08f, 0.07f, 0.30f, 0.16f, 0.45f, 1.6f, 0.55f, 0};
 #define PARTY_ROAM_MIN_MS 25000   // he wanders to another corner every 25-60 s
 #define PARTY_ROAM_MAX_MS 60000
+
+// ---- Pattern library (docs/party2-pattern-library.md) ------------------------
+// Symmetric ferrofluid sequences in three sizes, mirrored about the line from
+// the blob to the screen centre so they read as a magnet, not a fidget. Every
+// running pattern owns a bank of spike slots, so up to three can stack and their
+// spikes add up. A scheduler picks them; GET /bot/party?seq= plays one on demand.
+#define PARTY_BANKS 3
+#define PARTY_SLOTS 9
+#define PARTY_SEQS  3
+struct PartySlot { bool on, popped; int8_t off, k; uint8_t wide; float env, Fon, Foff, hT, lean; BotSpring h; };
+struct PartyBank { int8_t owner; float rf, rz, ff, fz; PartySlot s[PARTY_SLOTS]; };
+static const float PARTY_LUT7[4] = {1.0f, 0.53f, 0.22f, 0.05f};   // (1 - |d|/4)^2.2: the 7-wide spike
+
+enum { SEQ_BREATH, SEQ_CALM, SEQ_CROWN, SEQ_CAROUSEL, SEQ_SPLIT, SEQ_WAVE, SEQ_MERGE, SEQ_BLOOM, SEQ_FEELERS, SEQ_LONG, SEQ_COUNT };
+enum { TIER_S, TIER_M, TIER_B };
+struct PartySeqDef { const char *key; uint8_t tier, w; uint16_t cdS; bool spikes, tents, solo; };
+static const PartySeqDef PARTY_SEQ_DEF[SEQ_COUNT] = {
+  {"breath",   TIER_S, 17, 12, true,  false, false},   // Breathing Crown: five spikes breathe with him
+  {"calm",     TIER_S,  8, 20, false, false, true },   // Calm Dome: field off, a glossy dome, one wobble (never stacks)
+  {"crown",    TIER_M,  9, 30, true,  false, false},   // Rosensweig Crown: spikes nucleate centre-out, tremble, slump
+  {"carousel", TIER_M,  7, 35, true,  false, false},   // Carousel: a ring of leaning spikes circles and reverses
+  {"split",    TIER_M,  7, 30, true,  false, false},   // Peak Split: one peak splits into two, then three
+  {"wave",     TIER_M,  7, 25, true,  false, false},   // Stadium Wave: a crest of spikes runs across and back
+  {"merge",    TIER_M,  7, 30, true,  false, false},   // Spike Merge: nine small spikes merge into five, then three tall
+  {"bloom",    TIER_M,  7, 30, false, true,  false},   // Bloom: a mirrored pair of arms around a small spike
+  {"feelers",  TIER_M,  5, 20, false, true,  false},   // Feelers: a short group fanned across the cone
+  {"long",     TIER_B,  3, 45, false, true,  false},   // Long Reach: the big feeler, now rare
+};
+struct PartySeq {
+  bool on, lead, driveAl;
+  uint8_t id, bank, v;
+  int8_t dir;
+  unsigned long t0;
+  float axis, g, kT, phi, hold;
+  uint32_t f;                   // one-shot flags
+  int8_t ti[3]; uint16_t tg[3]; uint8_t nt;   // its tentacles (slot, generation)
+};
+struct PartyHist { unsigned long t; uint8_t tier; bool tents; };
+static const uint8_t PARTY_STACK_MOST[3] = {1, 2, 3};          // off, some, wild
+static const float PARTY_STACK_CHANCE[3] = {0, 0.4f, 0.75f};   // chance to add a layer a beat after one starts
+uint8_t partyStack = 1;              // GET /bot/party?stack=off|some|wild
+volatile uint8_t partySeqReq = 0;    // GET /bot/party?seq= sets id + 1, the render loop plays it
 
 struct PartyBlob {
   // Body
   BotSpring wx, wy;          // centre (wander), px
-  BotSpring J, L, St;        // squash (cos 2θ), hop lift px (+ up), velocity stretch
+  BotSpring L;               // hop lift px (+ up)
+  BotSpring mc[PARTY_MODES], ms[PARTY_MODES];   // surface modes n = 2.., cos and sin parts
   BotSpring al, F;           // spike attractor angle, field strength 0..1
   BotSpring spk[PARTY_SPIKES];
   BotSpring g, E;            // bulge toward gaze / attractor, agitation 0..1
@@ -170,18 +353,20 @@ struct PartyBlob {
   BotSpring P;               // enter / exit morph: 0 = the face, 1 = the drop in its corner
   BotSpring hP;              // porcupine spikes all round (shake), px
   BotSpring beatSm;          // smoothed beat envelope
-  float pkL, pkJ, pkD;       // kick normalisers
+  float pkL, pkD, pkE, pkBulb, pkM[PARTY_MODES];   // kick normalisers
 
   bool active, ready, haveCorner;
   uint8_t corner;
-  unsigned long lastMs, fieldUntil, evAt, nextWander, nextPulse;
-  float fieldT, alT, phiV, bulgeA, B, t;
+  unsigned long lastMs, fieldUntil, evAt, nextWander, nextPulse, nextFeeler, nextBright, lastBeatGrab;
+  float fieldT, alT, phiV, bulgeA, B, t, Reff, borrow;
   float wTx, wTy;
   float jit[PARTY_SPIKES], ph[6];
-  float prevTx, prevTy;
   int16_t icx, icy, iox, ioy;   // shared integer centre and eye offset (0.6 px hysteresis)
   float sheen[3];               // low-passed show colour, RGB888
-  float thD, tapT;              // dent angle; tap agitation, decays
+  float thD, tapT, shakeT;      // dent angle; tap and shake agitation, decay
+  bool haveBright;              // a bright spot in the show worth reaching for
+  int16_t brightX, brightY;
+  int8_t beatSide;
   unsigned long nextRoam;
   // Corner run (poke dash or roam)
   const PartyRun *run;          // null when not running
@@ -189,11 +374,35 @@ struct PartyBlob {
   uint8_t runTo;
   unsigned long goAt;
   float fromX, fromY, dstX, dstY;
+  int8_t grabI, strI[2];        // the run's grab tentacle and streamers (slot, generation)
+  uint16_t grabG, strG[2];
   // Morph, shake, fidgets, beat
   uint8_t morph;                // 0 none, 1 entering, 2 exiting
   unsigned long exitAt, porcUntil, shakeAt, shiverAt, nextFidget, padUntil, lastHop, lastPop;
   uint8_t lastFidget;
   float prevEnv;
+  // A face for bot_mode to show (0xFF none), and for how long
+  uint8_t exprReq;
+  uint16_t exprMs;
+  // Pattern library
+  PartyBank banks[PARTY_BANKS];
+  PartySeq seqs[PARTY_SEQS];
+  BotSpring kappa;              // calm gain: edge waves and agitation (Calm Dome turns it down)
+  float seqG;                   // mound under a crown
+  unsigned long schNextAt, schLayerAt, schCd[SEQ_COUNT], throbUntil;
+  bool schLayerArmed, schBigInStack;
+  int8_t schLast;
+  uint8_t schSmallRun, schSpikeRun, schForceSmall, schHistN;
+  PartyHist schHist[16];
+
+  PartyTent tents[PARTY_TENTS ? PARTY_TENTS : 1];
+  PartyDrop drops[PARTY_DROPS ? PARTY_DROPS : 1];
+  PartyEv evq[PARTY_EVQ];
+  uint8_t nEv;
+  uint16_t tentGen;
+  // cost guard
+  unsigned long guardAt, calmSince;
+  uint32_t guardMax;
 
   const PartyTier &tier() const { return PARTY_TIERS[partySize < 3 ? partySize : 1]; }
 
@@ -210,7 +419,7 @@ struct PartyBlob {
     box(c, x0, x1, y0, y1);
     hx = (x0 + x1) / 2; hy = (y0 + y1) / 2;
   }
-  // Spikes only point into the show, within 60° of the line to the screen centre
+  // Spikes and tentacles mostly point into the show, within a cone around the line to the screen centre
   float alphaHome() const {
     float hx, hy;
     home(corner, hx, hy);
@@ -221,28 +430,60 @@ struct PartyBlob {
     if (a < 0) a += TWO_PI;
     return a - PI;
   }
-  float clampInward(float a) const {
+  float clampCone(float a, float deg) const {
     float h = alphaHome();
-    return h + constrain(wrapPi(a - h), -60 * DEG_TO_RAD, 60 * DEG_TO_RAD);
+    return h + constrain(wrapPi(a - h), -deg * DEG_TO_RAD, deg * DEG_TO_RAD);
   }
+  float clampInward(float a) const { return clampCone(a, 60); }
 
   void init() {
     for (int i = 0; i < PARTY_N; i++) { partyCos3[i] = cosf(i * 3 * DEG_TO_RAD); partySin3[i] = sinf(i * 3 * DEG_TO_RAD); }
     const int harm[4] = {3, 4, 5, 7};
     for (int h = 0; h < 4; h++) { partyStepC[h] = cosf(harm[h] * 3 * DEG_TO_RAD); partyStepS[h] = sinf(harm[h] * 3 * DEG_TO_RAD); }
+    for (int k = 0; k < 4; k++) { partyModeStepC[k] = cosf((k + 2) * 3 * DEG_TO_RAD); partyModeStepS[k] = sinf((k + 2) * 3 * DEG_TO_RAD); }
+    for (int i = 0; i < 12; i++) { partyCos30[i] = cosf(i * 30 * DEG_TO_RAD); partySin30[i] = sinf(i * 30 * DEG_TO_RAD); }
     wx.init(0, 0.55f, 0.75f); wy.init(0, 0.55f, 0.75f);
-    J.init(0.05f, 2.2f, 0.45f); L.init(0, 1.9f, 0.42f); St.init(0, 4, 0.8f);
+    L.init(0, 1.9f, 0.42f);
+    for (int k = 0; k < PARTY_MODES; k++) {
+      const PartyModeDef &m = PARTY_MODE_DEF[k];
+      mc[k].init(0, m.f, m.z); ms[k].init(0, m.f, m.z);
+      pkM[k] = botSpringPeak(m.f, m.z);
+    }
     al.init(0, 1.2f, 0.9f); F.init(0, 3, 0.8f);
-    for (int k = 0; k < PARTY_SPIKES; k++) spk[k].init(0, 2.6f, 0.55f);
+    for (int k = 0; k < PARTY_SPIKES; k++) spk[k].init(0, 3.2f, 0.45f);
     g.init(0, 1.5f, 0.9f); E.init(0, 1.2f, 1);
-    ox.init(0, 2.4f, 0.5f); oy.init(0, 2.4f, 0.5f);
-    D.init(0, 3.2f, 0.32f); Q.init(0, 1.5f, 0.85f);
+    ox.init(0, 2.0f, 0.38f); oy.init(0, 2.0f, 0.38f);
+    D.init(0, 3.2f, 0.28f); Q.init(0, 1.5f, 0.85f);
     P.init(1, 1.4f, 0.82f); hP.init(0, 5, 0.6f); beatSm.init(0, 3, 0.7f);
     pkL = botSpringPeak(1.9f, 0.42f);
-    pkJ = botSpringPeak(2.2f, 0.45f);
-    pkD = botSpringPeak(3.2f, 0.32f);
+    pkD = botSpringPeak(3.2f, 0.28f);
+    pkE = botSpringPeak(1.2f, 1);
+    pkBulb = botSpringPeak(2, 0.4f);
+    exprReq = 0xFF;
+    kappa.init(1, 1.6f, 1);
+    for (int i = 0; i < PARTY_BANKS; i++) banks[i].owner = -1;
+    schLast = -1;
     active = false;
     ready = true;
+  }
+
+  // A surface mode kick of peak amp (fraction of r) centred on angle th
+  void modeKick(int n, float amp, float th) {
+    int k = n - 2;
+    if (k < 0 || k >= PARTY_MODES) return;
+    amp *= PARTY_JIGGLE;
+    mc[k].v += amp * cosf(n * th) / pkM[k];
+    ms[k].v += amp * sinf(n * th) / pkM[k];
+  }
+  void expr(uint8_t e, uint16_t ms) { exprReq = e; exprMs = ms; }
+
+  void clearExtras() {
+    for (int i = 0; i < PARTY_TENTS; i++) tents[i].on = false;
+    for (int i = 0; i < PARTY_DROPS; i++) drops[i].on = false;
+    nEv = 0; borrow = 0; grabI = strI[0] = strI[1] = -1;
+    for (int i = 0; i < PARTY_SEQS; i++) { calmEnd(seqs[i]); seqs[i].on = false; }
+    for (int i = 0; i < PARTY_BANKS; i++) { banks[i].owner = -1; for (int j = 0; j < PARTY_SLOTS; j++) { banks[i].s[j].on = false; banks[i].s[j].h.init(0, 3.2f, 0.45f); } }
+    kappa.snap(1); seqG = 0; throbUntil = 0; schLayerArmed = false; schBigInStack = false;
   }
 
   // First party frame. When party mode has just started he picks a corner and
@@ -254,8 +495,11 @@ struct PartyBlob {
     float hx, hy;
     home(corner, hx, hy);
     wx.snap(hx); wy.snap(hy); wTx = hx; wTy = hy;
-    J.snap(0.05f); L.snap(0); St.snap(0); F.snap(0); g.snap(0); E.snap(0); ox.snap(0); oy.snap(0); D.snap(0);
-    run = nullptr; tapT = 0; thD = 0;
+    L.snap(0); F.snap(0); g.snap(0); E.snap(0); ox.snap(0); oy.snap(0); D.snap(0);
+    for (int k = 0; k < PARTY_MODES; k++) { mc[k].snap(0); ms[k].snap(0); }
+    mc[0].snap(0.05f);
+    clearExtras();
+    run = nullptr; tapT = shakeT = 0; thD = 0; haveBright = false; beatSide = 1;
     nextRoam = now + (unsigned long)eyeRnd(PARTY_ROAM_MIN_MS, PARTY_ROAM_MAX_MS);
     for (int k = 0; k < PARTY_SPIKES; k++) spk[k].snap(0);
     alT = alphaHome(); al.snap(alT);
@@ -263,35 +507,44 @@ struct PartyBlob {
     fieldT = 0; fieldUntil = 0; evAt = 0; phiV = 0; bulgeA = alT;
     icx = (int16_t)lroundf(hx); icy = (int16_t)lroundf(hy); iox = ioy = 0;
     sheen[0] = 40; sheen[1] = 40; sheen[2] = 60;
-    prevTx = botEyes.tx; prevTy = botEyes.ty;
     lastMs = now;
     nextWander = now + 1000;
     nextPulse = now + (unsigned long)eyeRnd(5000, 12000);
     nextFidget = now + (unsigned long)eyeRnd(12000, 25000);
-    porcUntil = shakeAt = shiverAt = padUntil = lastHop = lastPop = 0;
+    nextFeeler = now + (unsigned long)eyeRnd(5000, 9000);
+    nextBright = now;
+    schNextAt = now + (fresh ? 5000 : 2500);   // a fresh party lands and stretches first
+    porcUntil = shakeAt = shiverAt = padUntil = lastHop = lastPop = lastBeatGrab = 0;
+    guardAt = now; guardMax = 0; calmSince = 0;
     hP.snap(0); beatSm.snap(0); prevEnv = 0;
     botEyes.blinkStart(now, BW_SWAP);   // every swap between face and drop hides under a blink
     active = true;
     if (fresh) {
       morph = 1;
       P.snap(0); P.t = 1;
-      J.snap(PARTY_MORPH_J);
+      mc[0].snap(PARTY_MORPH_J);
       wx.snap(BOT_FACE_CX); wy.snap(BOT_FACE_CY);
       icx = BOT_FACE_CX; icy = BOT_FACE_CY;
     } else {
       morph = 0;
       P.snap(1);
-      J.v += 0.14f / pkJ;              // land with a squash
+      modeKick(2, 0.14f, 0);           // land with a squash
       field(alT, 0.7f, 300, now);      // and a spike burst
     }
+    t = eyeSecs(now);
+    Reff = morphR();
+    prepShape(Reff);
   }
-  // Party mode turned off: a beat reaching for the middle, then the hop back
+  // Party mode turned off: tentacles drain, a beat reaching for the middle, then the hop back
   void beginExit(unsigned long now) {
     if (morph == 2) return;
+    abortSeqs(now);
     if (run) { run = nullptr; }
     morph = 2; exitAt = now;
+    retractAll(true);
+    for (int i = 0; i < PARTY_DROPS; i++) drops[i].flyMs = 0;
     field(alphaHome(), 0.6f, 200, now);
-    J.v += 0.10f / pkJ;
+    modeKick(2, 0.10f, 0);
     botEyes.padX = constrain((LCD_WIDTH / 2.0f - wx.x) / 40, -1.0f, 1.0f);
     botEyes.padY = constrain((LCD_HEIGHT / 2.0f - wy.x) / 40, -1.0f, 1.0f);
   }
@@ -304,8 +557,14 @@ struct PartyBlob {
   bool busy() const { return run || morph; }
   void shake(unsigned long now) {
     if (morph) return;
-    porcUntil = now + 450; shakeAt = now; tapT = 1;
+    abortSeqs(now);
+    porcUntil = now + 450; shakeAt = now; shakeT = 1;
+    retractAll(true);
+    static const float amp[4] = {0.18f, 0.12f, 0.08f, 0.05f};
+    for (int k = 0; k < PARTY_MODES; k++) modeKick(k + 2, amp[k], eyeRnd(0, TWO_PI));
     botEyes.blinkStart(now, BW_SWAP);
+    int n = 3 + random(3);   // a splash of droplets into the show
+    for (int i = 0; i < n; i++) later(now, i * 40, PE_DROP, -1, 0, clampCone(alphaHome() + eyeRnd(-70, 70) * DEG_TO_RAD, 75), eyeRnd(150, 260));
   }
   // Morph shapes: radius, eye scale, and how much of the corner behaviour is on
   float morphR() const {
@@ -321,42 +580,63 @@ struct PartyBlob {
   void leave(bool keepCorner) {
     if (active && (run || morph || padUntil)) { botEyes.padX = botEyes.padY = 0; }
     active = false; run = nullptr; morph = 0;
+    clearExtras();
     if (!keepCorner) haveCorner = false;
   }
 
   bool contains(int16_t x, int16_t y) const { return hypotf(x - icx, y - icy) < tier().r * 1.05f; }
   bool running() const { return run != nullptr; }
 
-  // Tap on the blob: dent where the finger lands, then dash to another corner
+  // Shy poke (hero 6.2): flinch where the finger lands, a beat of stillness,
+  // one tiny peek at the finger, then the slingshot to another corner
   void poke(int16_t x, int16_t y, unsigned long now) {
     if (busy()) return;
+    abortSeqs(now);
     thD = atan2f(y - icy, x - icx);
-    D.v += -0.18f * tier().r / pkD;
-    J.v += 0.16f / pkJ;
+    D.v += -0.22f * Reff / pkD;
+    modeKick(2, -0.10f, thD); modeKick(3, -0.07f, thD); modeKick(4, -0.05f, thD); modeKick(5, -0.03f, thD);
+    later(now, 90, PE_KICK2, -1, 0, 0.30f);
+    retractAll(true);
+    for (int i = 0; i < PARTY_DROPS; i++) drops[i].flyMs = 0;
     tapT = 1;
     botEyes.blinkStart(now, BW_SWAP);
-    startRun((corner + 1 + random(3)) % 4, PARTY_POKE, now);
+    later(now, 300, PE_PEEK, -1, 0, x, y);
+    startRun((corner + 1 + random(3)) % 4, PARTY_POKE, now, 820);
   }
-  // Tap elsewhere: a spike fan reaches for the finger, and he hops
+  // Tap on the show: a spike fan and a tentacle reach for the finger, boop, and let go
   void tapAt(int16_t x, int16_t y, unsigned long now) {
     if (busy()) return;
-    field(atan2f(y - icy, x - icx), 1.0f, 500, now);
-    L.v += 0.22f * tier().r / pkL;
-    J.v -= 0.10f / pkJ;
+    abortSeqs(now);
+    lookAt(x, y, 600, now);
+    field(atan2f(y - icy, x - icx), 0.8f, 400, now);
+    L.v += 0.12f * tier().r / pkL;
+    modeKick(2, -0.06f, 0);
     tapT = 1;
+    later(now, 110, PE_REACH, -1, 0, x, y);
     nextWander = now + 1200;
+    nextFeeler = now + 6000;
   }
   // Roaming mostly picks a neighbouring corner (a walk along one edge); one move in four crosses the diagonal
   void roam(unsigned long now) {
     uint8_t to = random(4) ? (corner + (random(2) ? 1 : 3)) % 4 : (corner + 2) % 4;
-    startRun(to, PARTY_ROAM, now);
+    startRun(to, PARTY_ROAM, now, 0);
   }
-  void startRun(uint8_t to, const PartyRun &m, unsigned long now) {
-    run = &m; going = false; runTo = to; goAt = now + m.leadMs;
+  // The arc bows toward the screen centre; its middle is where the grab tentacle latches
+  void bowPoint(const PartyRun &m, float &kx, float &ky) const {
+    float mx = (fromX + dstX) / 2, my = (fromY + dstY) / 2;
+    kx = mx + (LCD_WIDTH / 2.0f - mx) * m.bow; ky = my + (LCD_HEIGHT / 2.0f - my) * m.bow;
+  }
+  void startRun(uint8_t to, const PartyRun &m, unsigned long now, uint16_t leadMs) {
+    uint16_t lead = leadMs ? leadMs : m.leadMs;
+    run = &m; going = false; runTo = to; goAt = now + lead;
     home(to, dstX, dstY);
-    // Look where he's going for the whole trip (the look pad is free: BOT_IMU_GAZE is off)
-    botEyes.padX = constrain((dstX - wx.x) / 30, -1.0f, 1.0f);
-    botEyes.padY = constrain((dstY - wy.x) / 30, -1.0f, 1.0f);
+    fromX = wx.x; fromY = wy.x;
+    if (&m == &PARTY_ROAM) lookAt(dstX, dstY, lead + 1400, now);
+    else later(now, lead - 150, PE_LOOK, -1, 0, dstX, dstY, 1500);
+    float kx, ky;
+    bowPoint(m, kx, ky);
+    later(now, lead > 240 ? lead - 240 : 0, PE_GRAB, -1, 0, 0.25f * fromX + 0.5f * kx + 0.25f * dstX, 0.25f * fromY + 0.5f * ky + 0.25f * dstY);
+    grabI = strI[0] = strI[1] = -1;
   }
 
   // An event pulls a spike fan toward dir, at strength F, for holdMs
@@ -365,6 +645,879 @@ struct PartyBlob {
     F.f = slow ? 1.2f : 3;
     for (int k = 0; k < PARTY_SPIKES; k++) jit[k] = eyeRnd(0.85f, 1.15f);
   }
+  void look(float x, float y, unsigned long ms, unsigned long now) {
+    botEyes.padX = constrain(x, -1.0f, 1.0f); botEyes.padY = constrain(y, -1.0f, 1.0f);
+    padUntil = now + ms;
+  }
+  void lookAt(float x, float y, unsigned long ms, unsigned long now) { look((x - icx) / 40, (y - icy) / 40, ms, now); }
+
+  // ---- Timed events -----------------------------------------------------------
+  void later(unsigned long now, unsigned long ms, uint8_t kind, int8_t ref, uint16_t gen, float a = 0, float b = 0, float c = 0) {
+    if (nEv >= PARTY_EVQ) return;
+    PartyEv &e = evq[nEv++];
+    e.at = now + ms; e.kind = kind; e.ref = ref; e.gen = gen; e.a = a; e.b = b; e.c = c;
+  }
+  void runEvents(unsigned long now) {
+    for (int i = 0; i < nEv;) {
+      if (!eyeReached(now, evq[i].at)) { i++; continue; }
+      PartyEv e = evq[i];
+      evq[i] = evq[--nEv];
+      fire(e, now);
+    }
+  }
+  PartyTent *tentOf(int8_t i, uint16_t gen) {
+    if (i < 0 || i >= PARTY_TENTS || !tents[i].on || tents[i].gen != gen) return nullptr;
+    return &tents[i];
+  }
+  void fire(const PartyEv &e, unsigned long now) {
+    PartyTent *tt = tentOf(e.ref, e.gen);
+    const float r = tier().r;
+    PartyTentOpt o;
+    switch (e.kind) {
+      case PE_BOOP: if (tt && tt->phase == PT_HOLD) tt->bulb.v += 0.4f / pkBulb; break;
+      case PE_KICK2: modeKick(2, e.a, 0); break;
+      case PE_LOOK: lookAt(e.a, e.b, (unsigned long)e.c, now); break;
+      case PE_GRAB:
+        if (!run) break;
+        o.track = true; o.tx = e.a; o.ty = e.b; o.L = capLen(); o.kind = PT_GRAB; o.hold = -1;
+        o.gf = run->gf; o.gz = run->gz; o.curl = 0.1f; o.free = true; o.swA = 0; o.boops = 0;
+        grabI = spawnTent(o, now); grabG = tentGen;
+        break;
+      case PE_PEEK:
+        lookAt(e.a, e.b, 500, now);
+        o.track = true; o.tx = e.a; o.ty = e.b; o.L = 0.3f * r; o.kind = PT_PEEK; o.hold = 120;
+        o.gf = 3; o.gz = 0.6f; o.curl = 0.1f; o.free = true; o.boops = 0;
+        spawnTent(o, now);
+        break;
+      case PE_REACH:
+        o.track = true; o.tx = e.a; o.ty = e.b; o.L = capLen(); o.hold = 500;
+        o.curl = 0.15f; o.free = true; o.swA = 0.15f;
+        spawnTent(o, now);
+        break;
+      case PE_FEELER:   // ref bit 0: reaching for a bright spot; bit 1: a big free reach
+        o.track = true; o.tx = e.a; o.ty = e.b; o.L = e.c; o.kind = PT_FEELER; o.hold = (int32_t)eyeRnd(2500, 4000);
+        if (e.c > 1.6f * r) { o.gf = 1.1f; o.gz = 0.55f; }
+        o.curl = 0.35f; o.swA = 0.35f; o.boops = (e.ref & 1) ? 2 : 1; o.free = (e.ref & 2) != 0;
+        spawnTent(o, now);
+        break;
+      case PE_WAKE: wakeStretch(now); break;
+      case PE_FEELER_GO: if (!busy()) feeler(now, false, e.a, false, e.b != 0); break;
+      case PE_WAKE2: {
+        float s = wrapPi(e.a - alphaHome()) > 0 ? -1 : 1;
+        o.dir = e.a + s * 48 * DEG_TO_RAD; o.L = r * PARTY_REACH; o.hold = 700;
+        o.gf = 1.1f; o.gz = 0.7f; o.curl = 0.4f * s; o.free = true; o.swA = 0.1f; o.swF = 0.3f; o.boops = 0;
+        spawnTent(o, now);
+        break;
+      }
+      case PE_WAKE_END:
+        modeKick(2, 0.28f, 0); modeKick(4, 0.05f, 0);
+        expr(EXPR_HAPPY, 1500);
+        botEyes.blinkStart(now, BW_SWAP);
+        break;
+      case PE_DROP: {
+        float r0 = Reff, c = cosf(e.a), s = sinf(e.a);
+        spawnDrop(icx + r0 * c, icy + r0 * s, e.b * c, e.b * s, eyeRnd(0.07f, 0.11f) * r, now, false);
+        break;
+      }
+      case PE_RETRACT: if (tt) retract(*tt, false); break;
+      case PE_BEAT: {
+        for (int i = 0; i < PARTY_TENTS; i++) {
+          PartyTent &b = tents[i];
+          if (b.on && b.kind == PT_BEAT && b.phase != PT_RETRACT) { retract(b, true); later(now, 160, PE_KICK2, -1, 0, 0.12f); }
+        }
+        float Lb = hypotf(e.a - icx, e.b - icy) - Reff;
+        o.track = true; o.tx = e.a; o.ty = e.b; o.L = constrain(Lb, 0.6f * r, capLen()); o.kind = PT_BEAT; o.hold = 200;
+        o.gf = 3.2f; o.gz = 0.55f; o.curl = 0.25f; o.swA = 0; o.free = true;
+        spawnTent(o, now);
+        break;
+      }
+      case PE_BEAT_PINCH:
+        for (int i = 0; i < PARTY_TENTS; i++) {
+          PartyTent &b = tents[i];
+          if (b.on && b.kind == PT_BEAT && !b.pinchArmed) { b.pinchArmed = true; b.pinchAt = now; b.pinchV = 160; break; }
+        }
+        break;
+    }
+  }
+
+  // ---- Hero moments -----------------------------------------------------------
+  float capLen() const { return min(2.4f * tier().r * PARTY_REACH, 130.0f); }
+  float bigL(float lo, float hi) const {
+    float r = tier().r * PARTY_REACH;
+    return eyeRnd01() < PARTY_BIG ? eyeRnd(1.8f, 2.4f) * r : eyeRnd(lo, hi) * r;
+  }
+  // A point Lrim past the rim, somewhere in the cone into the show
+  void inCone(float Lrim, float &x, float &y) const {
+    float a = clampCone(alphaHome() + eyeRnd(-55, 55) * DEG_TO_RAD, 60), d = Reff + Lrim;
+    x = icx + d * cosf(a); y = icy + d * sinf(a);
+  }
+  int liveTents() const {
+    int n = 0;
+    for (int i = 0; i < PARTY_TENTS; i++) n += tents[i].on;
+    return n;
+  }
+  // A whip out and back; often the tip pinches off as a droplet
+  void flick(unsigned long now, float dropChance) {
+    float a = clampCone(alphaHome() + eyeRnd(-45, 45) * DEG_TO_RAD, 60), px, py;
+    inCone(eyeRnd(0.8f, 1.0f) * tier().r, px, py);
+    lookAt(px, py, 700, now);
+    PartyTentOpt o;
+    o.dir = a; o.L = eyeRnd(0.8f, 1.0f) * tier().r * PARTY_REACH; o.kind = PT_FLICK; o.hold = 60;
+    o.gf = 3.5f; o.gz = 0.5f; o.curl = 0.5f; o.boops = 0; o.swA = 0;
+    int i = spawnTent(o, now);
+    if (i >= 0 && eyeRnd01() < dropChance) { tents[i].pinchArmed = true; tents[i].pinchAt = now + 210; tents[i].pinchV = eyeRnd(170, 230); }
+  }
+  // A slow feel into the show, toward a bright spot when there is one; 60 % go big.
+  // aimDeg: off the line to the screen centre (a group spreads out); 999 = anywhere in the cone.
+  void feeler(unsigned long now, bool forceBig, float aimDeg = 999, bool mayBright = true, bool shortOnly = false) {
+    const float r = tier().r;
+    float Lf = forceBig ? eyeRnd(1.9f, 2.4f) * r * PARTY_REACH : shortOnly ? eyeRnd(0.8f, 1.3f) * r * PARTY_REACH : bigL(0.8f, 1.3f);
+    Lf = min(Lf, capLen());
+    bool bright = haveBright && !forceBig && mayBright;
+    float px, py;
+    if (bright) { px = brightX; py = brightY; }
+    else if (aimDeg < 900) {
+      float a = clampCone(alphaHome() + aimDeg * DEG_TO_RAD, 60);
+      px = icx + (Reff + Lf) * cosf(a); py = icy + (Reff + Lf) * sinf(a);
+    } else inCone(Lf, px, py);
+    float dx = px - icx, dy = py - icy, d = max(1.0f, hypotf(dx, dy)), need = Reff + Lf;
+    float tx = icx + dx / d * need, ty = icy + dy / d * need;
+    lookAt(tx, ty, 1600, now);
+    later(now, 120, PE_FEELER, (bright ? 1 : 0) | (forceBig ? 2 : 0), 0, tx, ty, Lf);
+  }
+  // A small bunch of feelers fanned across the cone, a beat apart (1 in 4 alone,
+  // else 2 or 3), never more than the pool has room for. shortOnly: 0.8-1.3 r (pattern library)
+  void feelerGroup(unsigned long now, bool shortOnly = false) {
+    int room = partyTentCap - liveTents();
+    int n = min(room, eyeRnd01() < 0.25f ? 1 : 2 + (int)random(2));
+    if (n <= 0) return;
+    float base = eyeRnd(-20, 20), gap = n == 2 ? 28 : 38;
+    for (int i = 0; i < n; i++) {
+      float deg = base + (i - (n - 1) / 2.0f) * gap;
+      if (i == 0) feeler(now, false, deg, true, shortOnly);
+      else later(now, i * (unsigned long)eyeRnd(220, 420), PE_FEELER_GO, -1, 0, deg, shortOnly);
+    }
+  }
+  // Wake-up stretch (hero 6.5): one long slow reach to the middle of the screen,
+  // a shorter one beside it, both drain back, a big contented jiggle
+  void wakeStretch(unsigned long now) {
+    const float r = tier().r, cx = LCD_WIDTH / 2.0f, cy = LCD_HEIGHT / 2.0f;
+    float a = atan2f(cy - icy, cx - icx);
+    expr(EXPR_CHILL, 2200);
+    lookAt(cx, cy, 2000, now);
+    PartyTentOpt o;
+    o.dir = a; o.L = min(capLen(), max(1.6f * r, hypotf(cx - icx, cy - icy) - Reff - 10) * PARTY_REACH);
+    o.hold = 900; o.gf = 0.9f; o.gz = 0.7f; o.curl = 0.2f; o.free = true; o.swA = 0.08f; o.swF = 0.3f; o.boops = 0;
+    spawnTent(o, now);
+    later(now, 380, PE_WAKE2, -1, 0, a);
+    later(now, 2300, PE_WAKE_END, -1, 0);
+  }
+  // Beat grab (hero 6.1): tentacles drum the beat, alternating sides
+  void beatGrab(unsigned long now, float bass) {
+    beatSide = -beatSide;
+    float a = clampCone(alphaHome() + beatSide * 35 * DEG_TO_RAD, 60), px, py;
+    if (haveBright && eyeRnd01() < 0.5f) { px = brightX; py = brightY; }
+    else { float Lb = bigL(1.0f, 1.4f); px = icx + (Reff + Lb) * cosf(a); py = icy + (Reff + Lb) * sinf(a); }
+    lookAt(px, py, 420, now);
+    later(now, 100, PE_BEAT, -1, 0, px, py);
+    if (bass > 0.8f && eyeRnd01() < 0.35f) later(now, 260, PE_BEAT_PINCH, -1, 0);
+    lastBeatGrab = now;
+  }
+  // GET /bot/party?hero= — play one on demand, to test and tune
+  void heroRequest(unsigned long now) {
+    uint8_t sq = partySeqReq;
+    if (sq) { partySeqReq = 0; if (sq <= SEQ_COUNT) startSeq(sq - 1, now, partyStack > 0); }
+    uint8_t h = partyHeroReq;
+    if (!h) return;
+    partyHeroReq = 0;
+    abortSeqs(now);
+    switch (h) {
+      case 1: flick(now, 1); break;
+      case 2: feelerGroup(now); break;
+      case 3: feeler(now, true); break;
+      case 4: wakeStretch(now); break;
+      case 5: roam(now); break;
+      case 6: shake(now); break;
+      case 7: beatGrab(now, 0.9f); break;
+    }
+  }
+
+  // ---- Pattern library: spike banks -----------------------------------------
+  static float crownH(PartySlot &s, float F, float H) {   // Rosensweig threshold with hysteresis
+    s.popped = F >= s.Fon || (s.popped && F > s.Foff);
+    return s.popped ? F * H * s.env : 0;
+  }
+  static float winH(float x) { return max(0.0f, (cosf(x) - 0.42262f) / 0.57738f); }   // the show arc, ±65°
+  static float ramp01(float t, float a, float b) { return constrain((t - a) / (b - a), 0.0f, 1.0f); }
+  static void setSlot(PartyBank &b, int i, int8_t off, int8_t k, uint8_t wide = 5, float env = 1, float Fon = 0, float Foff = 0) {
+    PartySlot &s = b.s[i];
+    s.on = true; s.popped = false; s.off = off; s.k = k; s.wide = wide; s.env = env; s.Fon = Fon; s.Foff = Foff; s.hT = 0; s.lean = 0;
+  }
+  static void bankSprings(PartyBank &b, float rf, float rz, float ff, float fz) { b.rf = rf; b.rz = rz; b.ff = ff; b.fz = fz; }
+  void claimBank(int qi) {
+    int pick = -1;
+    for (int i = 0; i < PARTY_BANKS && pick < 0; i++) {
+      if (banks[i].owner >= 0) continue;
+      bool drained = true;
+      for (int j = 0; j < PARTY_SLOTS; j++) if (fabsf(banks[i].s[j].h.x) > 0.5f) drained = false;
+      if (drained) pick = i;
+    }
+    for (int i = 0; i < PARTY_BANKS && pick < 0; i++) if (banks[i].owner < 0) pick = i;
+    if (pick < 0) { pick = 0; releaseSeq(banks[0].owner); }
+    PartyBank &b = banks[pick];
+    b.owner = qi; seqs[qi].bank = pick;
+    bankSprings(b, 3.2f, 0.45f, 4.5f, 0.38f);
+    for (int j = 0; j < PARTY_SLOTS; j++) { b.s[j].on = false; b.s[j].hT = 0; b.s[j].lean = 0; b.s[j].h.init(0, 3.2f, 0.45f); }
+  }
+  void stepSlots(unsigned long now, float dt) {
+    const float r = tier().r, throb = (long)(now - throbUntil) < 0 ? 0.06f * r : 0;
+    for (int i = 0; i < PARTY_BANKS; i++) {
+      PartyBank &b = banks[i];
+      for (int j = 0; j < PARTY_SLOTS; j++) {
+        PartySlot &s = b.s[j];
+        if (!s.on && fabsf(s.h.x) < 0.05f && fabsf(s.h.v) < 0.5f) continue;
+        float target = s.on ? s.hT + (s.hT > 1 ? throb : 0) : 0;
+        if (target > s.h.x) { s.h.f = b.rf; s.h.z = b.rz; } else { s.h.f = b.ff; s.h.z = b.fz; }
+        s.h.step(target, dt);
+        if (s.h.x < -0.05f * r) { s.h.x = -0.05f * r; s.h.v = 0; }   // the snap-back dimple stays shallow
+      }
+    }
+  }
+  // The carousel's spikes move one slot along with the grid
+  void shiftSlots(PartyBank &b, int n, int dir) {
+    if (dir > 0) for (int i = n - 1; i > 0; i--) { b.s[i].h.x = b.s[i - 1].h.x; b.s[i].h.v = b.s[i - 1].h.v; }
+    else for (int i = 0; i < n - 1; i++) { b.s[i].h.x = b.s[i + 1].h.x; b.s[i].h.v = b.s[i + 1].h.v; }
+    (dir > 0 ? b.s[0] : b.s[n - 1]).h.snap(0);
+  }
+
+  // ---- Pattern library: sequences -------------------------------------------
+  int nSeqs() const { int n = 0; for (int i = 0; i < PARTY_SEQS; i++) n += seqs[i].on; return n; }
+  bool seqRunning(uint8_t id) const { for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on && seqs[i].id == id) return true; return false; }
+  bool seqSolo() const { for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on && PARTY_SEQ_DEF[seqs[i].id].solo) return true; return false; }
+  bool seqHolds() const { for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on && PARTY_SEQ_DEF[seqs[i].id].tier != TIER_S) return true; return false; }
+  bool seqDrivesAl() const { for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on && seqs[i].driveAl) return true; return false; }
+  const PartySeq *leadSeq() const { for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on && seqs[i].lead) return &seqs[i]; return nullptr; }
+  bool anyFeeler() const { for (int i = 0; i < PARTY_TENTS; i++) if (tents[i].on && tents[i].kind == PT_FEELER) return true; return false; }
+  static bool once(PartySeq &q, int bit, bool cond) {
+    if (!cond || (q.f & (1u << bit))) return false;
+    q.f |= 1u << bit;
+    return true;
+  }
+  void seqLook(const PartySeq &q, float pad, unsigned long ms, unsigned long now) { if (q.lead) look(cosf(q.axis) * pad, sinf(q.axis) * pad, ms, now); }
+  void seqFace(const PartySeq &q, uint8_t e, uint16_t ms) { if (q.lead) expr(e, ms); }
+  void seqBlink(const PartySeq &q, unsigned long now) { if (q.lead) botEyes.blinkStart(now, BW_SWAP); }
+  void popS(float a) { botEyes.popS.v += a / botEyes.pkPopS; }
+  void seqTent(PartySeq &q, int i) { if (i >= 0 && q.nt < 3) { q.ti[q.nt] = i; q.tg[q.nt] = tents[i].gen; q.nt++; } }
+  void calmEnd(PartySeq &q) {
+    if (q.kT >= 1) return;
+    q.kT = 1; kappa.f = 1.0f;
+    for (int k = 0; k < PARTY_MODES; k++) { mc[k].z = ms[k].z = PARTY_MODE_DEF[k].z; }
+  }
+
+  void startSeq(uint8_t id, unsigned long now, bool layer, uint16_t holdMs = 0) {
+    const PartySeqDef &e = PARTY_SEQ_DEF[id];
+    layer = layer && !e.solo && nSeqs() && !seqSolo();
+    if (!layer) abortSeqs(now);
+    else {
+      for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on && seqs[i].id == id) abortOne(i);
+      if (nSeqs() >= PARTY_SEQS) { int old = -1; for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on && (old < 0 || seqs[i].t0 < seqs[old].t0)) old = i; abortOne(old); }
+      if (!PARTY_STACK_MOST[partyStack]) return;
+    }
+    int qi = -1;
+    for (int i = 0; i < PARTY_SEQS; i++) if (!seqs[i].on) { qi = i; break; }
+    if (qi < 0) return;
+    if (!layer) { fieldT = 0; alT = alphaHome(); }
+    const PartySeq *ld = leadSeq();
+    PartySeq &q = seqs[qi];
+    q.on = true; q.id = id; q.t0 = now; q.lead = !ld; q.axis = ld ? ld->axis : alphaHome();
+    q.driveAl = false; q.f = 0; q.nt = 0; q.g = 0; q.kT = 1; q.phi = 0; q.dir = random(2) ? 1 : -1; q.v = 0; q.hold = 0;
+    claimBank(qi);
+    if (e.tier != TIER_S) home(corner, wTx, wTy);   // medium and big hold still so the axis can't drift
+    PartyBank &b = banks[q.bank];
+    switch (id) {
+      case SEQ_BREATH:
+        for (int k = -2; k <= 2; k++) { int a = abs(k); setSlot(b, k + 2, 6 * k, k, k == 0 ? 7 : 5, a == 0 ? 1 : a == 1 ? 0.85f : 0.6f, 0.32f + 0.06f * a, 0.19f + 0.06f * a); }
+        bankSprings(b, 2.0f, 0.6f, 3.0f, 0.5f);
+        seqFace(q, EXPR_CHILL, 6800); seqLook(q, 0.3f, 6800, now);
+        break;
+      case SEQ_CALM:
+        q.hold = holdMs ? 600 + holdMs : 2100 + eyeRnd(0, 1000); q.kT = 0.12f; kappa.f = 1.6f;
+        for (int k = 0; k < PARTY_MODES; k++) { mc[k].z = ms[k].z = 2 * PARTY_MODE_DEF[k].z; }
+        fieldT = 0; seqFace(q, EXPR_CHILL, (uint16_t)q.hold);
+        break;
+      case SEQ_CROWN: {
+        static const float env[5] = {1, 0.9f, 0.75f, 0.6f, 0.24f};
+        int half = eyeRnd01() < 0.3f ? 4 : 3;
+        for (int k = -half; k <= half; k++) { int a = abs(k); setSlot(b, k + half, 6 * k, k, k == 0 ? 7 : 5, env[a], 0.30f + 0.12f * a, 0.17f + 0.12f * a); }
+        seqLook(q, 0.5f, 2800, now);
+        break;
+      }
+      case SEQ_CAROUSEL:
+        for (int k = -3; k <= 3; k++) setSlot(b, k + 3, 12 * k, k);   // every other slot: 36° apart
+        bankSprings(b, 4, 0.7f, 4, 0.7f);
+        q.driveAl = !seqDrivesAl();   // only one pattern turns the grid; a second carousel rides its turn
+        seqLook(q, 0.3f, 400, now);
+        break;
+      case SEQ_SPLIT:
+        setSlot(b, 0, 0, 0, 7); setSlot(b, 1, -3, 1); setSlot(b, 2, 3, 1); setSlot(b, 3, -6, 2); setSlot(b, 4, 0, 3); setSlot(b, 5, 6, 2);
+        bankSprings(b, 2.4f, 0.55f, 4.5f, 0.38f);
+        modeKick(2, -0.05f, 0); seqLook(q, 0.6f, 1100, now);
+        break;
+      case SEQ_WAVE:
+        for (int k = -3; k <= 3; k++) setSlot(b, k + 3, 6 * k, k, 5, abs(k) == 3 ? 0.8f : 1);
+        bankSprings(b, 5, 0.6f, 5, 0.6f);
+        q.v = eyeRnd01() < 0.5f;   // a third, smaller pass
+        break;
+      case SEQ_MERGE:
+        for (int k = -4; k <= 4; k++) setSlot(b, k + 4, 6 * k, k, k % 3 == 0 ? 7 : 5);
+        bankSprings(b, 3.0f, 0.5f, 3.6f, 0.55f);
+        seqLook(q, 0.5f, 3600, now); seqFace(q, EXPR_EXCITED, 3200);
+        break;
+      case SEQ_BLOOM: {
+        float u = eyeRnd01();
+        q.v = u < 0.25f ? 1 : u < 0.5f ? 2 : 0;   // 1 triple, 2 arch, 0 plain
+        if (q.v != 1) setSlot(b, 0, 0, 0);
+        modeKick(2, -0.04f, 0); seqLook(q, 0.4f, 2600, now); popS(0.02f);
+        break;
+      }
+      case SEQ_FEELERS: feelerGroup(now, true); break;
+      case SEQ_LONG: feeler(now, true); break;
+    }
+    // history, cool-downs and the stacking window
+    if (schHistN == 16) { memmove(schHist, schHist + 1, 15 * sizeof(PartyHist)); schHistN = 15; }
+    schHist[schHistN++] = {now, e.tier, e.tents};
+    schLayerAt = now + (unsigned long)eyeRnd(700, 2000); schLayerArmed = true;
+    if (layer) return;
+    schLast = id; schCd[id] = now + e.cdS * 1000UL;
+    schSpikeRun = e.spikes ? schSpikeRun + 1 : 0;
+    schSmallRun = e.tier == TIER_S ? schSmallRun + 1 : 0;
+    if (e.tier == TIER_S && schForceSmall) schForceSmall--;
+  }
+
+  // One frame of sequence q at t ms; true when it's done
+  bool stepSeq(PartySeq &q, unsigned long now, float t, float dt) {
+    const float r = tier().r;
+    PartyBank &b = banks[q.bank];
+    PartySlot *s = b.s;
+    switch (q.id) {
+      case SEQ_BREATH: {
+        float F; int br = -1;
+        if (t < 500) F = 0.15f * t / 500;
+        else if (t < 6500) {
+          br = min(2, (int)((t - 500) / 2000));
+          float u = fmodf(t - 500, 2000) / 2000, pk = br == 0 ? 0.70f : br == 1 ? 0.75f : 0.60f;
+          F = 0.15f + (pk - 0.15f) * (0.5f - 0.5f * cosf(TWO_PI * u));
+          if (once(q, br, u > 0.5f)) modeKick(2, 0.04f, 0);
+        } else F = 0.15f * max(0.0f, 1 - (t - 6500) / 500);
+        if (once(q, 4, t > 3500)) seqBlink(q, now);   // a slow blink on the out-breath
+        for (int i = 0; i < 5; i++) s[i].hT = (br == 2 && abs(s[i].k) == 2) ? 0 : crownH(s[i], F, 0.34f * r);   // the last breath only pops three
+        q.g = 0.12f * F;
+        return t > 7000;
+      }
+      case SEQ_CALM:
+        if (once(q, 0, t > q.hold * 0.6f)) botEyes.blinkStart(now, BW_SWAP);
+        if (once(q, 1, t > q.hold)) { calmEnd(q); modeKick(2, 0.07f, 0); modeKick(4, 0.03f, q.axis); }
+        return t > q.hold + 400;
+      case SEQ_CROWN: {
+        float F = t < 1600 ? 0.95f * t / 1600 : t < 2800 ? 0.95f : 0.95f * expf(-(t - 2800) / 60);
+        if (once(q, 0, t > 1100)) popS(0.03f);
+        if (once(q, 1, t > 2800)) seqBlink(q, now);
+        if (once(q, 2, t > 2850)) { modeKick(2, 0.08f, 0); modeKick(3, 0.03f, q.axis); seqFace(q, EXPR_HAPPY, 900); }
+        bool hold = t >= 1600 && t < 2800;
+        for (int i = 0; i < PARTY_SLOTS; i++) if (s[i].on)
+          s[i].hT = crownH(s[i], F, 0.38f * r) * (hold ? 1 + 0.06f * sinf(TWO_PI * 2.2f * t / 1000 + 1.3f * abs(s[i].k)) : 1);
+        q.g = 0.12f * F;
+        return t > 4000;
+      }
+      case SEQ_CAROUSEL: {
+        float w = t < 400 ? 40 * t / 400 : t < 3400 ? 40 : t < 3800 ? 40 - 90 * (t - 3400) / 400 : t < 5600 ? -50 : t < 6200 ? -50 * (1 - (t - 5600) / 600) : 0;
+        float F = t < 400 ? 0.8f * t / 400 : t < 5600 ? 0.8f : t < 6200 ? 0.8f * (1 - (t - 5600) / 600) : 0;
+        w *= q.dir;
+        // Rotate the vertex grid; every 36° hand each spike to the next slot, so the turn never jumps (spec §5.5)
+        if (q.driveAl) {
+          q.phi += w * DEG_TO_RAD * dt;
+          while (q.phi >= 18 * DEG_TO_RAD) { q.phi -= 36 * DEG_TO_RAD; shiftSlots(b, 7, 1); }
+          while (q.phi < -18 * DEG_TO_RAD) { q.phi += 36 * DEG_TO_RAD; shiftSlots(b, 7, -1); }
+          if (t < 6200) { al.x = al.t = q.axis + q.phi; al.v = 0; } else q.driveAl = false;
+        } else q.phi = wrapPi(al.x - q.axis);
+        float lean = 14 * DEG_TO_RAD * constrain(w / 40, -1.0f, 1.0f);
+        for (int i = 0; i < 7; i++) { s[i].hT = 0.34f * r * F * powf(winH(q.phi + s[i].off * 3 * DEG_TO_RAD), 0.7f); s[i].lean = lean; }
+        float sg = w > 0 ? 1 : w < 0 ? -1 : 0, ca = cosf(q.axis), sa = sinf(q.axis);
+        if (q.lead && sg != 0 && t < 6000) look(ca * 0.25f - sa * 0.4f * sg, sa * 0.25f + ca * 0.4f * sg, 300, now);   // the gaze pans with the travel
+        if (once(q, 0, t > 3600)) { modeKick(3, 0.03f, q.axis); seqBlink(q, now); }
+        if (once(q, 1, t > 6000)) seqFace(q, EXPR_HAPPY, 600);
+        q.g = 0.08f * F;
+        return t > 6500;
+      }
+      case SEQ_SPLIT: {
+        float trem = 1 + 0.04f * sinf(TWO_PI * 3 * t / 1000);
+        s[0].hT = t < 1100 ? 0.48f * r * trem : t < 2000 ? 0.14f * r : 0;
+        s[1].hT = s[2].hT = t >= 1100 && t < 2000 ? 0.34f * r * trem : 0;
+        s[3].hT = s[5].hT = t >= 2000 && t < 2900 ? 0.24f * r * trem : 0;
+        s[4].hT = t >= 2000 && t < 2900 ? 0.20f * r * trem : 0;
+        if (once(q, 0, t > 1100)) { modeKick(3, 0.03f, q.axis); seqFace(q, EXPR_SURPRISED, 500); popS(0.02f); }
+        if (once(q, 1, t > 2000)) modeKick(3, 0.02f, q.axis);
+        if (once(q, 2, t > 2900)) { modeKick(2, 0.06f, 0); seqFace(q, EXPR_HAPPY, 800); }
+        q.g = t < 2900 ? 0.10f : 0;
+        return t > 3600;
+      }
+      case SEQ_WAVE: {
+        const float passT[3] = {200, 1400, 2600}, passH[3] = {0.32f, 0.32f, 0.24f};
+        const int8_t passD[3] = {q.dir, (int8_t)-q.dir, q.dir};
+        int np = q.v ? 3 : 2;
+        for (int i = 0; i < 7; i++) { s[i].hT = 0; s[i].lean = 0; }
+        float crest = 99;
+        for (int p = 0; p < np; p++) {
+          for (int i = 0; i < 7; i++) {
+            int j = passD[p] > 0 ? s[i].k + 3 : 3 - s[i].k;
+            float u = (t - passT[p] - j * 90) / 300;
+            if (fabsf(u) < 1) {
+              float h = passH[p] * r * s[i].env * (0.5f + 0.5f * cosf(PI * u));
+              if (h > s[i].hT) { s[i].hT = h; s[i].lean = u < 0 ? 12 * DEG_TO_RAD * passD[p] : 0; }
+            }
+          }
+          float c = (t - passT[p]) / 90 - 3;
+          if (c > -3 && c < 3) crest = c * passD[p];
+        }
+        if (q.lead && crest < 90) {   // the eyes follow the crest
+          float a = q.axis + crest * 18 * DEG_TO_RAD;
+          look(cosf(a) * 0.5f, sinf(a) * 0.5f, 250, now);
+        }
+        if (once(q, 0, t > 470)) modeKick(2, 0.03f, 0);
+        if (once(q, 1, t > 1670)) modeKick(2, 0.03f, 0);
+        float end = q.v ? 3500 : 2300;
+        if (once(q, 2, t > end)) seqFace(q, EXPR_HAPPY, 600);
+        return t > end + 200;
+      }
+      case SEQ_MERGE: {
+        float wob = 1 + 0.05f * sinf(TWO_PI * 2.4f * t / 1000);
+        float s1 = ramp01(t, 0, 500) * (1 - ramp01(t, 1100, 1400)), s2 = ramp01(t, 1100, 1400) * (1 - ramp01(t, 2200, 2500)), s3 = ramp01(t, 2200, 2500) * (1 - ramp01(t, 3400, 3550));
+        for (int i = 0; i < 9; i++) {
+          int k = s[i].k, a = abs(k);
+          float e1 = a == 4 ? 0.6f : 1, e2 = k % 2 == 0 ? (a == 4 ? 0.55f : 1) : 0, e3 = k % 3 == 0 ? (a == 3 ? 0.8f : 1) : 0;
+          s[i].hT = max(max(0.15f * r * e1 * s1, 0.30f * r * e2 * s2), 0.46f * r * e3 * s3) * wob;
+        }
+        if (once(q, 0, t > 1250)) modeKick(2, -0.04f, 0);
+        if (once(q, 1, t > 2350)) { modeKick(2, -0.05f, 0); popS(0.03f); }
+        if (once(q, 2, t > 3450)) { modeKick(2, 0.08f, 0); modeKick(4, 0.03f, q.axis); seqFace(q, EXPR_HAPPY, 800); seqBlink(q, now); }
+        q.g = 0.10f * max(s1, max(s2, s3));
+        return t > 4100;
+      }
+      case SEQ_BLOOM: {
+        bool arch = q.v == 2;
+        if (once(q, 0, t > 100)) {   // the mirrored pair: same springs, same sway phase, mirrored sway
+          float ph = eyeRnd(0, TWO_PI);
+          for (int sd = 1; sd >= -1; sd -= 2) {
+            PartyTentOpt o;
+            o.dir = q.axis + sd * 32 * DEG_TO_RAD; o.L = (arch ? 0.95f : 0.85f) * r; o.kind = PT_SEQ; o.hold = -1;
+            o.gf = 1.3f; o.gz = 0.55f; o.curl = arch ? -0.6f : 0.45f; o.swA = 0.12f; o.swF = 0.4f; o.boops = 2;
+            o.free = true; o.mirror = true; o.side = sd; o.ph = ph;
+            seqTent(q, spawnTent(o, now));
+          }
+          modeKick(2, 0.06f, q.axis + 32 * DEG_TO_RAD); modeKick(2, 0.06f, q.axis - 32 * DEG_TO_RAD);
+        }
+        if (q.v == 1 && once(q, 1, t > 250)) {   // triple: a shorter one in the middle instead of the spike
+          PartyTentOpt o;
+          o.dir = q.axis; o.L = 0.55f * r; o.kind = PT_SEQ; o.hold = -1; o.gf = 1.3f; o.gz = 0.55f; o.curl = 0;
+          o.swA = 0.06f; o.swF = 0.4f; o.free = true; o.mirror = true; o.side = 1;
+          seqTent(q, spawnTent(o, now));
+        }
+        if (s[0].on) s[0].hT = t > 500 && t < 2400 ? 0.24f * r * (1 + 0.05f * sinf(TWO_PI * 2.5f * t / 1000)) : 0;   // the stamen
+        if (once(q, 2, t > 500)) seqFace(q, EXPR_HAPPY, 1800);
+        if (arch && q.nt >= 2) {   // two field lines between poles: the tips never touch
+          PartyTent *a = tentOf(q.ti[0], q.tg[0]), *c = tentOf(q.ti[1], q.tg[1]);
+          const int tip = PARTY_NN - 1;
+          if (a && c && hypotf(a->nx[tip] - c->nx[tip], a->ny[tip] - c->ny[tip]) < 12) {
+            if (a->phase != PT_RETRACT) a->lam.t = 0.9f;
+            if (c->phase != PT_RETRACT) c->lam.t = 0.9f;
+          }
+        }
+        if (once(q, 3, t > 2300)) for (int i = 0; i < q.nt; i++) { PartyTent *x = tentOf(q.ti[i], q.tg[i]); if (x) retract(*x, false); }
+        if (once(q, 4, t > 2700)) { modeKick(2, 0.08f, 0); seqBlink(q, now); seqFace(q, EXPR_HAPPY, 900); }
+        return t > 2900;
+      }
+      case SEQ_FEELERS:
+      case SEQ_LONG:
+        return (t > 900 && !anyFeeler()) || t > 6500;
+    }
+    return true;
+  }
+
+  void stepSeqs(unsigned long now, float dt) {
+    for (int i = 0; i < PARTY_SEQS; i++) {
+      PartySeq &q = seqs[i];
+      if (!q.on) continue;
+      float t = now - q.t0;
+      if (stepSeq(q, now, t, dt) || t > 7000) endSeq(i, now);
+    }
+    seqG = 0;
+    float kT = 1;
+    for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on) { seqG = max(seqG, seqs[i].g); kT = min(kT, seqs[i].kT); }
+    kappa.step(kT, dt);
+  }
+  void releaseSeq(int qi) {
+    if (qi < 0) return;
+    PartySeq &q = seqs[qi];
+    if (!q.on) return;
+    calmEnd(q);
+    PartyBank &b = banks[q.bank];
+    if (b.owner == qi) { for (int j = 0; j < PARTY_SLOTS; j++) { b.s[j].on = false; b.s[j].hT = 0; b.s[j].lean = 0; } b.owner = -1; }
+    q.on = false; q.driveAl = false;
+    if (q.lead) for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on) { seqs[i].lead = true; break; }
+    if (!nSeqs()) { seqG = 0; alT = alphaHome(); }
+  }
+  void endSeq(int qi, unsigned long now) {
+    uint8_t tierEnded = PARTY_SEQ_DEF[seqs[qi].id].tier;
+    if (tierEnded == TIER_B) schBigInStack = true;
+    releaseSeq(qi);
+    if (nSeqs()) return;   // the rest starts when the whole stack is done
+    bool big = schBigInStack;
+    schBigInStack = false;
+    if (big) tierEnded = TIER_B;
+    static const uint16_t restLo[3] = {2000, 3000, 6000}, restHi[3] = {4000, 6000, 10000};
+    schNextAt = now + (unsigned long)eyeRnd(restLo[tierEnded], restHi[tierEnded]);
+    if (big) { schForceSmall = 2; schCd[SEQ_CALM] = 0; startSeq(SEQ_CALM, now, false, 1000); }   // after a big: a palate cleanser
+  }
+  void abortOne(int qi) {
+    PartySeq &q = seqs[qi];
+    for (int i = 0; i < q.nt; i++) { PartyTent *x = tentOf(q.ti[i], q.tg[i]); if (x) retract(*x, true); }
+    releaseSeq(qi);
+  }
+  // A poke, tap, shake, run, exit or request cuts the whole stack short
+  void abortSeqs(unsigned long now) {
+    if (!nSeqs()) return;
+    for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on) abortOne(i);
+    schNextAt = now + 4000;
+  }
+
+  // ---- Pattern library: scheduler (spec §4) ---------------------------------
+  bool eligible(uint8_t id, unsigned long now, bool layering, bool heard) {
+    const PartySeqDef &e = PARTY_SEQ_DEF[id];
+    if (seqRunning(id)) return false;
+    if (e.tents && (!PARTY_TENTS || heard)) return false;   // with music, tentacles belong to the beat grab
+    if (heard && !e.spikes) return false;
+    int recentM = 0, recentT = 0;
+    bool recentB = false;
+    for (int i = 0; i < schHistN; i++) {
+      if (now - schHist[i].t >= 60000) continue;
+      recentM += schHist[i].tier == TIER_M; recentT += schHist[i].tents; recentB |= schHist[i].tier == TIER_B;
+    }
+    if (layering) return !e.solo && !(e.tents && liveTents() > 3) && !(e.tier == TIER_B && recentB);
+    if (id == schLast || !eyeReached(now, schCd[id])) return false;
+    if (e.spikes && schSpikeRun >= 2) return false;   // never three spike patterns running
+    if (id == SEQ_CALM && liveTents()) return false;
+    if (e.tents && (liveTents() > 2 || recentT >= 3)) return false;
+    if (e.tier == TIER_M && recentM >= 4) return false;
+    if (e.tier == TIER_B && recentB) return false;
+    return true;
+  }
+  int pickSeq(unsigned long now, bool layering, bool heard) {
+    float p[3] = {0.45f, 0.5f, 0.05f};   // mediums lead: smalls get lost
+    if (layering) { p[0] = 0.1f; p[1] = 0.8f; p[2] = 0.1f; }
+    else if (schSmallRun >= 2) p[1] *= 1.6f;
+    bool recentM = false;
+    for (int i = 0; i < schHistN; i++) recentM |= schHist[i].tier == TIER_M && now - schHist[i].t < 30000;
+    if (!recentM) p[2] = 0;   // a big only after a build-up
+    if (!layering && schForceSmall) p[1] = p[2] = 0;
+    float u = eyeRnd01() * (p[0] + p[1] + p[2]);
+    int first = 0;
+    for (int k = 0; k < 3; k++) { if (p[k] > 0 && (u -= p[k]) <= 0) { first = k; break; } }
+    for (int n = 0; n < 3; n++) {
+      int tr = (first + n) % 3;
+      if (p[tr] <= 0 && n) continue;
+      int wsum = 0;
+      for (int id = 0; id < SEQ_COUNT; id++) if (PARTY_SEQ_DEF[id].tier == tr && eligible(id, now, layering, heard)) wsum += PARTY_SEQ_DEF[id].w;
+      if (!wsum) continue;
+      int v = random(wsum);
+      for (int id = 0; id < SEQ_COUNT; id++) {
+        if (PARTY_SEQ_DEF[id].tier != tr || !eligible(id, now, layering, heard)) continue;
+        if ((v -= PARTY_SEQ_DEF[id].w) < 0) return id;
+      }
+    }
+    return -1;
+  }
+  // A new pattern when the stack is empty and the rest is over; with stacking on,
+  // a chance to pile another on top a beat after each one starts
+  void scheduleSeq(unsigned long now, bool heard) {
+    int n = nSeqs();
+    if (!n) {
+      if (!eyeReached(now, schNextAt)) return;
+      int id = pickSeq(now, false, heard);
+      if (id >= 0) startSeq(id, now, false); else schNextAt = now + 1000;
+    } else if (schLayerArmed && n < PARTY_STACK_MOST[partyStack] && eyeReached(now, schLayerAt) && !seqSolo()) {
+      schLayerArmed = false;
+      if (eyeRnd01() < PARTY_STACK_CHANCE[partyStack]) { int id = pickSeq(now, true, heard); if (id >= 0) startSeq(id, now, true); }
+    }
+  }
+  // GET /state: what's playing, e.g. "crown+bloom"
+  String seqNames() const {
+    String s;
+    for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on) { if (s.length()) s += "+"; s += PARTY_SEQ_DEF[seqs[i].id].key; }
+    return s;
+  }
+
+  // ---- Tentacles (motion spec §2) ---------------------------------------------
+  // A pose curve says where each node wants to be; the nodes chase it on springs
+  // that soften toward the tip, so motion travels outward along the tentacle.
+  int spawnTent(const PartyTentOpt &o, unsigned long now) {
+    int idx = -1;
+    if (liveTents() < partyTentCap)
+      for (int i = 0; i < PARTY_TENTS; i++) if (!tents[i].on) { idx = i; break; }
+    if (idx < 0) {   // full: reuse the oldest feeler or streamer
+      for (int i = 0; i < PARTY_TENTS; i++) {
+        PartyTent &c = tents[i];
+        if (c.on && (c.kind == PT_FEELER || c.kind == PT_STREAMER) && (idx < 0 || c.gen < tents[idx].gen)) idx = i;
+      }
+    }
+    if (idx < 0) return -1;
+    PartyTent &t = tents[idx];
+    float cx = icx, cy = icy;
+    float a = o.track ? atan2f(o.ty - cy, o.tx - cx) : o.dir;
+    float th0 = o.free ? a : clampCone(a, 70);
+    t.on = true; t.kind = o.kind; t.phase = PT_GROW; t.gen = ++tentGen;
+    t.track = o.track; t.tx = o.tx; t.ty = o.ty; t.dirA = a; t.free = o.free;
+    t.L = min(o.L > 0 ? o.L : (float)tier().r, capLen()); t.Lc = 0;
+    t.holdMs = o.hold;
+    t.lam.init(0, o.gf, o.gz); t.lam.t = 1;
+    t.th.init(th0, 0.8f, 0.9f); t.aim.init(th0, 1.4f, 0.8f);
+    t.side = o.side != 0 ? o.side : (wrapPi(a - alphaHome()) >= 0 ? 1 : -1);
+    t.curlT = o.curl * t.side; t.curl.init(1.6f * t.side, 1.2f, 0.5f);
+    t.swA = o.swA; t.swF = o.swF; t.swPh = o.ph >= 0 ? o.ph : eyeRnd(0, TWO_PI); t.mirror = o.mirror;
+    t.soft = o.soft; t.boops = o.boops; t.pinching = t.pinchArmed = false; t.bulbless = now; t.bulbR = 4;
+    t.bulb.init(1, 2, 0.4f); t.neck.init(1, 6, 1);
+    float rb = radiusAt(th0, Reff), c = cosf(th0), s = sinf(th0);
+    for (int i = 0; i < PARTY_NN; i++) { t.nx[i] = cx + rb * c; t.ny[i] = cy + rb * s; t.vx[i] = t.vy[i] = 0; }
+    modeKick(2, 0.06f, th0);
+    return idx;
+  }
+  void retract(PartyTent &t, bool fast) {
+    if (!t.on || t.phase == PT_RETRACT) return;
+    t.phase = PT_RETRACT;
+    t.curlT = 2.2f * t.side;
+    t.dirA = t.aim.x;
+    t.L = max(1.0f, t.Lc / max(0.05f, t.lam.x));   // the length it has now, so it doesn't jump
+    t.lam.snap(min(1.0f, t.lam.x)); t.lam.t = 0;
+    t.lam.f = fast ? 4 : 2.4f; t.lam.z = fast ? 0.8f : 0.75f;
+    t.track = false; t.free = true;
+  }
+  void retractAll(bool fast) { for (int i = 0; i < PARTY_TENTS; i++) retract(tents[i], fast); }
+
+  // Keep a point on the glass: m px in from the edges and inside the rounded corners
+  static void onGlass(float &x, float &y, float m) {
+    x = constrain(x, m, LCD_WIDTH - m); y = constrain(y, m, LCD_HEIGHT - m);
+    #if PARTY_GLASS_R > 0
+    const float r = PARTY_GLASS_R;
+    float cx = x < r ? r : (x > LCD_WIDTH - r ? LCD_WIDTH - r : -1), cy = y < r ? r : (y > LCD_HEIGHT - r ? LCD_HEIGHT - r : -1);
+    if (cx >= 0 && cy >= 0) {
+      float dx = x - cx, dy = y - cy, d = hypotf(dx, dy), lim = r - m;
+      if (d > lim) { x = cx + dx / d * lim; y = cy + dy / d * lim; }
+    }
+    #endif
+  }
+
+  void stepTent(int idx, unsigned long now, float dt) {
+    PartyTent &t = tents[idx];
+    const float cx = icx, cy = icy;
+    float aimA = t.dirA, Lt = t.L, thT = t.dirA;
+    if (t.track) {
+      float n1x = t.nx[1], n1y = t.ny[1];
+      aimA = atan2f(t.ty - n1y, t.tx - n1x);
+      Lt = constrain(hypotf(t.tx - n1x, t.ty - n1y) - 6, 0.0f, t.L);
+      thT = atan2f(t.ty - cy, t.tx - cx);
+    }
+    if (!t.free) thT = clampCone(thT, 70);
+    t.th.step(t.th.x + wrapPi(thT - t.th.x), dt);
+    t.aim.step(t.aim.x + wrapPi(aimA - t.aim.x), dt);
+    t.lam.step(t.lam.t, dt);
+    t.curl.step(t.curlT, dt);
+    t.bulb.step(1, dt);
+    t.neck.step(t.pinching ? 0 : 1, dt);
+
+    // Lifecycle: grow, hold (with a boop or two), retract
+    if (t.phase == PT_GROW && t.lam.x > 0.9f) {
+      t.phase = PT_HOLD;
+      if (t.holdMs >= 0) t.holdUntil = now + t.holdMs;
+      for (int b = 0; b < t.boops; b++) later(now, 30 + b * 600, PE_BOOP, idx, t.gen);
+    }
+    if (t.phase == PT_HOLD && t.holdMs >= 0 && eyeReached(now, t.holdUntil)) retract(t, false);
+    // A flick pinches off its bulb while it whips back
+    if (t.pinchArmed && !t.pinching && t.lam.x > 0.3f && eyeReached(now, t.pinchAt)) t.pinching = true;
+    if (t.pinching && t.neck.x < 0.15f) {
+      t.pinching = t.pinchArmed = false;
+      const int tip = PARTY_NN - 1;
+      float a = atan2f(t.ny[tip] - t.ny[tip - 1], t.nx[tip] - t.nx[tip - 1]), v = t.pinchV, c = cosf(a), s = sinf(a);
+      spawnDrop(t.nx[tip], t.ny[tip], c * v + t.vx[tip] * 0.4f, s * v + t.vy[tip] * 0.4f, t.bulbR * 0.95f, now, false);
+      if (eyeRnd01() < 0.4f) spawnDrop(t.nx[tip - 1], t.ny[tip - 1], c * v * 0.5f, s * v * 0.5f, 2, now, true);
+      t.bulbless = now + 150; t.neck.snap(1); t.phase = PT_HOLD;
+      retract(t, false);
+      t.lam.f = 3.5f; t.lam.z = 0.5f;
+    }
+    if (t.phase == PT_RETRACT && t.lam.x < 0.08f) {   // drained back in: the body takes the volume
+      t.on = false;
+      modeKick(2, -0.04f, t.th.x); modeKick(3, 0.03f, t.th.x);
+      E.v += 0.1f / pkE;
+      return;
+    }
+
+    // Pose curve ψ(s) = aim + curl s² + sway; nodes 0 and 1 ride the rim
+    float th = t.th.x, rb = radiusAt(th, Reff), ca = cosf(th), sa = sinf(th);
+    t.nx[0] = cx + 0.8f * rb * ca; t.ny[0] = cy + 0.8f * rb * sa;
+    t.nx[1] = cx + rb * ca; t.ny[1] = cy + rb * sa;
+    t.Lc = max(0.0f, t.lam.x) * Lt;
+    float seg = t.Lc / 8, swA = t.phase == PT_RETRACT ? 0 : t.swA;
+    float qx = t.nx[1], qy = t.ny[1];
+    int n = max(1, (int)ceilf(dt / 0.008f));
+    float h = dt / n;
+    for (int i = 2; i < PARTY_NN; i++) {
+      float s = (i - 1.5f) / 8, psi = t.aim.x + t.curl.x * s * s + swA * (t.mirror ? t.side : 1) * s * sinf(TWO_PI * t.swF * this->t - 2.5f * s + t.swPh);
+      qx += seg * cosf(psi); qy += seg * sinf(psi);
+      float u = i / (float)(PARTY_NN - 1);
+      float f = t.soft ? 1.4f + (0.8f - 1.4f) * u : 3.2f * (1 - 0.5f * u), z = t.soft ? 0.3f : 0.6f - 0.25f * u, w = TWO_PI * f;
+      for (int k = 0; k < n; k++) {
+        t.vx[i] += (w * w * (qx - t.nx[i]) - 2 * z * w * t.vx[i]) * h; t.nx[i] += t.vx[i] * h;
+        t.vy[i] += (w * w * (qy - t.ny[i]) - 2 * z * w * t.vy[i]) * h; t.ny[i] += t.vy[i] * h;
+      }
+    }
+    // Length pass from the root out, then keep every node on the glass
+    for (int i = 2; i < PARTY_NN; i++) {
+      float dx = t.nx[i] - t.nx[i - 1], dy = t.ny[i] - t.ny[i - 1], d = max(1e-6f, hypotf(dx, dy));
+      float dd = constrain(d, 0.85f * seg, 1.15f * seg);
+      if (dd != d) { t.nx[i] = t.nx[i - 1] + dx / d * dd; t.ny[i] = t.ny[i - 1] + dy / d * dd; }
+      onGlass(t.nx[i], t.ny[i], 4);
+    }
+  }
+
+  // Width profile (art direction): plump root with a flare into its mound, a
+  // round bulb at the tip; short tentacles are thinner. Once per frame.
+  void prepTent(PartyTent &t, unsigned long now) {
+    const float r = tier().r;
+    float w0 = (t.kind == PT_FLICK || t.kind == PT_STREAMER ? 0.22f : 0.275f) * r * PARTY_CHUNK;
+    float wTip = max(2.5f, 0.07f * r) * PARTY_CHUNK;
+    float wS = 0.45f + 0.55f * constrain(t.Lc / (0.3f * r), 0.0f, 1.0f);
+    float b = max(3.0f, 0.11f * r) * PARTY_BULB * max(0.6f, t.bulb.x) * (t.Lc > 0.5f * r ? 1.15f : 1) * PARTY_CHUNK;
+    if ((long)(now - t.bulbless) < 0) b = wTip * 0.6f;
+    t.bulbR = b;
+    for (int i = 0; i < PARTY_NN; i++) {
+      float s = max(0.0f, (i - 1) / 8.0f), u = 1 - s;
+      float hw = wTip + (w0 - wTip) * powf(u, 1.6f) + (s < 0.15f ? 0.35f * w0 * sq(1 - s / 0.15f) : 0);
+      if (i == 0) hw = w0 * 1.3f;
+      if (i == PARTY_NN - 2) hw = min(hw, 0.8f * b * t.neck.x + 0.3f);
+      t.hw[i] = hw * wS;
+      int a = max(0, i - 1), c = min(PARTY_NN - 1, i + 1);
+      float dx = t.nx[c] - t.nx[a], dy = t.ny[c] - t.ny[a], d = hypotf(dx, dy);
+      if (d < 1e-4f) { t.ux[i] = cosf(t.th.x); t.uy[i] = sinf(t.th.x); } else { t.ux[i] = dx / d; t.uy[i] = dy / d; }
+    }
+    t.bulbR = b * wS;
+    float A = PI * b * b;
+    for (int i = 1; i < PARTY_NN - 1; i++) A += (t.hw[i] + t.hw[i + 1]) * hypotf(t.nx[i + 1] - t.nx[i], t.ny[i + 1] - t.ny[i]);
+    t.area = A;
+  }
+  // The polygon around the chain, grown by grow px, into partyTX/TY: left side, bulb, right side back
+  void buildTent(const PartyTent &t, float grow) {
+    int k = 0;
+    for (int i = 0; i < PARTY_NN - 1; i++) {
+      float w = t.hw[i] + grow;
+      partyTX[k] = t.nx[i] - t.uy[i] * w; partyTY[k] = t.ny[i] + t.ux[i] * w; k++;
+    }
+    const int tip = PARTY_NN - 1;
+    float br = t.bulbR + grow, bx = t.nx[tip], by = t.ny[tip];
+    float c = -t.uy[tip], s = t.ux[tip];   // tangent turned +90°, then 8 steps of -22.5°
+    const float sc = 0.92388f, ss = -0.38268f;
+    for (int j = 0; j <= 8; j++) {
+      partyTX[k] = bx + br * c; partyTY[k] = by + br * s; k++;
+      float c2 = c * sc - s * ss; s = c * ss + s * sc; c = c2;
+    }
+    for (int i = PARTY_NN - 2; i >= 0; i--) {
+      float w = t.hw[i] + grow;
+      partyTX[k] = t.nx[i] + t.uy[i] * w; partyTY[k] = t.ny[i] - t.ux[i] * w; k++;
+    }
+  }
+
+  // ---- Droplets (motion spec §2.6) --------------------------------------------
+  void spawnDrop(float x, float y, float vx, float vy, float r, unsigned long now, bool sat) {
+    for (int i = 0; i < PARTY_DROPS; i++) {
+      PartyDrop &d = drops[i];
+      if (d.on) continue;
+      d.on = true; d.sat = sat; d.bridge = false; d.phase = 0;
+      d.x = x; d.y = y; d.vx = vx; d.vy = vy; d.r = max(sat ? 2.0f : 2.5f, r); d.gap = 99; d.th = 0; d.rim = Reff;
+      d.t0 = now; d.flyMs = sat ? 180 : (unsigned long)eyeRnd(250, 450);
+      d.rs.init(d.r, 2.6f, 1);
+      return;
+    }
+  }
+  void stepDrop(PartyDrop &d, unsigned long now, float dt) {
+    const float cx = icx, cy = icy;
+    d.th = atan2f(d.y - cy, d.x - cx);
+    d.rim = radiusAt(d.th, Reff);
+    d.gap = hypotf(d.x - cx, d.y - cy) - d.rim - d.r;
+    float c = cosf(d.th), s = sinf(d.th);
+    if (d.phase == 0) {   // flying: drag, and a boing off the bezel
+      float k = expf(-3 * dt);
+      d.vx *= k; d.vy *= k;
+      float x = d.x + d.vx * dt, y = d.y + d.vy * dt, gx = x, gy = y;
+      onGlass(gx, gy, d.r + 3);
+      if (gx != x) d.vx = -d.vx * 0.4f;
+      if (gy != y) d.vy = -d.vy * 0.4f;
+      d.x = gx; d.y = gy;
+      if (now - d.t0 > d.flyMs) {
+        d.phase = 1;
+        d.rx.init(d.x, 1.4f, 0.55f); d.rx.v = d.vx;
+        d.ry.init(d.y, 1.4f, 0.55f); d.ry.v = d.vy;
+      }
+    } else if (d.phase == 1) {   // flowing back to the rim, faster if it dawdles
+      if (now - d.t0 > 2000) { d.rx.f = d.ry.f = 2.5f; d.rx.z = d.ry.z = 0.6f; }
+      float px = d.x, py = d.y;
+      d.x = d.rx.step(cx + (d.rim - 2) * c, dt); d.y = d.ry.step(cy + (d.rim - 2) * s, dt);
+      d.vx = (d.x - px) / dt; d.vy = (d.y - py) / dt;
+      if (d.gap < 1) { d.phase = 2; d.rs.snap(d.r); }
+    } else {   // absorbed: shrinks into the rim, which wobbles
+      d.r = d.rs.step(0, dt);
+      d.x += (cx + (d.rim - d.r) * c - d.x) * 0.3f; d.y += (cy + (d.rim - d.r) * s - d.y) * 0.3f;
+      if (d.r < 0.6f) { d.on = false; modeKick(3, 0.04f, d.th); E.v += 0.15f / pkE; }
+    }
+  }
+  // Ellipse stretched along the velocity into partyDX/DY; once close, a bridge to the rim into partyBX/BY
+  void buildDrop(PartyDrop &d, float grow) {
+    const float rT = tier().r;
+    float sp = hypotf(d.vx, d.vy), e = 1 + 0.35f * min(1.0f, sp / (4 * rT)), a = atan2f(d.vy, d.vx);
+    float ra = d.r * e + grow, rb = d.r / e + grow, ca = cosf(a), sa = sinf(a);
+    for (int i = 0; i < 12; i++) {
+      float x = ra * partyCos30[i], y = rb * partySin30[i];
+      partyDX[i] = d.x + x * ca - y * sa; partyDY[i] = d.y + x * sa + y * ca;
+    }
+    d.bridge = d.phase != 0 && d.gap < 0.3f * rT;
+    if (!d.bridge) return;
+    float k = constrain(1 - d.gap / (0.3f * rT), 0.0f, 1.0f), c = cosf(d.th), s = sinf(d.th);
+    float rx = icx + (d.rim - 2) * c, ry = icy + (d.rim - 2) * s, nx = -s, ny = c;
+    float wm = 0.6f * d.r * sqrtf(k) + grow, wd = d.r * 0.85f + grow, wr = wm * 1.7f;
+    float mx = (d.x + rx) / 2, my = (d.y + ry) / 2;
+    partyBX[0] = d.x + nx * wd; partyBY[0] = d.y + ny * wd;
+    partyBX[1] = mx + nx * wm;  partyBY[1] = my + ny * wm;
+    partyBX[2] = rx + nx * wr;  partyBY[2] = ry + ny * wr;
+    partyBX[3] = rx - nx * wr;  partyBY[3] = ry - ny * wr;
+    partyBX[4] = mx - nx * wm;  partyBY[4] = my - ny * wm;
+    partyBX[5] = d.x - nx * wd; partyBY[5] = d.y - ny * wd;
+  }
+  // Every tentacle, droplet and bridge into a raster, grown by grow px and shifted by (ox, oy)
+  bool addSmall(PartyRaster &ras, float grow, float ox, float oy) {
+    bool any = false;
+    for (int i = 0; i < PARTY_TENTS; i++) {
+      PartyTent &t = tents[i];
+      if (!t.on || t.Lc <= 0.5f) continue;
+      buildTent(t, grow);
+      ras.add(partyTX, partyTY, PARTY_TP, ox, oy);
+      any = true;
+    }
+    for (int i = 0; i < PARTY_DROPS; i++) {
+      PartyDrop &d = drops[i];
+      if (!d.on || d.r <= 0.5f) continue;
+      buildDrop(d, grow);
+      ras.add(partyDX, partyDY, 12, ox, oy);
+      if (d.bridge) ras.add(partyBX, partyBY, 6, ox, oy);
+      any = true;
+    }
+    return any;
+  }
 
   // ---- Motion ---------------------------------------------------------------
   void step(unsigned long now) {
@@ -372,31 +1525,36 @@ struct PartyBlob {
     lastMs = now;
     if (dt <= 0) return;
     t = eyeSecs(now);
+    runEvents(now);
     if (morph) stepMorph(now, dt);
-    const float R = morphR();
+    const float R = morphR(), r = tier().r;
     bool free = !run && !morph;   // settled in his corner
+    if (free) heroRequest(now);
+    stepSeqs(now, dt);
 
     // Corner run: crouch for the lead-in, then follow an arc to the new corner's home
+    free = !run && !morph;
     if (run) stepRun(now, dt);
-    else if (free && eyeReached(now, nextRoam)) roam(now);
+    else if (free && eyeReached(now, nextRoam) && !nSeqs()) roam(now);   // a roam waits for the patterns to finish
     free = !run && !morph;
 
     if (padUntil && eyeReached(now, padUntil)) { padUntil = 0; if (!run && !morph) botEyes.padX = botEyes.padY = 0; }
     if (free && eyeReached(now, nextFidget)) fidget(now);
 
     // Wander: a new spot in the corner box every 3.5-8 s; half the long moves are a scoot hop
-    if (free && eyeReached(now, nextWander)) {
+    if (free && eyeReached(now, nextWander) && !seqHolds()) {
       float x0, x1, y0, y1;
       box(corner, x0, x1, y0, y1);
       float nx = eyeRnd(min(x0, x1), max(x0, x1)), ny = eyeRnd(min(y0, y1), max(y0, y1));
-      if (hypotf(nx - wTx, ny - wTy) > 0.15f * R && random(2)) { L.v += 0.06f * R / pkL; J.v -= 0.05f / pkJ; }
+      if (hypotf(nx - wTx, ny - wTy) > 0.15f * r && random(2)) { L.v += 0.06f * r / pkL; modeKick(2, -0.05f, 0); }
       wTx = nx; wTy = ny;
       nextWander = now + (unsigned long)eyeRnd(3500, 8000);
     }
     if (!morph && (!run || !going)) { wx.step(wTx, dt); wy.step(wTy, dt); }
 
     // Music: on the CoreS3 / Stackchan the spikes pump on the beat (smoothed, so
-    // fast tempos pump instead of strobing). Without a mic, a spike fan every 5-12 s.
+    // fast tempos pump instead of strobing) and tentacles drum it. Without a mic,
+    // a spike fan every 5-12 s, and sometimes a flick.
     #ifdef TARGET_CORES3
     bool heard = audioSpectrum.alive;
     float env = heard ? audioSpectrum.beatEnv : 0, bass = heard ? constrain(audioSpectrum.bass, 0.0f, 1.0f) : 0;
@@ -406,32 +1564,41 @@ struct PartyBlob {
     #endif
     beatSm.step(env, dt);
     if (heard) {
-      if (free && env > 0.9f && prevEnv < 0.5f) {
+      if (free && env > 0.9f && prevEnv < 0.5f && nSeqs()) {   // a pattern owns the spikes: the beat throbs it
+        throbUntil = now + 250; modeKick(2, 0.03f + 0.04f * bass, 0);
+      } else if (free && env > 0.9f && prevEnv < 0.5f) {
         field(alphaHome(), 0.3f + 0.5f * bass, 120, now);
-        if (bass > 0.6f && now - lastHop > 450) { L.v += 0.06f * R / pkL; lastHop = now; }
+        modeKick(2, 0.04f + 0.08f * bass, 0);
+        if (bass > 0.6f && now - lastHop > 450) { L.v += 0.06f * r / pkL; lastHop = now; }
         if (bass > 0.7f && now - lastPop > 600) { botEyes.popS.v += 0.03f / botEyes.pkPopS; lastPop = now; }
+        if (PARTY_TENTS && now - lastBeatGrab > 450) beatGrab(now, bass);
       }
+    } else if (free && eyeReached(now, nextPulse) && nSeqs()) {   // a throb on the pattern, not a new fan
+      throbUntil = now + 250; modeKick(2, 0.05f, 0); later(now, 180, PE_KICK2, -1, 0, 0.03f);
+      nextPulse = now + (unsigned long)eyeRnd(5000, 12000);
     } else if (free && eyeReached(now, nextPulse)) {
       field(alphaHome() + eyeRnd(-40, 40) * DEG_TO_RAD, 0.5f, (unsigned long)eyeRnd(500, 900), now);
+      modeKick(2, 0.10f, 0);
+      later(now, 180, PE_KICK2, -1, 0, 0.06f);
+      if (PARTY_TENTS && eyeRnd01() < 0.25f && liveTents() < partyTentCap) flick(now, 0.25f);
       nextPulse = now + (unsigned long)eyeRnd(5000, 12000);
     }
     prevEnv = env;
 
-    // Gaze reach: 40 % of big saccades send a small fan where he looks
-    if (free && hypotf(botEyes.tx - prevTx, botEyes.ty - prevTy) > 0.07f && eyeReached(now, fieldUntil) && random(10) < 4)
-      field(atan2f(botEyes.ty, botEyes.tx), 0.25f, 400, now);
-    prevTx = botEyes.tx; prevTy = botEyes.ty;
+    // The pattern library's scheduler (feeler groups are one of its entries now)
+    if (free) scheduleSeq(now, heard);
+    stepSlots(now, dt);
 
-    // Field, attractor, spikes. Spike k starts |k-4| x 35 ms late so the fan opens outward.
+    // Field, attractor, spikes (up to 0.55 r). Spike k starts |k-4| x 35 ms late so the fan opens outward.
     if (eyeReached(now, fieldUntil)) fieldT = 0;
     F.step(fieldT, dt);
-    al.step(al.x + wrapPi(alT - al.x), dt);
+    if (!seqDrivesAl()) al.step(al.x + wrapPi(alT - al.x), dt);   // the carousel turns it itself
     for (int k = 0; k < PARTY_SPIKES; k++) {
       BotSpring &s = spk[k];
       bool late = (long)(now - evAt) < abs(k - 4) * 35;
       float d = (k - 4) / 2.2f;
-      float target = late ? s.t : F.x * 0.42f * R * expf(-d * d) * jit[k];
-      if (target > s.x) { s.f = 2.6f; s.z = 0.55f; } else { s.f = 4.5f; s.z = 0.38f; }   // pop up, snap back
+      float target = late ? s.t : F.x * 0.55f * R * expf(-d * d) * jit[k];
+      if (target > s.x) { s.f = 3.2f; s.z = 0.45f; } else { s.f = 4.5f; s.z = 0.38f; }   // pop up, snap back
       s.step(target, dt);
       if (s.x < -0.05f * R) { s.x = -0.05f * R; s.v = 0; }   // the snap-back dimple stays shallow
     }
@@ -439,40 +1606,64 @@ struct PartyBlob {
     // Porcupine: spikes all round for 450 ms after a shake, then the snap back
     bool porc = !eyeReached(now, porcUntil);
     hP.f = porc ? 5 : 4.5f; hP.z = porc ? 0.6f : 0.38f;
-    hP.step(porc ? 0.22f * R : 0, dt);
+    hP.step(porc ? 0.30f * R : 0, dt);
 
-    // Squash, hop, stretch. The lift spring's undershoot is the landing splat.
+    // Lift, then the surface modes. Mode 2 is the squash (the lift spring's
+    // undershoot is the landing splat) plus a stretch along the velocity.
     // Mid-morph the drop is the wide ellipse of the stroke around his eyes.
-    float jT = 0.05f + (PARTY_MORPH_J - 0.05f) * (1 - morphOn());
-    if (L.x < 0) jT += -L.x / R * 0.9f;
-    J.step(jT, dt);
     L.step(0, dt);
     float vx = wx.v, vy = wy.v - L.v, speed = hypotf(vx, vy);
     if (speed > 0.2f * R) phiV = atan2f(vy, vx);   // freeze the stretch axis when slow
-    St.step(0.10f * constrain(speed / (2.5f * R), 0.0f, 1.0f), dt);
+    float Sv = 0.18f * constrain(speed / (2.5f * R), 0.0f, 1.0f) * PARTY_JIGGLE;
+    float c2 = 0.05f + (PARTY_MORPH_J - 0.05f) * (1 - morphOn());
+    if (L.x < 0) c2 += -L.x / R * 0.9f;
+    float msq = 0;
+    for (int k = 0; k < PARTY_MODES; k++) {
+      mc[k].step(k == 0 ? c2 + Sv * cosf(2 * phiV) : 0, dt);
+      ms[k].step(k == 0 ? Sv * sinf(2 * phiV) : 0, dt);
+      float cl = PARTY_MODE_DEF[k].cl * max(1.0f, PARTY_JIGGLE);
+      mc[k].x = constrain(mc[k].x, -cl, cl); ms[k].x = constrain(ms[k].x, -cl, cl);
+      msq += mc[k].x * mc[k].x + ms[k].x * ms[k].x;
+    }
     tapT *= expf(-dt / 0.6f);
+    shakeT *= expf(-dt / 0.6f);
     D.step(0, dt);
-    E.step((run && going) || morph ? 0.8f : constrain(speed / (3 * R) + 0.6f * tapT + 0.25f * beatSm.x, 0.0f, 1.0f), dt);
+    E.step((run && going) || morph ? 0.8f : constrain(speed / (3 * R) + 0.6f * tapT + shakeT + 0.25f * beatSm.x, 0.0f, 1.0f) * kappa.x, dt);
 
     // Bulge toward the gaze, or toward the spikes while a field is up
     float gx = botEyes.gxOut, gy = botEyes.gyOut;
     float gG = 0.07f * min(1.0f, hypotf(gx / 0.35f, gy / 0.25f));
-    bulgeA = F.x > 0.05f ? al.x : atan2f(gy, gx);
-    g.step(max(gG, 0.10f * F.x), dt);
+    const PartySeq *ld = leadSeq();   // a pattern keeps the bulge on its axis, with a mound under a crown
+    bulgeA = ld ? ld->axis : F.x > 0.05f ? al.x : atan2f(gy, gx);
+    g.step(max(max(gG, 0.10f * F.x), seqG), dt);
+
+    // Volume: the modes and the tentacles borrow from the body (motion spec §3.3)
+    B = 1 + 0.05f * sinf(TWO_PI * 0.21f * t);
+    Reff = R * B / sqrtf(1 + 0.5f * msq) * sqrtf(1 - borrow);
+
+    // One integer centre for body, shadow, tentacles and eyes, moved only past 0.6 px so nothing shimmers
+    float on = morphOn();
+    float fcx = wx.x, fcy = wy.x - L.x + mc[0].x * R * on;   // planted bottom: squash keeps the base on the floor
+    float st = (now - shakeAt) / 1000.0f;   // shake: a sideways jiggle at 5.7 Hz dying away
+    if (shakeAt && st < 1.5f) fcx += 0.12f * R * expf(-5 * st) * sinf(TWO_PI * 5.7f * st);
+    if (fabsf(fcx - icx) > 0.6f) icx = (int16_t)lroundf(fcx);
+    if (fabsf(fcy - icy) > 0.6f) icy = (int16_t)lroundf(fcy);
+
+    prepShape(Reff);
+    for (int i = 0; i < PARTY_TENTS; i++) if (tents[i].on) stepTent(i, now, dt);
+    for (int i = 0; i < PARTY_DROPS; i++) if (drops[i].on) stepDrop(drops[i], now, dt);
 
     // Eyes trail the body, look with the whole face, ride the squash and the breath
-    B = 1 + 0.04f * sinf(TWO_PI * 0.21f * t);
     // (mid-morph they stay centred, where the face's eyes are)
-    float on = morphOn();
     ox.step(0.20f * R * gx / 0.35f * on, dt);
-    oy.step((0.15f * R * gy / 0.25f + 0.6f * J.x * R - 0.3f * (B - 1) * R) * on, dt);
+    oy.step((0.15f * R * gy / 0.25f + 0.6f * mc[0].x * R - 0.3f * (B - 1) * R) * on, dt);
   }
 
   // The hop between the face's place and his corner, along an arc that rises a
   // quarter of the way, while the outline shrinks (or grows) and the eyes scale
   void stepMorph(unsigned long now, float dt) {
     if (morph == 2 && now - exitAt > 200 && P.t != 0) {   // anticipation over: launch
-      J.v += -0.12f / pkJ; L.v += 0.10f * tier().r / pkL;
+      modeKick(2, -0.12f, 0); L.v += 0.10f * tier().r / pkL;
       P.t = 0;
     }
     P.step(P.t, dt);
@@ -485,124 +1676,162 @@ struct PartyBlob {
     wx.v = (x - wx.x) / dt; wy.v = (y - wy.x) / dt;
     wx.x = wx.t = x; wy.x = wy.t = y;
     wTx = hx; wTy = hy;
-    if (morph == 1 && P.x > 0.97f) {   // landed in the corner
+    if (morph == 1 && P.x > 0.97f) {   // landed in the corner: a jiggle, a spike burst, two droplets, then the stretch
       morph = 0;
-      J.v += 0.14f / pkJ;
-      field(alphaHome(), 0.7f, 300, now);
+      modeKick(2, 0.16f, 0); modeKick(4, 0.03f, 0);
+      field(alphaHome(), 0.8f, 300, now);
       botEyes.blinkStart(now, BW_SWAP);
-      nextWander = now + 1000;
+      nextWander = now + 3000;
+      nextFidget = now + (unsigned long)eyeRnd(12000, 25000);
+      nextPulse = now + (unsigned long)eyeRnd(5000, 12000);
+      nextRoam = now + (unsigned long)eyeRnd(PARTY_ROAM_MIN_MS, PARTY_ROAM_MAX_MS);
+      nextFeeler = now + (unsigned long)eyeRnd(5000, 9000);
+      for (int i = 0; i < 2; i++) {
+        float a = alphaHome() + eyeRnd(-50, 50) * DEG_TO_RAD, v = eyeRnd(90, 140), r0 = Reff;
+        spawnDrop(icx + r0 * cosf(a), icy + r0 * sinf(a), v * cosf(a), v * sinf(a), 0.08f * tier().r, now, false);
+      }
+      if (PARTY_TENTS) later(now, 400, PE_WAKE, -1, 0);
     } else if (morph == 2 && P.t == 0 && P.x < 0.03f) {   // back to the face
       morph = 0;
       active = false; haveCorner = false;
+      clearExtras();
       botEyes.padX = botEyes.padY = 0;
       botEyes.blinkStart(now, BW_SWAP);
     }
   }
 
-  // Idle fidgets every 12-25 s, never the same one twice running
+  // Idle fidgets every 12-25 s, alternating: a shiver, or a scoot (feelers took over the probe)
   void fidget(unsigned long now) {
-    uint8_t f;
-    do { f = random(3); } while (f == lastFidget);
+    uint8_t f = lastFidget == 1 ? 2 : 1;
     lastFidget = f;
     nextFidget = now + (unsigned long)eyeRnd(12000, 25000);
-    if (f == 0) {   // probe: one slow spike reaches out, and he looks along it
-      float a = alphaHome() + eyeRnd(-50, 50) * DEG_TO_RAD;
-      field(a, 0.6f, 800, now, false, true);
-      look(cosf(a), sinf(a), 1200, now);
-    } else if (f == 1) {   // shiver: a quick n = 7 ripple round the rim
+    if (f == 1) {   // shiver: a quick n = 7 ripple round the rim
       shiverAt = now;
     } else {   // scoot: a hop to a new spot in his corner, with a glance that way
       float x0, x1, y0, y1;
       box(corner, x0, x1, y0, y1);
       wTx = eyeRnd(min(x0, x1), max(x0, x1)); wTy = eyeRnd(min(y0, y1), max(y0, y1));
-      L.v += 0.10f * tier().r / pkL; J.v -= 0.06f / pkJ;
+      L.v += 0.12f * tier().r / pkL; modeKick(2, -0.06f, 0);
       look(wTx > wx.x ? 0.9f : -0.9f, 0, 700, now);
       nextWander = now + (unsigned long)eyeRnd(3500, 8000);
     }
   }
-  void look(float x, float y, unsigned long ms, unsigned long now) {
-    botEyes.padX = constrain(x, -1.0f, 1.0f); botEyes.padY = constrain(y, -1.0f, 1.0f);
-    padUntil = now + ms;
-  }
 
   void stepRun(unsigned long now, float dt) {
     const PartyRun &m = *run;
-    const float R = tier().r;
+    const float r = tier().r;
     if (!going) {
       if (!eyeReached(now, goAt)) return;
       going = true;
       fromX = wx.x; fromY = wy.x;   // he may have drifted during the lead-in
       corner = runTo; wTx = dstX; wTy = dstY;
-      J.v += m.jGo / pkJ; L.v += m.lift * R / pkL;
+      modeKick(2, m.jGo, 0); L.v += m.lift * r / pkL;
       Q.snap(0); Q.f = m.f; Q.z = m.z;
-      field(atan2f(dstY - fromY, dstX - fromX), m.reach, 220, now, true);   // reach toward where he's going
+      float a = atan2f(dstY - fromY, dstX - fromX);
+      field(a, 0.35f, 220, now, true);   // reach toward where he's going
+      for (int s = 0; s < m.streamers && s < 2; s++) {   // a poke trails two floppy streamers
+        PartyTentOpt o;
+        o.dir = a + PI + (s ? 0.75f : -0.75f); o.L = eyeRnd(0.4f, 0.7f) * r * PARTY_REACH; o.kind = PT_STREAMER; o.hold = -1;
+        o.gf = 3; o.gz = 0.6f; o.soft = true; o.curl = 0; o.free = true; o.swA = 0; o.boops = 0;
+        strI[s] = spawnTent(o, now); strG[s] = tentGen;
+      }
     }
     Q.step(1, dt);
-    float p = constrain(Q.x, 0.0f, 1.03f), mx = (fromX + dstX) / 2, my = (fromY + dstY) / 2;
-    float kx = mx + (LCD_WIDTH / 2.0f - mx) * 0.45f, ky = my + (LCD_HEIGHT / 2.0f - my) * 0.45f;
+    float p = constrain(Q.x, 0.0f, 1.03f), kx, ky;
+    bowPoint(m, kx, ky);
     float x = (1 - p) * (1 - p) * fromX + 2 * (1 - p) * p * kx + p * p * dstX;
     float y = (1 - p) * (1 - p) * fromY + 2 * (1 - p) * p * ky + p * p * dstY;
     // Move along the path but keep a velocity, so stretch and slosh see the motion
     wx.v = (x - wx.x) / dt; wy.v = (y - wy.x) / dt;
     wx.x = wx.t = x; wy.x = wy.t = y;
-    if (Q.x > 0.97f) {   // landed: squash, spike burst, blink
+    PartyTent *grab = tentOf(grabI, grabG);
+    if (grab && p > 0.55f) retract(*grab, true);   // past the latch: let go
+    if (Q.x > 0.97f) {   // landed: squash, spike burst, blink; the streamers flick a droplet and drain
       run = nullptr;
-      J.v += m.jLand / pkJ;
+      modeKick(2, m.jLand, 0); modeKick(4, 0.06f, 0);
       field(alphaHome(), m.land, 300, now);
       botEyes.blinkStart(now, BW_SWAP);
-      botEyes.padX = botEyes.padY = 0;
-      nextWander = now + 1200;
+      botEyes.padX = botEyes.padY = 0; padUntil = 0;
+      nextWander = now + 1500;
       nextRoam = now + (unsigned long)eyeRnd(PARTY_ROAM_MIN_MS, PARTY_ROAM_MAX_MS);
+      for (int s = 0; s < 2; s++) {
+        PartyTent *st = tentOf(strI[s], strG[s]);
+        if (!st) continue;
+        if (eyeRnd01() < 0.5f) { st->pinchArmed = true; st->pinchAt = now + 120; st->pinchV = eyeRnd(110, 160); }
+        later(now, 380, PE_RETRACT, strI[s], strG[s]);
+      }
+      if (grab) retract(*grab, true);
     }
   }
 
   // ---- Shape ----------------------------------------------------------------
   // Per-frame constants of the radius function
-  float a3, a4, a5, w3, w4, w5, cPhi, sPhi, cBul, sBul, cDent, sDent;
+  float a3, a4, a5, w3, w4, w5, cBul, sBul, cDent, sDent;
   void prepShape(float R) {
-    float A = (1 + 1.5f * E.x) * R * min(1.0f, 2 * constrain(P.x, 0.0f, 1.0f));   // no wobble while it's still the face's outline
-    a3 = A * 0.045f * (0.6f + 0.4f * sinf(TWO_PI * 0.050f * t + ph[3]));   // edge waves n = 3, 4, 5, each
-    a4 = A * 0.030f * (0.6f + 0.4f * sinf(TWO_PI * 0.071f * t + ph[4]));   // with a slow amplitude drift so
-    a5 = A * 0.018f * (0.6f + 0.4f * sinf(TWO_PI * 0.037f * t + ph[5]));   // the pattern never repeats
+    float A = (1 + 2.0f * E.x) * kappa.x * R * min(1.0f, 2 * constrain(P.x, 0.0f, 1.0f));   // no wobble while it's still the face's outline
+    a3 = A * 0.065f * (0.6f + 0.4f * sinf(TWO_PI * 0.050f * t + ph[3]));   // edge waves n = 3, 4, 5, each
+    a4 = A * 0.045f * (0.6f + 0.4f * sinf(TWO_PI * 0.071f * t + ph[4]));   // with a slow amplitude drift so
+    a5 = A * 0.027f * (0.6f + 0.4f * sinf(TWO_PI * 0.037f * t + ph[5]));   // the pattern never repeats
     w3 = TWO_PI * 0.13f * t + ph[0]; w4 = -TWO_PI * 0.19f * t + ph[1]; w5 = TWO_PI * 0.29f * t + ph[2];
-    cPhi = cosf(phiV); sPhi = sinf(phiV); cBul = cosf(bulgeA); sBul = sinf(bulgeA); cDent = cosf(thD); sDent = sinf(thD);
+    cBul = cosf(bulgeA); sBul = sinf(bulgeA); cDent = cosf(thD); sDent = sinf(thD);
     float sp = (millis() - shiverAt) / 600.0f;   // shiver: n = 7 at 1.1 Hz under a 600 ms sin² envelope
     a7 = (shiverAt && sp < 1) ? 0.02f * R * sq(sinf(PI * sp)) : 0;
     w7 = TWO_PI * 1.1f * t;
-    floorOn = morphOn() > 0.99f;
+    floorOn = P.x > 0.9f;
   }
   float a7, w7;
   bool floorOn;
 
-  // Radius at angle th (c, s = its cos and sin), before the spike fan
-  float radiusAt(float th, float c, float s, float R) const {
-    return radiusWob(c, s, R, a3 * sinf(3 * th + w3) + a4 * sinf(4 * th + w4) + a5 * sinf(5 * th + w5));
+  // Body radius at angle th, without spikes, mounds or the floor (tentacle roots, droplets)
+  float radiusAt(float th, float R) const {
+    float wob = a3 * sinf(3 * th + w3) + a4 * sinf(4 * th + w4) + a5 * sinf(5 * th + w5);
+    if (a7 > 0) wob += a7 * sinf(7 * th + w7);
+    float m = 0;
+    for (int k = 0; k < PARTY_MODES; k++) m += mc[k].x * cosf((k + 2) * th) + ms[k].x * sinf((k + 2) * th);
+    return radiusCore(cosf(th), sinf(th), R, wob, m);
   }
-  float radiusWob(float c, float s, float R, float wob) const {
-    float cv = c * cPhi + s * sPhi;
-    float r = R * B * (1 + J.x * (2 * c * c - 1) + St.x * (2 * cv * cv - 1)) + wob;
+  float radiusCore(float c, float s, float R, float wob, float m) const {
+    float r = R * (1 + m) + wob;
     float cb = c * cBul + s * sBul;
     if (cb > 0) r += R * g.x * cb * cb * cb;
-    // Poke dent: a soft dip about 0.6 rad each side of the finger (cos 0.6 = 0.825)
-    float cd = c * cDent + s * sDent;
-    if (cd > 0.825f && D.x < -0.05f) { float u = (cd - 0.825f) / 0.175f; r += D.x * u * u; }
-    // Floor: the eyes reach 2.47 R on a mood pop, so the sides never pull in past 0.97 r
-    // (mid-morph the drop is the stroke's flat ellipse, so no floor then)
-    if (!floorOn) return r;
-    float fl = fabsf(s) < 0.5736f ? 0.97f : 0.85f;   // within 35° of horizontal
-    return max(r, fl * R);
+    // Poke dent: a soft dip 0.6 rad each side of the finger (cos 0.6 = 0.825)
+    if (D.x < -0.05f) {
+      float cd = c * cDent + s * sDent;
+      if (cd > 0.825f) { float q = cosf(acosf(min(1.0f, cd)) * PI / 1.2f); r += D.x * q * q; }
+    }
+    return r;
   }
+  // Floor (art director's eye zone): the eyes reach 2.47 R on a mood pop, so the
+  // sides never pull in past 0.97 R, the rest past 0.85 R. Mid-morph the drop is
+  // the stroke's flat ellipse, so no floor then.
+  static float floorFor(float s, float R) { return (fabsf(s) < 0.5736f ? 0.97f : 0.85f) * R; }   // within 35° of horizontal
 
   // Radii for this frame (partyRR, with the unit vectors in partyC/partyS)
-  // The edge waves step around the outline by rotation (sin(n(θ + 3°) + w) from
-  // sin and cos at θ), so the whole outline costs 6 sinf/cosf, not 360.
+  // Edge waves and surface modes step around the outline by rotation (sin(n(θ + 3°) + w)
+  // from sin and cos at θ), so the whole outline costs a few sinf/cosf, not hundreds.
   void buildOutline(float R) {
     float a0 = al.x, ca = cosf(a0), sa = sinf(a0);
-    float ws[4], wc[4];
+    float ws[4], wc[4], mcs[PARTY_MODES], msn[PARTY_MODES];
     const float amp[4] = {a3, a4, a5, a7}, w[4] = {w3, w4, w5, w7};
     const int harm[4] = {3, 4, 5, 7};
     int nh = a7 > 0 ? 4 : 3;
     for (int h = 0; h < nh; h++) { ws[h] = sinf(harm[h] * a0 + w[h]); wc[h] = cosf(harm[h] * a0 + w[h]); }
+    for (int k = 0; k < PARTY_MODES; k++) { mcs[k] = cosf((k + 2) * a0); msn[k] = sinf((k + 2) * a0); }
+    // Tentacle mounds and droplet necks, as unit vectors
+    float tc[PARTY_TENTS ? PARTY_TENTS : 1], ts[PARTY_TENTS ? PARTY_TENTS : 1], tm[PARTY_TENTS ? PARTY_TENTS : 1];
+    float dc[PARTY_DROPS ? PARTY_DROPS : 1], ds[PARTY_DROPS ? PARTY_DROPS : 1], dm[PARTY_DROPS ? PARTY_DROPS : 1];
+    int nt = 0, nd = 0;
+    const float rT = tier().r;
+    for (int i = 0; i < PARTY_TENTS; i++) {
+      const PartyTent &t = tents[i];
+      if (!t.on) continue;
+      tc[nt] = cosf(t.th.x); ts[nt] = sinf(t.th.x); tm[nt] = 0.12f * constrain(t.lam.x, 0.0f, 1.2f) * R; nt++;
+    }
+    for (int i = 0; i < PARTY_DROPS; i++) {
+      const PartyDrop &d = drops[i];
+      if (!d.on || d.phase == 0 || d.gap >= 0.3f * rT) continue;
+      dc[nd] = cosf(d.th); ds[nd] = sinf(d.th); dm[nd] = 0.10f * (1 - max(0.0f, d.gap) / (0.3f * rT)) * R; nd++;
+    }
     for (int i = 0; i < PARTY_N; i++) {
       float c = ca * partyCos3[i] - sa * partySin3[i];
       float s = sa * partyCos3[i] + ca * partySin3[i];
@@ -614,7 +1843,23 @@ struct PartyBlob {
         wc[h] = wc[h] * partyStepC[h] - ws[h] * partyStepS[h];
         ws[h] = s2;
       }
-      partyRR[i] = radiusWob(c, s, R, wob);
+      float m = 0;
+      for (int k = 0; k < PARTY_MODES; k++) {
+        m += mc[k].x * mcs[k] + ms[k].x * msn[k];
+        float c2 = mcs[k] * partyModeStepC[k] - msn[k] * partyModeStepS[k];
+        msn[k] = msn[k] * partyModeStepC[k] + mcs[k] * partyModeStepS[k];
+        mcs[k] = c2;
+      }
+      float r = radiusCore(c, s, R, wob, m);
+      for (int j = 0; j < nt; j++) {   // a tentacle roots in a mound (fake smooth-min)
+        float q = c * tc[j] + s * ts[j];
+        if (q > 0) { q *= q; q *= q; r += tm[j] * q * q; }
+      }
+      for (int j = 0; j < nd; j++) {   // a returning droplet pulls a neck toward itself
+        float q = c * dc[j] + s * ds[j];
+        if (q > 0) { float q2 = q * q, q4 = q2 * q2; r += dm[j] * q4 * q4 * q4; }
+      }
+      partyRR[i] = r;
     }
     // Spike fan: slots 6 vertices apart, centred on the attractor (vertex 0)
     for (int k = 0; k < PARTY_SPIKES; k++) {
@@ -632,12 +1877,28 @@ struct PartyBlob {
         for (int d = -2; d <= 2; d++) partyRR[(idx + d + PARTY_N) % PARTY_N] += hP.x * len * PARTY_SPK_LUT[abs(d)];
       }
     }
+    // Pattern spikes (spec §5.1, §5.4): offsets from vertex 0, 5 or 7 wide; a lean tilts the tip sideways
+    memset(partyTT, 0, sizeof(partyTT));
+    for (int bi = 0; bi < PARTY_BANKS; bi++) for (int j = 0; j < PARTY_SLOTS; j++) {
+      const PartySlot &q = banks[bi].s[j];
+      float h = q.h.x;
+      if (fabsf(h) < 0.05f) continue;
+      const float *lut = q.wide == 7 ? PARTY_LUT7 : PARTY_SPK_LUT;
+      int w = q.wide == 7 ? 3 : 2;
+      float cl = cosf(q.lean), sl = sinf(q.lean);
+      for (int d = -w; d <= w; d++) {
+        int i = ((q.off + d) % PARTY_N + PARTY_N) % PARTY_N;
+        float v = h * lut[abs(d)];
+        partyRR[i] += v * cl; partyTT[i] += v * sl;
+      }
+    }
+    if (floorOn) for (int i = 0; i < PARTY_N; i++) partyRR[i] = max(partyRR[i], floorFor(partyS[i], R));
   }
   // The outline polygon around (cx, cy), grown outward by grow px
   void placeOutline(float cx, float cy, float grow) {
     for (int i = 0; i < PARTY_N; i++) {
-      partyVX[i] = cx + (partyRR[i] + grow) * partyC[i];
-      partyVY[i] = cy + (partyRR[i] + grow) * partyS[i];
+      partyVX[i] = cx + (partyRR[i] + grow) * partyC[i] - partyTT[i] * partyS[i];
+      partyVY[i] = cy + (partyRR[i] + grow) * partyS[i] + partyTT[i] * partyC[i];
     }
   }
 
@@ -651,32 +1912,41 @@ struct PartyBlob {
     stage(0);
 
     const PartyTier &T = tier();
-    const float R = morphR(), on = morphOn();
-    prepShape(R);
-    uint16_t *buf = lcdCanvasPixels();   // null on an 8-bit canvas: no shadow or rim then
+    const float R = Reff, on = morphOn();
+    uint16_t *buf = lcdCanvasPixels();   // null on an 8-bit canvas: no shadows or rim then
 
-    // One integer centre for body, shadow and eyes, moved only past 0.6 px so nothing shimmers
-    float fcx = wx.x, fcy = wy.x - L.x + J.x * R * on;   // planted bottom: squash keeps the base on the floor
-    float st = (now - shakeAt) / 1000.0f;   // shake: a sideways jiggle at 5.7 Hz dying away
-    if (shakeAt && st < 1.5f) fcx += 0.12f * R * expf(-5 * st) * sinf(TWO_PI * 5.7f * st);
-    if (fabsf(fcx - icx) > 0.6f) icx = (int16_t)lroundf(fcx);
-    if (fabsf(fcy - icy) > 0.6f) icy = (int16_t)lroundf(fcy);
-
-    // Sheen colour: what the show looks like at the screen centre, low-passed
+    // Sheen colour: what the show looks like at the screen centre, low-passed;
+    // and every 1.5 s, the brightest spot in reach (tentacles like to feel for it)
     if (buf) {
       uint16_t p = partySwap(buf[(LCD_HEIGHT / 2) * LCD_WIDTH + LCD_WIDTH / 2]);
       float target[3] = {(float)((p >> 11) & 31) * 8.2f, (float)((p >> 5) & 63) * 4.05f, (float)(p & 31) * 8.2f};
       for (int c = 0; c < 3; c++) sheen[c] += (target[c] - sheen[c]) * 0.15f;
+      if (eyeReached(now, nextBright)) sampleBright(buf, now);
     }
 
     buildOutline(R);
+    float tentArea = 0;
+    int live = 0;
+    for (int i = 0; i < PARTY_TENTS; i++) if (tents[i].on) { prepTent(tents[i], now); tentArea += tents[i].area; live++; }
+    borrow = min(0.08f, 0.3f * tentArea / ((float)PI * R * R));
+    if (live > partyRenderStats.tentsMax) partyRenderStats.tentsMax = live;
+    const bool small = P.x > 0.9f;
     stage(1);
     if (buf && P.x > 0.6f) drawShadow(buf, R);
+    if (buf && small) drawLiftShadow(buf);
     stage(2);
-    if (buf) drawRimAndBody(buf);
+    if (buf) drawRimAndBody(buf, small);
     else {
+      partyRB.clear();
       placeOutline(icx, icy, 0);
-      partyFillPoly(partyVX, partyVY, PARTY_N, [&](int y, int xa, int xb) { gfx->drawFastHLine(xa, y, xb - xa + 1, BOT_COLOR_BG); });
+      partyRB.add(partyVX, partyVY, PARTY_N);
+      if (small) addSmall(partyRB, 0, 0, 0);
+      partyRB.begin();
+      int16_t xa[PARTY_MAX_SPANS], xb[PARTY_MAX_SPANS];
+      for (int y = partyRB.ya; y <= partyRB.yb; y++) {
+        int k = partyRB.spans(y, xa, xb);
+        for (int i = 0; i < k; i++) gfx->drawFastHLine(xa[i], y, xb[i] - xa[i] + 1, BOT_COLOR_BG);
+      }
     }
     stage(3);
     if (P.x > 0.8f) drawSheen(R);
@@ -684,8 +1954,8 @@ struct PartyBlob {
 
     // Eyes: the firmware model, no mouth, clamped inside the drop
     float k = morphK(), hw = 2.04f * 48 * k, hh = 1.22f * 48 * k;
-    float ex = ox.x, ey = oy.x;
-    float ax = max(1.0f, R * (1 + J.x) - hw - 3), ay = max(1.0f, R * (1 - J.x) - hh - 3), q = hypotf(ex / ax, ey / ay);
+    float ex = ox.x, ey = oy.x, sq0 = mc[0].x;
+    float ax = max(1.0f, R * (1 + sq0) - hw - 3), ay = max(1.0f, R * (1 - sq0) - hh - 3), q = hypotf(ex / ax, ey / ay);
     if (q > 1 && on > 0.99f) { ex /= q; ey /= q; }
     if (fabsf(ex - iox) > 0.6f) iox = (int16_t)lroundf(ex);
     if (fabsf(ey - ioy) > 0.6f) ioy = (int16_t)lroundf(ey);
@@ -696,18 +1966,56 @@ struct PartyBlob {
     partyRenderStats.sumUs += us;
     partyRenderStats.count++;
     if (us > partyRenderStats.maxUs) partyRenderStats.maxUs = us;
+    guard(us, now);
   }
 
-  // Rim and body in one pass. The rim outline is the body grown 1.5 px; each
-  // rim row is split around the body's spans, so only the thin ring is read,
-  // halved and written back, and the inside is cleared to black.
+  // Cost guard: cap live tentacles at 3 only while a 2 s window has a frame over
+  // 9 ms; lift the cap after 10 s of windows under 7 ms. Kevin would rather the
+  // frame rate dip than lose tentacles, so this only catches a runaway.
+  void guard(uint32_t us, unsigned long now) {
+    if (us > guardMax) guardMax = us;
+    if (now - guardAt < 2000) return;
+    if (guardMax > 9000) { partyTentCap = min(3, PARTY_TENTS); calmSince = 0; }
+    else if (guardMax < 7000) {
+      if (!calmSince) calmSince = now;
+      else if (now - calmSince > 10000) partyTentCap = PARTY_TENTS;
+    } else calmSince = 0;
+    guardAt = now; guardMax = 0;
+  }
+
+  // The brightest of 12 points on two arcs into the show, if it stands out
+  void sampleBright(const uint16_t *buf, unsigned long now) {
+    nextBright = now + 1500;
+    const float r = tier().r;
+    int best = -1, sum = 0, n = 0;
+    for (int arc = 0; arc < 2; arc++) for (int i = 0; i < 6; i++) {
+      float a = clampCone(alphaHome() + (-55 + i * 22) * DEG_TO_RAD, 60), d = (arc ? 2.2f : 1.6f) * r;
+      int x = (int)lroundf(icx + d * cosf(a)), y = (int)lroundf(icy + d * sinf(a));
+      if (x < 4 || y < 4 || x >= LCD_WIDTH - 4 || y >= LCD_HEIGHT - 4) continue;
+      uint16_t p = partySwap(buf[y * LCD_WIDTH + x]);
+      int l = (((p >> 11) & 31) * 4 + ((p >> 5) & 63) * 5 + (p & 31) * 2) / 8;
+      sum += l; n++;
+      if (l > best) { best = l; brightX = x; brightY = y; }
+    }
+    haveBright = n && best * 4 > sum * 5 / n;   // 1.25 x the average
+  }
+
+  // Rim and body in one pass, over the union of the body, tentacles, droplets
+  // and bridges. The rim is everything grown 1.5 px; each rim row is split
+  // around the fill's spans, so only the thin ring is read, halved and written
+  // back, and the inside is cleared to black. Overlapping parts read as one liquid.
   // Rim colour: the show at half brightness, or a faint face-colour line on dark scenes.
-  void drawRimAndBody(uint16_t *buf) {
-    int ya, yb, yi0, yi1;
+  void drawRimAndBody(uint16_t *buf, bool small) {
+    partyRA.clear();
     placeOutline(icx, icy, 1.5f);
-    partyScan(0, partyVX, partyVY, PARTY_N, ya, yb);
+    partyRA.add(partyVX, partyVY, PARTY_N);
+    if (small) addSmall(partyRA, 1.5f, 0, 0);
+    partyRA.begin();
+    partyRB.clear();
     placeOutline(icx, icy, 0);
-    partyScan(1, partyVX, partyVY, PARTY_N, yi0, yi1);
+    partyRB.add(partyVX, partyVY, PARTY_N);
+    if (small) addSmall(partyRB, 0, 0, 0);
+    partyRB.begin();
     uint16_t fc = botFaceColor;
     uint16_t fr = (uint16_t)(((fc >> 11) & 31) * 0.22f), fg = (uint16_t)(((fc >> 5) & 63) * 0.22f), fb = (uint16_t)((fc & 31) * 0.22f);
     auto rim = [&](uint16_t *row, int a, int b) {
@@ -717,11 +2025,11 @@ struct PartyBlob {
         row[x] = partySwap((r << 11) | (gg << 5) | bb);
       }
     };
-    int16_t oa[PARTY_MAX_X / 2], ob[PARTY_MAX_X / 2], ia[PARTY_MAX_X / 2], ib[PARTY_MAX_X / 2];
-    for (int y = ya; y <= yb; y++) {
+    int16_t oa[PARTY_MAX_SPANS], ob[PARTY_MAX_SPANS], ia[PARTY_MAX_SPANS], ib[PARTY_MAX_SPANS];
+    for (int y = partyRA.ya; y <= partyRA.yb; y++) {
       uint16_t *row = buf + y * LCD_WIDTH;
-      int no = partySpans(0, y, oa, ob);
-      int ni = (y >= yi0 && y <= yi1) ? partySpans(1, y, ia, ib) : 0;
+      int no = partyRA.spans(y, oa, ob);
+      int ni = partyRB.spans(y, ia, ib);
       for (int s = 0; s < no; s++) {
         int cur = oa[s];
         for (int j = 0; j < ni; j++) {
@@ -733,6 +2041,19 @@ struct PartyBlob {
         }
         if (cur <= ob[s]) rim(row, cur, ob[s]);
       }
+    }
+  }
+
+  // Lift shadow: one flat 75 % tone (+1, +2) px under the tentacles and droplets, so they float over the show
+  void drawLiftShadow(uint16_t *buf) {
+    partyRA.clear();
+    if (!addSmall(partyRA, 0, 1, 2)) return;
+    partyRA.begin();
+    int16_t xa[PARTY_MAX_SPANS], xb[PARTY_MAX_SPANS];
+    for (int y = partyRA.ya; y <= partyRA.yb; y++) {
+      int k = partyRA.spans(y, xa, xb);
+      uint16_t *row = buf + y * LCD_WIDTH;
+      for (int i = 0; i < k; i++) for (int x = xa[i]; x <= xb[i]; x++) row[x] = partySwap(partyDark75(partySwap(row[x])));
     }
   }
 
@@ -774,13 +2095,14 @@ struct PartyBlob {
     float sx[24], sy[24];
     for (int i = 0; i < 12; i++) {
       float u = i / 11.0f, th = (200 + 50 * u) * DEG_TO_RAD, c = cosf(th), s = sinf(th);
-      float r = radiusAt(th, c, s, R) - 2, w = 0.08f * R * sinf(PI * u);
+      float r = max(radiusAt(th, R), floorOn ? floorFor(s, R) : 0.0f) - 2, w = 0.08f * R * sinf(PI * u);
       sx[i] = icx + r * c; sy[i] = icy + r * s;
       sx[23 - i] = icx + (r - w) * c; sy[23 - i] = icy + (r - w) * s;
     }
     partyFillPoly(sx, sy, 24, [&](int y, int xa, int xb) { gfx->drawFastHLine(xa, y, xb - xa + 1, col); });
-    if (fabsf(St.x) < 0.05f && E.x < 0.6f) {   // specular dot, hidden in fast motion
-      float th = 225 * DEG_TO_RAD, c = cosf(th), s = sinf(th), r = radiusAt(th, c, s, R) - 2 - 0.04f * R;
+    float vx = wx.v, vy = wy.v - L.v;
+    if (hypotf(vx, vy) < 0.2f * R && E.x < 0.6f) {   // specular dot, hidden in fast motion
+      float th = 225 * DEG_TO_RAD, c = cosf(th), s = sinf(th), r = radiusAt(th, R) - 2 - 0.04f * R;
       gfx->fillRect((int)lroundf(icx + r * c) - 1, (int)lroundf(icy + r * s) - 1, 3, 2, 0xBDF7);
     }
   }

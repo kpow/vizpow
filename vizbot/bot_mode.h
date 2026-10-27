@@ -887,6 +887,12 @@ void renderBotMode() {
     if (partyWanted()) partyBlob.cancelExit(); else if (partyBlob.active) partyBlob.beginExit(frameNow);
     partyBlob.render(frameNow);
     party = true;
+    if (partyBlob.exprReq != 0xFF) {   // a face for a hero moment (wake-up stretch), then back to neutral
+      botMode.face.transitionTo(partyBlob.exprReq, 300);
+      botMode.shakeReacting = true;
+      botMode.shakeReactEnd = frameNow + partyBlob.exprMs;
+      partyBlob.exprReq = 0xFF;
+    }
   }
   if (!party) {
     partyBlob.leave(partyWanted());
