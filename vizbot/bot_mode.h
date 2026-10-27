@@ -387,6 +387,7 @@ BotModeState botMode;
 // ---- Voice hooks (written by voice_client.h on Core 0, read here on Core 1) ----
 // Harmless defaults on targets without VOICE_ENABLED.
 volatile bool voiceHoldsFace = false;     // a voice turn owns the face: no random expressions/sayings
+volatile uint8_t voicePhase = 0;          // VoiceState mirror: 0 idle, 1 listening, 2 thinking, 3 speaking, 4 error
 // Lip-sync: while voiceSpeakT0 != 0 the mouth follows voiceEnv (one 0..12 level
 // per 33 ms frame since voiceSpeakT0). Read here so the mouth keeps moving even
 // while the voice task is blocked on the network.
@@ -395,6 +396,12 @@ volatile bool voiceSuppressEvents = false;   // e.g. chill mode: don't report ar
 volatile uint32_t voiceSpeakT0 = 0;
 uint8_t* volatile voiceEnv = nullptr;
 volatile uint32_t voiceEnvFrames = 0;
+// The reply's loudness right now, 0..12, or -1 when he isn't speaking
+static int8_t voiceLevel() {
+  if (voiceSpeakT0 == 0 || voiceEnv == nullptr) return -1;
+  uint32_t f = (millis() - voiceSpeakT0) / 33;
+  return (f < voiceEnvFrames) ? (int8_t)voiceEnv[f] : 0;
+}
 static volatile bool voiceBubblePending = false;
 static char voiceBubbleText[MAX_SAY_LEN];
 static uint32_t voiceBubbleMs = 0;
@@ -629,9 +636,8 @@ void updateBotMode() {
 
   // Voice lip-sync: open the mouth with the reply audio's loudness, then put
   // the current expression's own mouth back when speech ends.
-  if (voiceSpeakT0 != 0 && voiceEnv != nullptr) {
-    uint32_t f = (millis() - voiceSpeakT0) / 33;
-    int8_t lvl = (f < voiceEnvFrames) ? (int8_t)voiceEnv[f] : 0;
+  int8_t lvl = voiceLevel();
+  if (lvl >= 0) {
     botMode.face.mouthType = (lvl >= 2) ? MOUTH_OPEN_O : MOUTH_LINE;
     botMode.face.mouthCurve = 4 + lvl;          // MOUTH_OPEN_O radius
     if (botMode.face.mouthWidth < 10) botMode.face.mouthWidth = 10;
@@ -886,6 +892,8 @@ void renderBotMode() {
   if (!partyPaused && (partyWanted() || partyBlob.active)) {
     if (partyWanted()) partyBlob.cancelExit(); else if (partyBlob.active) partyBlob.beginExit(frameNow);
     partyBlob.holdCorner = voiceHoldsFace || (botMode.speechBubble.active && botMode.speechBubble.voice);
+    partyBlob.talk = voicePhase <= 3 ? voicePhase : 0;
+    partyBlob.talkEnv = max(0, (int)voiceLevel()) / 12.0f;
     partyBlob.render(frameNow);
     party = true;
     if (partyBlob.exprReq != 0xFF) {   // a face for a hero moment (wake-up stretch), then back to neutral

@@ -73,6 +73,7 @@ static const char* const VOICE_STATE_NAMES[] = {
 
 // Hooks read by the render loop (bot_mode.h) and the spectrum analyzer.
 extern volatile bool voiceHoldsFace;
+extern volatile uint8_t voicePhase;        // party mode shows the state on the blob
 extern volatile uint32_t voiceSpeakT0;
 extern uint8_t* volatile voiceEnv;
 extern volatile uint32_t voiceEnvFrames;
@@ -126,6 +127,9 @@ struct VoiceClient {
 };
 
 VoiceClient voice;
+
+// Every state change goes through here so the render loop sees it too
+static void voiceSetState(VoiceState s) { voice.state = s; voicePhase = s; }
 
 // Wake-word mic stream state (see "Wake-word mic stream" below).
 #define WAKE_UDP_PORT        4051
@@ -558,7 +562,7 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
         if (!t0) {
           if (expr >= 0 && expr < BOT_NUM_EXPRESSIONS) cmdSetExpression((uint8_t)expr);
           if (bubble && bubble[0]) voiceShowBubble(bubble, (clipMs ? clipMs : (hintMs ? hintMs : 6000)) + 1500);
-          voice.state = VOICE_SPEAKING;
+          voiceSetState(VOICE_SPEAKING);
           voice.lastFetchMs = millis() - tReq;      // request → first sound
           t0 = millis();
           voiceEnv = voice.env;
@@ -598,7 +602,7 @@ static void voiceFinish(VoiceState how) {
   voiceSpeakT0 = 0;
   if (how == VOICE_ERROR) {
     voice.failures++;
-    voice.state = VOICE_ERROR;
+    voiceSetState(VOICE_ERROR);
     cmdPlaySequence(SEQ_ERROR);
     cmdSetExpression(EXPR_CONFUSED);
     vTaskDelay(pdMS_TO_TICKS(2500));
@@ -607,7 +611,7 @@ static void voiceFinish(VoiceState how) {
   voice.cancelRequested = false;
   scCamMotion.paused = false;
   scCamMotion.havePrev = false;   // the room changed while we were busy; re-baseline
-  voice.state = VOICE_IDLE;
+  voiceSetState(VOICE_IDLE);
 }
 
 static void voiceRunTurn() {
@@ -628,7 +632,7 @@ static void voiceRunTurn() {
   if (!followUp) voice.followUps = 0;
 
   // 1. Listen — a synth cue first, and wait for it so the mic doesn't hear it
-  voice.state = VOICE_LISTENING;
+  voiceSetState(VOICE_LISTENING);
   scCamMotion.paused = true;
   cmdSetExpression(EXPR_FOCUSED);
   voiceShowBubble("Listening...", VOICE_MAX_REC_MS);
@@ -669,7 +673,7 @@ static void voiceRunTurn() {
   }
 
   // 2. Think
-  voice.state = VOICE_THINKING;
+  voiceSetState(VOICE_THINKING);
   cmdPlaySequence(SEQ_TYPING);
   cmdSetExpression(EXPR_THINKING);
   voiceShowBubble("Hmm...", 20000);
@@ -750,7 +754,7 @@ static void voiceRunPlay() {
     return;
   }
   voiceHoldsFace = true;
-  voice.state = VOICE_THINKING;
+  voiceSetState(VOICE_THINKING);
   scCamMotion.paused = true;
   voiceOwnsAudio = true;
   vTaskDelay(pdMS_TO_TICKS(60));
