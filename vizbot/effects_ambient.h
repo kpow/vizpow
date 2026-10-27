@@ -64,17 +64,26 @@ struct EffectCtx {
 // ============================================================================
 // Shared animation state
 // ============================================================================
+// The show's clock runs on real time, not loop count, so a faster loop gives
+// smoother frames rather than a faster show. One tick (+10 frame, +1 hue) per
+// AMBIENT_TICK_MS: the loop period the effects were tuned at (77 ms, measured
+// on the 1.69 at fw 3.8.0). A long gap (menu, OTA) counts as one tick.
+#define AMBIENT_TICK_MS 77.0f
+
 static uint16_t ambientFrame = 0;
 static uint8_t  ambientHue   = 0;
 static uint32_t lastAmbientAdvanceMs = 0;
+static float    ambientTicks = 0;   // fractional ticks since boot, wrapped
 
 inline void advanceAmbientState() {
   uint32_t now = millis();
-  if (now != lastAmbientAdvanceMs) {
-    ambientFrame += 10;  // speed=10 equivalent
-    ambientHue++;
-    lastAmbientAdvanceMs = now;
-  }
+  uint32_t dt = now - lastAmbientAdvanceMs;
+  if (dt == 0) return;
+  lastAmbientAdvanceMs = now;
+  ambientTicks += dt > 4 * AMBIENT_TICK_MS ? 1.0f : dt / AMBIENT_TICK_MS;
+  if (ambientTicks >= 32768.0f) ambientTicks -= 32768.0f;   // frame and hue both wrap to 0 here; keeps float precision
+  ambientFrame = (uint16_t)(uint32_t)(ambientTicks * 10.0f);
+  ambientHue   = (uint8_t)(uint32_t)ambientTicks;
 }
 
 // ============================================================================

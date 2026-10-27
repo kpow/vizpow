@@ -1290,11 +1290,14 @@ void handleState() {
                 "},\"wled\":" + getWledStatusJson() +
                 ",\"wledEmoji\":" + getWledEmojiJson() +
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
+                ",\"loop\":" + loopStatsJson() +                  // real fps, loop work and panel push µs since the last read
                 ",\"faceRender\":" + botFaceRenderStatsJson() +   // µs per face render since the last read
                 ",\"party\":{\"on\":" + (partyMode ? "true" : "false") +
                   ",\"size\":\"" + String("sml"[partySize % 3]) + "\"" +
                   ",\"active\":" + (partyBlob.active ? "true" : "false") +
                   ",\"corner\":\"" + partyCornerName(partyBlob.corner) + "\"" +   // his choice, read only
+                  ",\"seq\":\"" + partyBlob.seqNames() + "\"" +                    // library patterns playing, e.g. crown+bloom
+                  ",\"stack\":\"" + String(partyStack == 0 ? "off" : partyStack == 1 ? "some" : "wild") + "\"" +
                   ",\"render\":" + partyRenderStatsJson() + "}" +              // µs per blob + eyes render
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
@@ -1482,6 +1485,9 @@ void handleBotBackground() {
 // GET /bot/party?v=0|1&size=s|m|l — party mode (the face as a blob in a corner
 // over the ambient effect). Turning it on switches to the ambient scene. He
 // picks his own corner, so there is no corner argument.
+// &hero=flick|feeler|big|wake|roam|shake|beat plays one hero moment now, to test and tune.
+// &seq=breath|calm|crown|carousel|split|wave|merge|bloom|feelers|long plays a library pattern
+// (on top of what's playing when stacking is on); &stack=off|some|wild sets how many can stack.
 extern void cmdSetParty(uint8_t on, uint8_t size);
 
 void handleBotParty() {
@@ -1494,6 +1500,19 @@ void handleBotParty() {
     if (i >= 0 && i <= 2) size = i;
   }
   if (on != 0xFF || size != 0xFF) cmdSetParty(on, size);
+  if (server.hasArg("hero")) {
+    static const char *heroes[] = {"flick", "feeler", "big", "wake", "roam", "shake", "beat"};
+    String h = server.arg("hero");
+    for (uint8_t i = 0; i < 7; i++) if (h == heroes[i]) partyHeroReq = i + 1;
+  }
+  if (server.hasArg("seq")) {
+    String q = server.arg("seq");
+    for (uint8_t i = 0; i < SEQ_COUNT; i++) if (q == PARTY_SEQ_DEF[i].key) partySeqReq = i + 1;
+  }
+  if (server.hasArg("stack")) {
+    String k = server.arg("stack");
+    if (k == "off") partyStack = 0; else if (k == "some") partyStack = 1; else if (k == "wild") partyStack = 2;
+  }
   bool nowOn = on == 0xFF ? partyMode : on == 1;
   uint8_t nowSize = size == 0xFF ? partySize : size;
   server.send(200, "application/json", String("{\"party\":") + (nowOn ? "true" : "false") +
@@ -2384,6 +2403,40 @@ void handleDebugScreen() {
   botRenderHold = false;
 }
 
+#if defined(BOARD_ESP32S3_LCD_169) || defined(BOARD_ESP32S3_LCD_13)
+// GET /debug/panelcheck → reads the panel's GRAM back (slow read clock) and
+// compares it with the canvas that was last pushed, to prove the write clock
+// lands every pixel. Pauses rendering for the ~0.2 s it takes.
+void handleDebugPanelCheck() {
+  extern const uint16_t* lcdCanvasBuffer();
+  const uint16_t* buf = lcdCanvasBuffer();
+  if (!buf) { server.send(503, "text/plain", "no canvas"); return; }
+  extern volatile bool botRenderHold, botFrameInProgress;
+  botRenderHold = true;
+  for (int i = 0; i < 50 && botFrameInProgress; i++) delay(2);
+  delay(5);
+  static uint16_t row[LCD_WIDTH];
+  uint32_t same = 0, swapped = 0, badRows = 0, firstBadY = 0xFFFF, zeros = 0;
+  for (int y = 0; y < LCD_HEIGHT; y++) {
+    _lcd_display.readRect(0, y, LCD_WIDTH, 1, row);
+    const uint16_t* want = buf + y * LCD_WIDTH;
+    uint32_t rowSame = 0;
+    for (int x = 0; x < LCD_WIDTH; x++) {
+      if (row[x] == want[x]) rowSame++;
+      if (row[x] == (uint16_t)((want[x] << 8) | (want[x] >> 8))) swapped++;
+      if (row[x] == 0) zeros++;
+    }
+    same += rowSame;
+    if (rowSame != LCD_WIDTH) { badRows++; if (firstBadY == 0xFFFF) firstBadY = y; }
+  }
+  botRenderHold = false;
+  server.send(200, "application/json",
+    "{\"pixels\":" + String(LCD_WIDTH * LCD_HEIGHT) + ",\"match\":" + String(same) +
+    ",\"matchSwapped\":" + String(swapped) + ",\"zeros\":" + String(zeros) +
+    ",\"badRows\":" + String(badRows) + ",\"firstBadY\":" + String(firstBadY) + "}");
+}
+#endif
+
 void handleDebugTouch() {
   String g = server.arg("g");
   uint8_t code = g == "tap" ? 1 : g == "long" ? 2 : g == "up" ? 3 : g == "down" ? 4 :
@@ -2616,6 +2669,9 @@ void setupWebServer() {
   #endif
   #ifdef TOUCH_UI_V2
   server.on("/debug/screen", handleDebugScreen);
+#if defined(BOARD_ESP32S3_LCD_169) || defined(BOARD_ESP32S3_LCD_13)
+  server.on("/debug/panelcheck", handleDebugPanelCheck);
+#endif
   server.on("/debug/touch", handleDebugTouch);
   #endif
   server.on("/brightness", handleBrightness);
