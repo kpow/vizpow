@@ -376,6 +376,20 @@ Times are from the trigger. "Body" covers the modes, hop and spikes. "Eyes" cove
 
 ---
 
+## 6a. Tuned defaults (Kevin, 2026-10-26, Tentacle Lab)
+
+These multiply the spec values above and are the starting point for the firmware port.
+
+| Knob | Value | Meaning |
+|---|---|---|
+| Reach | 1.20× | tentacle length |
+| Jiggle | 1.70× | surface-mode kick amplitude |
+| Chunkiness | 1.30× | tentacle root/body width |
+| Tip bulb | 1.30× | bulb radius at the tip |
+| Big reaches | 60% | share of random reaches that go big |
+
+Eye safety zone: the art director's (body floor 0.85 R toward the eyes, 0.97 R on the sides). The motion designer's variant is dropped.
+
 ## 7. Open questions for Kevin
 
 1. Is the frame-rate work (§1.4: loop pacing, SPI clock, DMA) in scope? The motion is built to read at 15–20 fps either way.
