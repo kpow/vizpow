@@ -95,6 +95,15 @@ class CodeTurn(BrainTest):
         self.assertTrue(until(lambda: len(self.bot.code_calls) == 2))
         self.assertEqual(self.bot.code_calls, [{"v": 1, "why": "vizself"}, {"found": 1}])
 
+    def test_talk_between_code_look_ups_is_not_said(self):
+        self.turn(reply(tool_use("vizself__search_code", id="a")),
+                  reply(text("That wasn't it. Let me look again."), tool_use("vizself__read_code", id="b")),
+                  reply(text("[face:happy] Springy eyelids.")))
+        self.assertEqual(self.spoken, ["Springy eyelids."])
+        self.assertEqual(sum(q in codemode.FOUND_IT for q in self.quips), 1)
+        self.assertTrue(until(lambda: len(self.bot.code_calls) == 2))
+        self.assertEqual(self.bot.code_calls, [{"v": 1, "why": "vizself"}, {"found": 1}])   # one show, no restart
+
     def test_no_answer_shrugs_out_of_code_mode(self):
         self.turn(reply(tool_use("vizself__search_code")), reply(stop="end_turn"))
         self.assertTrue(until(lambda: {"v": 0} in self.bot.code_calls))

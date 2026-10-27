@@ -108,9 +108,12 @@ CONNECTORS_LINE = ("- Tools with a double underscore in the name (like kpow__boo
                    "the cover, check what's playing and it will show.\n")
 
 CODE_LINE = ("- Tools starting with {prefixes} are your own source code, design notes and hardware. When {user} "
-             "asks how you work, why you do something or what you're made of, look it up there; several look-ups "
-             "are fine. You put on a little show while you dig, so don't talk between look-ups: answer once at the "
-             "end, in plain words, briefly. Never read code, file names or line numbers aloud unless asked.\n")
+             "asks about you (how you see, hear, move, talk, remember or light up, what you're made of, your code, "
+             "what changed lately), look it up there before answering, every time, even when you think you know. "
+             "This is the exception to using tools only to change things. Several look-ups are fine. Before the "
+             "first one say at most a few words, like \"let me check\", and never why you're looking; between "
+             "look-ups say nothing. Then answer once, in plain words, briefly. Never read code, file names or line "
+             "numbers aloud unless asked.\n")
 
 
 TAG_RE = re.compile(r"\[(face|gesture)\s*:\s*([a-z_]+)\]", re.I)
@@ -349,11 +352,13 @@ class Brain:
         used: list[str] = []
         text_parts: list[str] = []
         speak = None
-        turn = {"said": False, "budgets": {}, "fed": False, "tainted": False, "show": None}
+        turn = {"said": False, "budgets": {}, "fed": False, "tainted": False, "show": None, "held": []}
         if on_text is not None:
             def speak(s: str) -> None:
-                if s.strip() and turn["show"]:
-                    turn["show"].found()   # the answer is starting: a "found it" line first
+                if turn["show"] and turn["show"].digging:
+                    # Talk between code look-ups is held back: said only if this round is the answer
+                    turn["held"].append(s)
+                    return
                 turn["said"] = turn["said"] or bool(s.strip())
                 on_text(s)
         try:
@@ -383,7 +388,12 @@ class Brain:
                 messages.append({"role": "assistant", "content": resp.content})
                 continue
             calls = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
+            held, turn["held"] = turn["held"], []
             if resp.stop_reason != "tool_use" or not calls:
+                if any(h.strip() for h in held):   # the answer: a "found it" line, then the words
+                    turn["show"].found()
+                    for h in held:
+                        speak(h)
                 break
             # Append the assistant turn unchanged (thinking/progress blocks included).
             messages.append({"role": "assistant", "content": resp.content})
