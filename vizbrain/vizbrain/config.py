@@ -183,6 +183,9 @@ def keychain_get(account: str) -> str | None:
 CONNECTOR_NAME = re.compile(r"^[a-z][a-z0-9-]{0,15}$")
 CONNECTOR_DEFAULTS = {"timeout_s": 8.0, "start_timeout_s": 30.0, "max_result_chars": 6000}
 _CONNECTOR_LIMITS = {"timeout_s": (1.0, 20.0), "start_timeout_s": (5.0, 120.0), "max_result_chars": (500, 20000)}
+# Optional: a connector's own look-up budget per turn (else it shares the turn's, brain.MAX_LOOKUPS
+# and LOOKUP_BUDGET_S). vizself digs through code for up to a minute while the bot puts on a show.
+_BUDGET_LIMITS = {"max_lookups": (1, 20), "lookup_budget_s": (5.0, 120.0)}
 
 
 def connectors_raw() -> dict:
@@ -280,6 +283,20 @@ def _connector(name: str, e: dict) -> dict:
             raise ValueError(f'"{key}" should be a number') from None
         v = min(max(v, lo), hi)
         conn[key] = int(v) if isinstance(default, int) else v
+    budget = {}
+    for key, (lo, hi) in _BUDGET_LIMITS.items():
+        if key not in e:
+            continue
+        try:
+            v = min(max(float(e[key]), lo), hi)
+        except (TypeError, ValueError):
+            raise ValueError(f'"{key}" should be a number') from None
+        budget[key] = int(v) if isinstance(lo, int) else v
+    conn["budget"] = budget or None
+    code_mode = e.get("code_mode", False)
+    if not isinstance(code_mode, bool):
+        raise ValueError('"code_mode" should be true or false')
+    conn["code_mode"] = code_mode   # look-ups play code mode on the bot, with quips (codemode.py)
     return conn
 
 

@@ -144,6 +144,7 @@ class App:
         self.pictures = Shower(self.get_bot, lambda: self.bot_info.get("firmware"))
         self.brain.on_picture = lambda url: threading.Thread(target=self.pictures.show, args=(url,),
                                                               daemon=True).start()
+        self.brain.get_bot = self.get_bot   # code mode's animation (codemode.py)
         if self.connectors:
             self.connectors.on_track = self.on_track
         self.log: collections.deque = collections.deque(maxlen=50)
@@ -294,7 +295,8 @@ class App:
         def work() -> None:
             result = {"tools": []}
             try:
-                result = self.brain.turn(heard, personality, on_text=splitter.feed)
+                result = self.brain.turn(heard, personality, on_text=splitter.feed,
+                                         on_quip=lambda line, after: mouth.say(line, after=after, record=False))
                 splitter.flush()
                 if not mouth.spoken:  # offline stand-in or error text: nothing was streamed
                     if st["expression"] < 0:

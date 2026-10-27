@@ -130,6 +130,11 @@ struct ScBaseLeds {
   // Cost of update() incl. the push to hardware; worst case since /state last read
   uint32_t updateMaxUs = 0;
 
+  // Code mode (party_blob.h, set each frame by bot_mode): 0 none, 1 reading
+  // scanner, 2 quip, 3 found, 4 shrug. Painted over the running effect.
+  uint8_t codeBeat = 0, codePos = 0, codeLvl = 0;
+  unsigned long codeAt = 0;
+
   // Internal state
   unsigned long lastUpdate = 0;
   float phase = 0;        // general animation phase (0-1 wrapping)
@@ -176,6 +181,30 @@ struct ScBaseLeds {
     flashDurationMs = durationMs;
   }
 
+  // Code mode beats (spec docs/vizself/code-mode-motion-spec.md §3.3): a mirrored
+  // two-dot scanner in the face colour stepping down both sides with his reading,
+  // warm white with the voice on a quip, a green flash for "found it", amber on a shrug
+  void effectCode(unsigned long now) {
+    extern uint16_t botFaceColor;
+    const int n = SC_BASE_LED_COUNT;
+    uint8_t fr = ((botFaceColor >> 11) & 31) * 8, fg = ((botFaceColor >> 5) & 63) * 4, fb = (botFaceColor & 31) * 8;
+    auto set = [&](int i, uint8_t r, uint8_t g, uint8_t b) { i = ((i % n) + n) % n; ledR[i] = r; ledG[i] = g; ledB[i] = b; };
+    auto all = [&](uint8_t r, uint8_t g, uint8_t b) { for (int i = 0; i < n; i++) set(i, r, g, b); };
+    float t = (now - codeAt) / 1000.0f;
+    switch (codeBeat) {
+      case 1: {
+        all(0, 0, 0);
+        int p = min((int)codePos, n / 2);
+        set(p, fr * 12 / 100, fg * 12 / 100, fb * 12 / 100);
+        set(-p, fr * 12 / 100, fg * 12 / 100, fb * 12 / 100);
+        break;
+      }
+      case 2: { float k = 0.06f + 0.015f * codeLvl; all(255 * k, 210 * k, 160 * k); break; }
+      case 3: { float k = t < 0.3f ? 0.4f : max(0.0f, 0.4f * (1 - (t - 0.3f) / 0.8f)); all(40 * k, 255 * k, 80 * k); break; }
+      case 4: { float k = t < 0.5f ? 0.15f : 0; all(255 * k, 160 * k, 0); break; }
+    }
+  }
+
   // Set mood color (used by mood ring mode)
   void setMoodColor(uint8_t r, uint8_t g, uint8_t b) {
     moodR = r; moodG = g; moodB = b;
@@ -207,6 +236,7 @@ struct ScBaseLeds {
       case SC_LED_MODE_SCREEN:    effectScreen(dt, speedFactor); break;
       default:                    effectOff(); break;
     }
+    if (codeBeat && mode != SC_LED_MODE_OFF) effectCode(now);
 
     // Audio overlay — when AudioFX is enabled (and we're not on OFF or the
     // dedicated AUDIO mode which already does its own thing), modulate the

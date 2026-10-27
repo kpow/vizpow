@@ -105,8 +105,8 @@ static inline bool partyRight(uint8_t c) { return c == 0 || c == 1; }
 static inline bool partyTop(uint8_t c)   { return c == 0 || c == 3; }
 
 // Render cost for GET /state (blob + eyes, not the effect); reading starts a fresh window
-// stageUs: summed per stage (step, outline, shadows, rim + body, sheen, eyes) to find the cost
-#define PARTY_STAGES 6
+// stageUs: summed per stage (step, outline, shadows, rim + body, sheen, eyes, code backdrop) to find the cost
+#define PARTY_STAGES 7
 struct PartyRenderStats { uint32_t sumUs, count, maxUs; uint32_t stageUs[PARTY_STAGES]; uint8_t tentsMax; };
 PartyRenderStats partyRenderStats = {0, 0, 0, {0}, 0};
 uint8_t partyTentCap = PARTY_TENTS;   // the cost guard drops it to 3 while frames run long
@@ -294,6 +294,7 @@ static float partyCos30[12], partySin30[12];
 struct PartyRun { uint16_t leadMs; float f, z, jGo, lift, bow, jLand, land, gf, gz; uint8_t streamers; };
 static const PartyRun PARTY_POKE = {260, 1.5f, 0.85f, -0.14f, 0.12f, 0.45f, 0.30f, 0.7f, 3.0f, 0.6f, 2};
 static const PartyRun PARTY_ROAM = {700, 0.95f, 0.9f, -0.08f, 0.07f, 0.30f, 0.16f, 0.45f, 1.6f, 0.55f, 0};
+static const PartyRun PARTY_CODE = {160, 2.2f, 0.85f, -0.10f, 0.06f, 0.15f, 0.16f, 0.5f, 3.0f, 0.6f, 2};   // into code mode and back
 #define PARTY_ROAM_MIN_MS 25000   // he wanders to another corner every 25-60 s
 #define PARTY_ROAM_MAX_MS 60000
 
@@ -309,7 +310,10 @@ struct PartySlot { bool on, popped; int8_t off, k; uint8_t wide; float env, Fon,
 struct PartyBank { int8_t owner; float rf, rz, ff, fz; PartySlot s[PARTY_SLOTS]; };
 static const float PARTY_LUT7[4] = {1.0f, 0.53f, 0.22f, 0.05f};   // (1 - |d|/4)^2.2: the 7-wide spike
 
-enum { SEQ_BREATH, SEQ_CALM, SEQ_CROWN, SEQ_CAROUSEL, SEQ_SPLIT, SEQ_WAVE, SEQ_MERGE, SEQ_BLOOM, SEQ_FEELERS, SEQ_LONG, SEQ_COUNT };
+// SEQ_COMPILE and on belong to code mode: the party scheduler never picks them (?seq= still plays them)
+enum { SEQ_BREATH, SEQ_CALM, SEQ_CROWN, SEQ_CAROUSEL, SEQ_SPLIT, SEQ_WAVE, SEQ_MERGE, SEQ_BLOOM, SEQ_FEELERS, SEQ_LONG,
+       SEQ_COMPILE, SEQ_AHA, SEQ_GRAND, SEQ_VOICE, SEQ_COUNT };
+#define SEQ_PARTY_COUNT SEQ_COMPILE
 enum { TIER_S, TIER_M, TIER_B };
 struct PartySeqDef { const char *key; uint8_t tier, w; uint16_t cdS; bool spikes, tents, solo; };
 static const PartySeqDef PARTY_SEQ_DEF[SEQ_COUNT] = {
@@ -323,6 +327,10 @@ static const PartySeqDef PARTY_SEQ_DEF[SEQ_COUNT] = {
   {"bloom",    TIER_M,  7, 30, false, true,  false},   // Bloom: a mirrored pair of arms around a small spike
   {"feelers",  TIER_M,  5, 20, false, true,  false},   // Feelers: a short group fanned across the cone
   {"long",     TIER_B,  3, 45, false, true,  false},   // Long Reach: the big feeler, now rare
+  {"compile",  TIER_M,  0, 14, true,  false, false},   // Compile: a progress bar of spikes, outside in, centre last
+  {"aha",      TIER_M,  0, 18, false, true,  false},   // Aha: one short finger raised up the axis
+  {"grand",    TIER_B,  0, 45, true,  false, false},   // Grand Crown: the whole fan, for "found it"
+  {"voice",    TIER_S,  0,  0, true,  false, true },   // Voice crown: five spikes ride a quip's speech
 };
 struct PartySeq {
   bool on, lead, driveAl;
@@ -338,6 +346,150 @@ static const uint8_t PARTY_STACK_MOST[3] = {1, 2, 3};          // off, some, wil
 static const float PARTY_STACK_CHANCE[3] = {0, 0.4f, 0.75f};   // chance to add a layer a beat after one starts
 uint8_t partyStack = 1;              // GET /bot/party?stack=off|some|wild
 volatile uint8_t partySeqReq = 0;    // GET /bot/party?seq= sets id + 1, the render loop plays it
+
+// ---- Code mode "Ink Reader" (docs/vizself/code-mode-motion-spec.md) ---------
+// While vizBot looks through his own code (vizbrain's vizself connector), he is
+// a big ink drop in the middle of the screen, reading a dim scrolling code
+// minimap with two mirrored tentacles while patterns stack on his head. Quips
+// make the voice the magnet; "found it" is a full-reach grab and a Grand Crown.
+// It is a flag on the party blob: with party mode off the face rounds into the
+// drop where it is, with it on he flies in from his corner and back after.
+#ifdef BOARD_ESP32S3_LCD_169
+  #define CODE_CX 120
+  #define CODE_CY 150
+#else
+  #define CODE_CX 160
+  #define CODE_CY 118
+#endif
+static const PartyTier CODE_TIER = {0.55f, 66, 79, 82, 0, 0, true};
+#define CODE_MORPH_F    2.0f     // enter / exit morph spring (party's is 1.4 Hz)
+#define CODE_KAPPA      0.85f    // edge waves a bit calmer than party, so the patterns read
+#define CODE_ROWS       24       // backdrop ring (21 rows on screen)
+#define CODE_ROW_PITCH  12
+#define CODE_BAR_H      6
+#define CODE_SCROLL     8.0f     // px/s, x (1 + 0.4 effort)
+#define CODE_READ_ROOT  (20 * DEG_TO_RAD)
+#define CODE_READ_L0    0.4f     // reader tip, past the rim, x r: start and end of a line
+#define CODE_READ_L1    1.3f
+#define CODE_READ_LINE_MS 1400
+#define CODE_READ_CR_MS 260
+#define CODE_TIMEOUT_MS 75000    // no signal for this long: shrug and leave
+
+enum { CP_OFF, CP_ENTER, CP_LOOP, CP_QUIP, CP_FOUND, CP_SHRUG };
+enum { CR_NONE, CR_START, CR_FOUND, CR_FOUND_SMALL, CR_SHRUG, CR_CANCEL };
+enum { CH_NONE, CH_QUIP, CH_FOUND, CH_SHRUG };
+enum { RD_READ, RD_SKIM, RD_STARE };
+enum { CL_NONE, CL_SCAN, CL_QUIP, CL_FOUND, CL_SHRUG };   // LED beats
+
+// GET /bot/code sets these; the render loop acts on them
+volatile uint8_t codeReq = CR_NONE;
+volatile uint8_t codeHeroReq = CH_NONE;
+volatile uint8_t codeSeqReq = 0;        // id + 1
+volatile uint16_t codeQuipReq = 0;      // a quip is coming: about this many ms of audio
+volatile uint8_t codeQuipExpr = 0xFF;
+volatile uint32_t codeSignalMs = 0;     // the last /bot/code call
+uint8_t codeStack = 1;                  // ?stack=off|some|wild
+String codeWhy;                         // ?why= (shown in /state)
+
+// The code playlist (spec §2.2): weights and cool-downs (s) for code mode
+struct CodeSeqDef { uint8_t id, w, cdS; };
+static const CodeSeqDef CODE_SEQ_DEF[] = {
+  {SEQ_COMPILE, 16, 14}, {SEQ_CAROUSEL, 14, 14}, {SEQ_BREATH, 14, 5}, {SEQ_CROWN, 12, 12}, {SEQ_WAVE, 12, 10},
+  {SEQ_MERGE, 10, 12}, {SEQ_SPLIT, 8, 14}, {SEQ_AHA, 8, 18}, {SEQ_CALM, 6, 20},
+};
+#define CODE_SEQS (sizeof(CODE_SEQ_DEF) / sizeof(CODE_SEQ_DEF[0]))
+
+// The code minimap behind him: rows of rounded bars in four dim syntax hues,
+// tinted toward the face colour, scrolling up. The row under a reader glows.
+struct CodeRow { uint8_t n; int16_t x[10]; uint8_t w[10], hue[10]; float hl; };
+struct CodeBackdrop {
+  CodeRow rows[CODE_ROWS];
+  int32_t made;       // rows generated (absolute index)
+  float scroll;       // px since the start
+  float alpha;        // fade in / out
+  int8_t indent[2];   // two panes side by side, one per reader
+  int32_t foundRow;   // -1, or the row that lit up ("found it")
+  float fx0, fx1;     // the found line's ends (the reader tips)
+
+  void reset() {
+    made = 0; scroll = 0; indent[0] = indent[1] = 1; foundRow = -1;
+    for (int i = 0; i < CODE_ROWS; i++) rows[i].hl = 0;
+  }
+  int32_t rowAt(float y) const { return (int32_t)floorf((y + scroll - 4) / CODE_ROW_PITCH); }
+  float rowY(int32_t i) const { return 4 + i * CODE_ROW_PITCH - scroll; }   // top of the row's bars
+  CodeRow &row(int32_t i) { make(i); return rows[i % CODE_ROWS]; }
+  void make(int32_t upTo) {
+    for (; made <= upTo; made++) {
+      CodeRow &r = rows[made % CODE_ROWS];
+      r.hl = 0; r.n = 0;
+      for (int pane = 0; pane < 2; pane++) {
+        int8_t &ind = indent[pane];
+        int16_t x0 = pane ? LCD_WIDTH / 2 + 6 : 8, x1 = pane ? LCD_WIDTH - 8 : LCD_WIDTH / 2 - 6;
+        if (random(100) < 15) { ind = constrain(ind + (random(2) ? -1 : 0), 0, 3); continue; }   // a blank line
+        int16_t x = x0 + ind * 12;
+        int n = 1 + random(4);
+        for (int k = 0; k < n && x < x1 - 8 && r.n < 10; k++) {
+          uint8_t w = min((int)(8 + random(37)), x1 - x);
+          r.x[r.n] = x; r.w[r.n] = w;
+          r.hue[r.n] = k == 0 ? (random(3) ? 0 : 3) : (uint8_t)(1 + random(3));   // keyword or comment first
+          r.n++;
+          x += w + 5;
+        }
+        int u = random(10);
+        ind = constrain(ind + (u < 2 ? 1 : u < 4 ? -1 : 0), 0, 3);
+      }
+    }
+  }
+  void step(float dt, float speed, bool frozen, bool on) {
+    alpha = constrain(alpha + (on ? dt / 0.45f : -dt / 0.30f), 0.0f, 1.0f);
+    if (!frozen) scroll += speed * dt;
+    for (int i = 0; i < CODE_ROWS; i++) rows[i].hl = max(0.0f, rows[i].hl - dt / 0.4f);
+  }
+  // Keyword, string, name, comment: mixed a third of the way to the face colour, at 18-28 % luma
+  static uint16_t hue565(int h, uint16_t face, float gain) {
+    static const uint8_t base[4][3] = {{190, 120, 255}, {120, 220, 140}, {0, 0, 0}, {150, 150, 160}};
+    static const float luma[4] = {0.26f, 0.24f, 0.28f, 0.18f};
+    float fr = ((face >> 11) & 31) * 8.2f, fg = ((face >> 5) & 63) * 4.05f, fb = (face & 31) * 8.2f;
+    float r = h == 2 ? fr : base[h][0] + (fr - base[h][0]) * 0.33f;
+    float g = h == 2 ? fg : base[h][1] + (fg - base[h][1]) * 0.33f;
+    float b = h == 2 ? fb : base[h][2] + (fb - base[h][2]) * 0.33f;
+    float l = max(1.0f, 0.3f * r + 0.59f * g + 0.11f * b), k = luma[h] * 255 / l * gain;
+    uint8_t r8 = (uint8_t)min(255.0f, r * k), g8 = (uint8_t)min(255.0f, g * k), b8 = (uint8_t)min(255.0f, b * k);
+    return ((r8 >> 3) << 11) | ((g8 >> 2) << 5) | (b8 >> 3);
+  }
+  // Straight into the canvas (PSRAM): a fillRect per bar costs more than its pixels
+  static void bar(uint16_t *buf, int x, int y, int w, uint16_t c) {
+    int x0 = max(0, x), x1 = min((int)LCD_WIDTH, x + w);
+    if (x1 <= x0) return;
+    uint16_t v = partySwap(c);
+    for (int yy = max(0, y); yy < min((int)LCD_HEIGHT, y + CODE_BAR_H); yy++) {
+      uint16_t *p = buf + yy * LCD_WIDTH + x0;
+      for (int i = x1 - x0; i > 0; i--) *p++ = v;
+    }
+  }
+  void draw(uint16_t face) {
+    if (alpha <= 0) return;
+    uint16_t *buf = lcdCanvasPixels();
+    auto put = [&](int x, int y, int w, uint16_t c) { if (buf) bar(buf, x, y, w, c); else gfx->fillRect(x, y, w, CODE_BAR_H, c); };
+    uint16_t col[4];
+    for (int h = 0; h < 4; h++) col[h] = hue565(h, face, alpha);
+    int32_t i0 = rowAt(0), i1 = rowAt(LCD_HEIGHT) + 1;
+    make(i1);
+    for (int32_t i = max((int32_t)0, i0); i <= i1; i++) {
+      CodeRow &r = rows[i % CODE_ROWS];
+      int y = (int)lroundf(rowY(i));
+      if (y <= -CODE_BAR_H || y >= LCD_HEIGHT) continue;
+      if (i == foundRow) {   // face colour at 60 %, between the reader tips
+        int a = (int)lroundf(min(fx0, fx1)), b = (int)lroundf(max(fx0, fx1));
+        if (b > a) put(a, y, b - a, hue565(2, face, 2.1f * alpha));
+        continue;
+      }
+      bool lit = r.hl > 0.01f;
+      for (int k = 0; k < r.n; k++) put(r.x[k], y, r.w[k], lit ? hue565(r.hue[k], face, alpha * (1 + 0.8f * r.hl)) : col[r.hue[k]]);
+    }
+  }
+};
+static CodeBackdrop codeBackdrop;
 
 struct PartyBlob {
   // Body
@@ -412,8 +564,52 @@ struct PartyBlob {
   // cost guard
   unsigned long guardAt, calmSince;
   uint32_t guardMax;
+  // Code mode (spec: docs/vizself/code-mode-motion-spec.md)
+  bool codeOn;                  // wanted: from /bot/code?v=1 until the exit starts
+  bool code;                    // centre layout: home and axis in the middle (kept through the exit morph)
+  bool codeParty;               // flew in from his party corner, so he flies back
+  bool codeVoice;               // a voice turn was on: its end closes code mode
+  uint8_t cPhase, quipExpr, quipN, cFace;
+  BotSpring cW;                 // 0 the party tier .. 1 the code tier (radius, eye scale)
+  PartyTier curT = PARTY_TIERS[1];
+  unsigned long codeT0, phaseT0, landedAt, quipAt, quipHeardAt, quipLoudAt, quipEndAt, lastQuipAt, quipPeriod;
+  unsigned long foundWaitUntil, headAt, fakeUntil, tickAt, exprHold;
+  uint16_t quipMs;
+  bool quipAudio, foundWait;
+  int8_t talkLvl;               // lip-sync level 0..12, or -1 with no reply audio (set by bot_mode)
+  BotSpring lvlSm;
+  float codeM2, codeE, codeKappa, codePump;
+  int8_t rdI[2]; uint16_t rdG[2];   // the reader pair (slot, generation)
+  uint8_t rdVar, rdStep, rdSide, rdSacc, rdLines, rdLeft, rdBoop, fdF;
+  unsigned long cFaceAt, codeHeroAt;
+  uint8_t codeHero;
+  int32_t rdRow;
+  unsigned long rdT0;
+  float rdMs, rdStop;
+  uint8_t ticksLeft;
+  uint16_t tickGap;
+  // Out to bot_mode, which owns the mouth, head, LEDs and synth
+  bool mouthOn;
+  int16_t mouthX, mouthY, mouthFloor;
+  float mouthK;
+  int8_t fakeLvl;               // hero=quip: a made-up lip-sync level, or -1
+  bool headReq;
+  int16_t headYaw, headPitch;   // degrees: yaw from centre, pitch from home
+  uint16_t headMs;
+  uint8_t ledBeat, ledPos, ledLvl, sndReq;
+  unsigned long ledAt;
 
-  const PartyTier &tier() const { return PARTY_TIERS[partySize < 3 ? partySize : 1]; }
+  const PartyTier &tier() const { return curT; }
+  // Party size, or on the way to (and in) code mode a blend toward the code tier
+  void syncTier() {
+    const PartyTier &P0 = PARTY_TIERS[partySize < 3 ? partySize : 1];
+    float w = constrain(cW.x, 0.0f, 1.0f);
+    if (w < 0.002f) { curT = P0; return; }
+    if (w > 0.998f) { curT = CODE_TIER; return; }
+    auto mix = [w](float a, float b) { return a + (b - a) * w; };
+    curT = {mix(P0.k, CODE_TIER.k), (int16_t)lroundf(mix(P0.r, CODE_TIER.r)), (int16_t)lroundf(mix(P0.env, CODE_TIER.env)),
+            (int16_t)lroundf(mix(P0.below, CODE_TIER.below)), P0.wanderW, P0.wanderH, true};
+  }
 
   // Wander box runs inward from the tuck point; home is its centre (layout spec §2)
   void box(uint8_t c, float &x0, float &x1, float &y0, float &y1) const {
@@ -424,12 +620,14 @@ struct PartyBlob {
     y0 = ty; y1 = ty + (partyTop(c) ? T.wanderH : -T.wanderH);
   }
   void home(uint8_t c, float &hx, float &hy) const {
+    if (code) { hx = CODE_CX; hy = CODE_CY; return; }
     float x0, x1, y0, y1;
     box(c, x0, x1, y0, y1);
     hx = (x0 + x1) / 2; hy = (y0 + y1) / 2;
   }
   // Spikes and tentacles mostly point into the show, within a cone around the line to the screen centre
   float alphaHome() const {
+    if (code) return -HALF_PI;   // code mode: every pattern sits on his head
     float hx, hy;
     home(corner, hx, hy);
     return atan2f(LCD_HEIGHT / 2.0f - hy, LCD_WIDTH / 2.0f - hx);
@@ -472,8 +670,12 @@ struct PartyBlob {
     kappa.init(1, 1.6f, 1);
     for (int i = 0; i < PARTY_BANKS; i++) banks[i].owner = -1;
     schLast = -1;
+    cW.init(0, 2.0f, 0.9f); lvlSm.init(0, 3, 0.8f);
+    rdI[0] = rdI[1] = -1; talkLvl = fakeLvl = -1; codeKappa = 1;
+    curT = PARTY_TIERS[1];
     active = false;
     ready = true;
+    syncTier();
   }
 
   // A surface mode kick of peak amp (fraction of r) centred on angle th
@@ -484,7 +686,7 @@ struct PartyBlob {
     mc[k].v += amp * cosf(n * th) / pkM[k];
     ms[k].v += amp * sinf(n * th) / pkM[k];
   }
-  void expr(uint8_t e, uint16_t ms) { exprReq = e; exprMs = ms; }
+  void expr(uint8_t e, uint16_t ms) { exprReq = e; exprMs = ms; exprHold = millis() + min((uint16_t)1500, ms); cFace = 0xFF; }
 
   void clearExtras() {
     for (int i = 0; i < PARTY_TENTS; i++) tents[i].on = false;
@@ -499,6 +701,7 @@ struct PartyBlob {
   // morphs into it from the face; back from a sheet he is simply there again.
   void enter(unsigned long now) {
     if (!ready) init();
+    syncTier();
     bool fresh = !haveCorner;
     if (fresh) { corner = random(4); haveCorner = true; }
     float hx, hy;
@@ -529,6 +732,8 @@ struct PartyBlob {
     talkWas = 0; talkPrev = 0; talkSm.snap(0); swC = swS = 0; earI = -1;
     botEyes.blinkStart(now, BW_SWAP);   // every swap between face and drop hides under a blink
     active = true;
+    P.f = code ? CODE_MORPH_F : 1.4f; P.z = code ? 0.85f : 0.82f;   // code mode: the outline rounds into the drop in place
+    if (code) schNextAt = now + 2500;
     if (fresh) {
       morph = 1;
       P.snap(0); P.t = 1;
@@ -604,6 +809,7 @@ struct PartyBlob {
     abortSeqs(now);
     thD = atan2f(y - icy, x - icx);
     D.v += -0.22f * Reff / pkD;
+    if (code) { modeKick(2, -0.10f, thD); retractAll(true); tapT = 1; botEyes.blinkStart(now, BW_SWAP); return; }   // reading: a flinch, then the readers regrow
     modeKick(2, -0.10f, thD); modeKick(3, -0.07f, thD); modeKick(4, -0.05f, thD); modeKick(5, -0.03f, thD);
     later(now, 90, PE_KICK2, -1, 0, 0.30f);
     retractAll(true);
@@ -615,7 +821,7 @@ struct PartyBlob {
   }
   // Tap on the show: a spike fan and a tentacle reach for the finger, boop, and let go
   void tapAt(int16_t x, int16_t y, unsigned long now) {
-    if (busy()) return;
+    if (busy() || code) return;
     abortSeqs(now);
     lookAt(x, y, 600, now);
     field(atan2f(y - icy, x - icx), 0.8f, 400, now);
@@ -641,7 +847,7 @@ struct PartyBlob {
       PartyTent *ear = tentOf(earI, earG);
       if (ear) retract(*ear, false);
       earI = -1;
-      if (!talkWas) abortSeqs(now);
+      if (!talkWas && !code) abortSeqs(now);
       if (talk == 1 && free) {
         L.v += 0.10f * r / pkL; modeKick(2, -0.08f, 0);   // perk up
         PartyTentOpt o;
@@ -954,7 +1160,7 @@ struct PartyBlob {
     return true;
   }
   void seqLook(const PartySeq &q, float pad, unsigned long ms, unsigned long now) { if (q.lead) look(cosf(q.axis) * pad, sinf(q.axis) * pad, ms, now); }
-  void seqFace(const PartySeq &q, uint8_t e, uint16_t ms) { if (q.lead) expr(e, ms); }
+  void seqFace(const PartySeq &q, uint8_t e, uint16_t ms) { if (q.lead) expr(code && e == EXPR_CHILL ? EXPR_THINKING : e, ms); }
   void seqBlink(const PartySeq &q, unsigned long now) { if (q.lead) botEyes.blinkStart(now, BW_SWAP); }
   void popS(float a) { botEyes.popS.v += a / botEyes.pkPopS; }
   void seqTent(PartySeq &q, int i) { if (i >= 0 && q.nt < 3) { q.ti[q.nt] = i; q.tg[q.nt] = tents[i].gen; q.nt++; } }
@@ -1032,6 +1238,22 @@ struct PartyBlob {
       }
       case SEQ_FEELERS: feelerGroup(now, true); break;
       case SEQ_LONG: feeler(now, true); break;
+      case SEQ_COMPILE:
+        for (int k = -4; k <= 4; k++) setSlot(b, k + 4, 6 * k, k, k == 0 ? 7 : 5);
+        seqLook(q, 0.4f, 2200, now);
+        break;
+      case SEQ_AHA: break;   // its finger grows on the first step
+      case SEQ_GRAND: {
+        static const float env[5] = {1, 0.9f, 0.78f, 0.62f, 0.45f};
+        for (int k = -4; k <= 4; k++) { int a = abs(k); setSlot(b, k + 4, 6 * k, k, k == 0 ? 7 : 5, env[a], 0.20f + 0.06f * a, 0.10f + 0.06f * a); }
+        bankSprings(b, 4, 0.4f, 4.5f, 0.38f);
+        break;
+      }
+      case SEQ_VOICE:
+        for (int k = -2; k <= 2; k++) { int a = abs(k); setSlot(b, k + 2, 6 * k, k, k == 0 ? 7 : 5, a == 0 ? 1 : a == 1 ? 0.85f : 0.6f, 0.32f + 0.06f * a, 0.19f + 0.06f * a); }
+        bankSprings(b, 2.0f, 0.6f, 3.0f, 0.5f);
+        q.v = holdMs;   // 1: a sharp face is up, so the body pumps instead of spiking
+        break;
     }
     // history, cool-downs and the stacking window
     if (schHistN == 16) { memmove(schHist, schHist + 1, 15 * sizeof(PartyHist)); schHistN = 15; }
@@ -1189,6 +1411,48 @@ struct PartyBlob {
       case SEQ_FEELERS:
       case SEQ_LONG:
         return (t > 900 && !anyFeeler()) || t > 6500;
+      case SEQ_COMPILE: {   // a progress bar: pairs pop from the outside in, the centre last ("built"), then all drop
+        static const float H[5] = {0.40f, 0.28f, 0.22f, 0.18f, 0.14f};   // by |k|
+        bool drop = t >= 1380, hold = t >= 880 && !drop;
+        for (int i = 0; i < 9; i++) {
+          int a = abs(s[i].k);
+          s[i].hT = drop || t < (4 - a) * 220 ? 0 : H[a] * r * (hold ? 1 + 0.05f * sinf(TWO_PI * 2.2f * t / 1000) : 1);
+        }
+        for (int a = 4; a >= 0; a--) if (once(q, 4 - a, t >= (4 - a) * 220)) { codeTick(); if (!a) popS(0.03f); }
+        if (once(q, 5, drop)) { modeKick(2, 0.07f, 0); seqFace(q, EXPR_HAPPY, 600); }
+        q.g = drop ? 0 : 0.08f;
+        return t > 2600;
+      }
+      case SEQ_AHA: {   // a third limb: one short finger up the axis, two boops, back in
+        if (once(q, 0, true)) {
+          if (liveTents() >= partyTentCap) return true;   // the readers have the pool
+          PartyTentOpt o;
+          o.dir = q.axis; o.L = 0.7f * r; o.kind = PT_SEQ; o.hold = -1; o.curl = 0; o.swA = 0.06f; o.swF = 0.4f;
+          o.gf = 1.3f; o.gz = 0.55f; o.boops = 2; o.free = true; o.mirror = true; o.side = 1;
+          seqTent(q, spawnTent(o, now));
+          seqLook(q, 0.5f, 1800, now); seqFace(q, EXPR_SURPRISED, 400); popS(0.02f);
+        }
+        if (once(q, 1, t > 400)) seqFace(q, EXPR_HAPPY, 1200);
+        if (once(q, 2, t > 2100)) for (int i = 0; i < q.nt; i++) { PartyTent *x = tentOf(q.ti[i], q.tg[i]); if (x) retract(*x, false); }
+        return t > 2700;
+      }
+      case SEQ_GRAND: {   // pattern library §11: the whole fan nucleates centre-out, trembles, then snaps back
+        float F = t < 850 ? min(1.0f, t / 80) : 0;
+        bool hold = t >= 150 && t < 750;
+        for (int i = 0; i < 9; i++) {
+          float h = crownH(s[i], F, 0.55f * r);
+          if (abs(s[i].k) == 2 && t >= 150 && t < 300) h *= 0.3f;   // the two that fling the droplets
+          s[i].hT = h * (hold ? 1 + 0.05f * sinf(TWO_PI * 2.5f * t / 1000) : 1);
+        }
+        q.g = 0.14f * F;
+        return t > 1300;
+      }
+      case SEQ_VOICE: {   // spikes ride the speech level (smoothed, so phrases, not syllables)
+        float F = 0.15f + 0.065f * lvlSm.x;
+        for (int i = 0; i < 5; i++) s[i].hT = q.v ? 0 : crownH(s[i], F, 0.30f * r);
+        q.g = q.v ? 0 : 0.10f * F;
+        return false;   // the quip beat ends it
+      }
     }
     return true;
   }
@@ -1198,12 +1462,12 @@ struct PartyBlob {
       PartySeq &q = seqs[i];
       if (!q.on) continue;
       float t = now - q.t0;
-      if (stepSeq(q, now, t, dt) || t > 7000) endSeq(i, now);
+      if (stepSeq(q, now, t, dt) || (t > 7000 && q.id != SEQ_VOICE)) endSeq(i, now);
     }
     seqG = 0;
     float kT = 1;
     for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on) { seqG = max(seqG, seqs[i].g); kT = min(kT, seqs[i].kT); }
-    kappa.step(kT, dt);
+    kappa.step(kT * (code ? codeKappa : 1), dt);
   }
   void releaseSeq(int qi) {
     if (qi < 0) return;
@@ -1221,6 +1485,7 @@ struct PartyBlob {
     if (tierEnded == TIER_B) schBigInStack = true;
     releaseSeq(qi);
     if (nSeqs()) return;   // the rest starts when the whole stack is done
+    if (code) { schBigInStack = false; schNextAt = now + (unsigned long)eyeRnd(800, 2000); return; }   // code mode rests briefly
     bool big = schBigInStack;
     schBigInStack = false;
     if (big) tierEnded = TIER_B;
@@ -1276,10 +1541,10 @@ struct PartyBlob {
       int tr = (first + n) % 3;
       if (p[tr] <= 0 && n) continue;
       int wsum = 0;
-      for (int id = 0; id < SEQ_COUNT; id++) if (PARTY_SEQ_DEF[id].tier == tr && eligible(id, now, layering, heard)) wsum += PARTY_SEQ_DEF[id].w;
+      for (int id = 0; id < SEQ_PARTY_COUNT; id++) if (PARTY_SEQ_DEF[id].tier == tr && eligible(id, now, layering, heard)) wsum += PARTY_SEQ_DEF[id].w;
       if (!wsum) continue;
       int v = random(wsum);
-      for (int id = 0; id < SEQ_COUNT; id++) {
+      for (int id = 0; id < SEQ_PARTY_COUNT; id++) {
         if (PARTY_SEQ_DEF[id].tier != tr || !eligible(id, now, layering, heard)) continue;
         if ((v -= PARTY_SEQ_DEF[id].w) < 0) return id;
       }
@@ -1304,6 +1569,400 @@ struct PartyBlob {
     String s;
     for (int i = 0; i < PARTY_SEQS; i++) if (seqs[i].on) { if (s.length()) s += "+"; s += PARTY_SEQ_DEF[seqs[i].id].key; }
     return s;
+  }
+
+  // ---- Code mode "Ink Reader" (docs/vizself/code-mode-motion-spec.md) -------
+  // GET /bot/code's requests. bot_mode calls this every frame, before it decides
+  // whether the blob draws, so v=1 works with party mode off too.
+  void codeRequests(unsigned long now) {
+    if (!active && code && !codeOn) codeClear();   // the exit finished while he wasn't drawn
+    uint8_t rq = codeReq, hero = codeHeroReq, sq = codeSeqReq;
+    uint16_t qm = codeQuipReq;
+    if (rq) codeReq = CR_NONE;
+    if (hero) { codeHeroReq = CH_NONE; codeHero = hero; codeHeroAt = now; if (!codeOn) rq = CR_START; }
+    if (rq == CR_START) codeStart(now);
+    if (!codeOn) { codeQuipReq = 0; codeSeqReq = 0; return; }
+    if (rq == CR_FOUND || rq == CR_FOUND_SMALL) startFound(now, rq == CR_FOUND_SMALL);
+    else if (rq == CR_SHRUG) startShrug(now);
+    else if (rq == CR_CANCEL) codeExit(now);
+    if (qm) { codeQuipReq = 0; quipMs = qm; quipExpr = codeQuipExpr; if (cPhase == CP_LOOP) startQuip(now, false); }
+    if (sq) { codeSeqReq = 0; if (sq <= SEQ_COUNT && cPhase == CP_LOOP) startSeq(sq - 1, now, codeStack > 0); }
+  }
+  // Party off: the face rounds into the drop where it is. Party on: he flies in from his corner.
+  void codeStart(unsigned long now) {
+    if (!ready) init();
+    bool fromCorner = active && !code && morph != 2 && partyMode && botBackgroundStyle == 4;
+    if (!codeOn) { codeT0 = now; codeBackdrop.reset(); quipN = 0; codeVoice = false; }
+    codeOn = true;
+    codeSignalMs = now;
+    if (cPhase == CP_LOOP || cPhase == CP_QUIP || cPhase == CP_ENTER) return;   // already reading: keep going
+    cPhase = CP_ENTER; phaseT0 = now; landedAt = 0;
+    lastQuipAt = now; quipPeriod = 8000; quipEndAt = 0; quipAudio = false; foundWait = false; quipMs = 0; quipExpr = 0xFF;
+    rdI[0] = rdI[1] = -1; rdStep = 0; rdLines = 0; rdRow = -1; rdLeft = 0;
+    headAt = 0; ledBeat = CL_NONE; fakeLvl = -1; codeM2 = codeE = codePump = 0; codeKappa = CODE_KAPPA;
+    cFace = 0xFF; cFaceAt = 0; ticksLeft = 0;
+    schNextAt = now + 2500;
+    if (code) { if (!morph && !run) landedAt = now; return; }   // back on mid-exit: bot_mode turns the morph around
+    code = true;
+    if (fromCorner) {   // the radius grows on the way in (cW)
+      codeParty = true;
+      abortSeqs(now); retractAll(true);
+      run = nullptr;
+      if (!morph) startRun(corner, PARTY_CODE, now, 0);
+      schNextAt = now + 2500;
+    } else {
+      codeParty = false;
+      if (active) leave(false);   // e.g. halfway through party's own exit: start over from the face
+      cW.snap(1); syncTier();
+    }
+  }
+  void codeLanded(unsigned long now) {   // the morph from the face landed: a squash and a thought popping up
+    landedAt = now;
+    modeKick(2, 0.12f, 0); modeKick(4, 0.03f, 0);
+    field(-HALF_PI, 0.36f, 250, now, true);
+    botEyes.blinkStart(now, BW_SWAP);
+  }
+  // Leave code mode. With party on he runs back to his corner; otherwise bot_mode
+  // starts the morph back into the face and the centre layout stays until it lands.
+  void codeExit(unsigned long now) {
+    if (!codeOn) return;
+    codeOn = false; cPhase = CP_OFF; foundWait = false;
+    ledBeat = CL_NONE; fakeLvl = -1; codeM2 = codeE = codePump = 0; codeKappa = 1;
+    abortSeqs(now); retractAll(true);
+    rdI[0] = rdI[1] = -1;
+    head(0, 0, 1200, now, true);
+    if (codeParty && partyMode && botBackgroundStyle == 4 && active && !morph) {
+      code = false;
+      startRun(corner, PARTY_CODE, now, 0);
+      schNextAt = now + 4000;
+    }
+  }
+  void codeClear() { code = false; codeParty = false; codeOn = false; cW.snap(0); syncTier(); cPhase = CP_OFF; mouthOn = false; codeBackdrop.alpha = 0; }
+
+  void codeFace(uint8_t e, unsigned long now) {   // the reading face; a pattern's own face wins while it's up
+    if ((e == cFace && now - cFaceAt < 6000) || !eyeReached(now, exprHold)) return;
+    exprReq = e; exprMs = 8000; cFace = e; cFaceAt = now;
+  }
+  void codeTick() { if (code && !mouthOn) sndReq = 1; }   // a woodblock tick (synth only)
+  void head(int16_t yaw, int16_t pitch, uint16_t ms, unsigned long now, bool force) {
+    if (!force && headAt && now - headAt < 2000) return;   // gentle: >= 2 s apart (brownout)
+    headYaw = constrain(yaw, (int16_t)-8, (int16_t)8); headPitch = constrain(pitch, (int16_t)-2, (int16_t)5);
+    headMs = ms; headReq = true; headAt = now;
+  }
+  bool slotUp() const {
+    float lim = 0.30f * tier().r;
+    for (int b = 0; b < PARTY_BANKS; b++) for (int j = 0; j < PARTY_SLOTS; j++) if (banks[b].s[j].h.x > lim) return true;
+    return false;
+  }
+
+  void stepCode(unsigned long now, float dt) {
+    float e = codeOn ? constrain((now - codeT0) / 45000.0f, 0.0f, 1.0f) : 0;   // effort ramp: the longer, the harder he works
+    codeBackdrop.step(dt, CODE_SCROLL * (1 + 0.4f * e), cPhase == CP_FOUND, codeOn);
+    if (eyeReached(now, fakeUntil)) fakeLvl = -1;
+    else { float u = now / 1000.0f; fakeLvl = (int8_t)constrain(6 + 7 * sinf(TWO_PI * 3.1f * u) * sinf(TWO_PI * 0.7f * u), 0.0f, 12.0f); }
+    int lvl = fakeLvl >= 0 ? fakeLvl : talkLvl;
+    lvlSm.step(max(0, lvl), dt);
+    if (lvl > 0) quipLoudAt = now;
+    if (!code) { mouthOn = false; return; }
+    // The mouth surfaces in the ink while he talks (party off only, no mouth in party mode)
+    mouthOn = !codeParty && (cPhase == CP_QUIP || cPhase == CP_FOUND || !codeOn) && quipLoudAt && now - quipLoudAt < 300;
+    if (!codeOn) { codeM2 = codeE = codePump = 0; return; }
+    if (talk) codeVoice = true;
+    bool timedOut = (long)(now - max((unsigned long)codeSignalMs, codeT0)) > CODE_TIMEOUT_MS;
+    if (((codeVoice && !talk) || timedOut) && cPhase != CP_SHRUG && cPhase != CP_FOUND) startShrug(now);   // the turn ended without a result
+    codeE = 0.10f + 0.25f * e; codeM2 = 0; codePump = 0; codeKappa = CODE_KAPPA;
+    switch (cPhase) {
+      case CP_ENTER: {
+        if (now - phaseT0 > 200) codeFace(EXPR_FOCUSED, now);
+        if (!morph && !run && !landedAt) landedAt = now;
+        if (!landedAt) break;
+        if (rdI[0] < 0 && now - phaseT0 >= 450 && now - landedAt >= 70) { readersSpawn(now); look(0.4f, -0.3f, 600, now); }
+        if (rdI[0] >= 0 && now - phaseT0 >= 600) { cPhase = CP_LOOP; ledBeat = CL_SCAN; head(-6, 0, 1400, now, true); newLine(now, e); }
+        break;
+      }
+      case CP_LOOP:
+        stepReaders(now, e);
+        if (cPhase != CP_LOOP) break;
+        scheduleCode(now);
+        if (lvl >= 2 && now - quipEndAt > 500) { quipMs = 0; quipExpr = 0xFF; startQuip(now, true); break; }   // speech without a signal
+        if (codeHero && now - codeHeroAt > 400) {
+          uint8_t h = codeHero; codeHero = CH_NONE;
+          if (h == CH_QUIP) { fakeUntil = now + 300 + 2200; quipMs = 2200; quipExpr = 0xFF; startQuip(now, false); }
+          else if (h == CH_FOUND) startFound(now, false);
+          else if (h == CH_SHRUG) startShrug(now);
+        }
+        if (ticksLeft && eyeReached(now, tickAt)) { codeTick(); ticksLeft--; tickAt = now + tickGap; }
+        break;
+      case CP_QUIP: stepQuip(now, lvl, e); break;
+      case CP_FOUND: stepFound(now, lvl); break;
+      case CP_SHRUG: if (now - phaseT0 > 900) codeExit(now); break;
+    }
+    ledLvl = (uint8_t)max(0, lvl);
+  }
+
+  // ---- Code mode: the reader pair --------------------------------------------
+  // A reader's tip target: d px past the rim on its side, on the row being read
+  void readerTip(int sd, float d, float &x, float &y) {
+    x = icx + sd * (Reff * cosf(CODE_READ_ROOT) + d);
+    y = rdRow >= 0 ? codeBackdrop.rowY(rdRow) + CODE_BAR_H / 2.0f : icy - Reff * sinf(CODE_READ_ROOT);
+    onGlass(x, y, 6);
+  }
+  int32_t nextRow(int32_t cur) {   // the next line down, kept within two rows of the reader roots
+    int32_t mid = codeBackdrop.rowAt(icy - Reff * sinf(CODE_READ_ROOT));
+    int32_t r = cur < 0 ? mid + (int32_t)random(-1, 2) : cur + 1;
+    if (r < mid - 2 || r > mid + 2) r = mid - 1 + (int32_t)random(0, 3);
+    for (int k = 0; k < 3 && codeBackdrop.row(r).n == 0; k++) r++;   // skip blank lines
+    return max((int32_t)0, r);
+  }
+  void readersSpawn(unsigned long now) {
+    if (rdRow < 0) rdRow = nextRow(-1);
+    float ph = eyeRnd(0, TWO_PI);
+    for (int s = 0; s < 2; s++) {
+      PartyTentOpt o;
+      int sd = s ? -1 : 1;
+      o.track = true; readerTip(sd, CODE_READ_L0 * tier().r, o.tx, o.ty);
+      o.L = capLen(); o.kind = PT_SEQ; o.hold = -1; o.gf = 1.6f; o.gz = 0.5f; o.curl = 0.25f; o.swA = 0; o.swF = 0.4f;
+      o.boops = 0; o.free = true; o.mirror = true; o.side = sd; o.ph = ph;
+      rdI[s] = spawnTent(o, now); rdG[s] = tentGen;
+    }
+  }
+  PartyTent *reader(int s) { return tentOf(rdI[s], rdG[s]); }
+  void readersLam(float lam, float sw) {
+    for (int s = 0; s < 2; s++) { PartyTent *t = reader(s); if (t && t->phase != PT_RETRACT) { t->lam.t = lam; t->swA = sw; } }
+  }
+  // A new line: read (55 %), skim two lines fast (25 %) or stare at one token (20 %)
+  void newLine(unsigned long now, float e) {
+    if (!rdLeft) { float u = eyeRnd01(); rdVar = u < 0.55f ? RD_READ : u < 0.8f ? RD_SKIM : RD_STARE; rdLeft = rdVar == RD_SKIM ? 2 : 1; }
+    rdLeft--;
+    rdStep = 0; rdT0 = now; rdSacc = 0; rdBoop = 0; rdLines++;
+    rdSide = rdLines & 1;   // the eyes read one side per line, alternating; the body stays symmetric
+    rdMs = (rdVar == RD_SKIM ? 600 : rdVar == RD_STARE ? 2200 : CODE_READ_LINE_MS) * (1 - 0.25f * e);
+    rdStop = eyeRnd(0.35f, 0.7f);
+    readersLam(1, 0);
+    if (eyeRnd01() < 0.5f) { ticksLeft = 3 + random(5); tickGap = (uint16_t)(1000 / eyeRnd(3, 6)); tickAt = now + 120; }
+    if (rdLines % 2 == 0) head(rdSide ? 6 : -6, 0, 1400, now, false);   // toward the side being read
+    codeFace(slotUp() ? EXPR_THINKING : EXPR_FOCUSED, now);
+    ledPos = 0;
+  }
+  void stepReaders(unsigned long now, float e) {
+    PartyTent *a = reader(0), *b = reader(1);
+    if (!a || !b || a->phase == PT_RETRACT || b->phase == PT_RETRACT) {   // a poke or a shake took them: regrow
+      if (liveTents() + 2 <= partyTentCap) { readersSpawn(now); newLine(now, e); }
+      return;
+    }
+    const float r = tier().r;
+    float u = (now - rdT0) / max(1.0f, rdMs), p;
+    bool up = slotUp();
+    if (up) { look(0, -0.4f, 300, now); codeFace(EXPR_THINKING, now); }   // eyes up at a crown
+    if (rdStep == 0) {   // the sweep
+      if (rdVar == RD_STARE) {   // to a token, hold it a second with two boops, then on
+        if (u < 0.32f) p = rdStop * eyeSmooth(u / 0.32f);
+        else if (u < 0.77f) {
+          p = rdStop;
+          if (rdBoop < 2 && u > 0.36f + 0.2f * rdBoop) { rdBoop++; a->bulb.v += 0.4f / pkBulb; b->bulb.v += 0.4f / pkBulb; }
+        } else p = rdStop + (1 - rdStop) * eyeSmooth(min(1.0f, (u - 0.77f) / 0.23f));
+      } else p = eyeSmooth(min(1.0f, u));
+      // Reading saccades along the line on one side (a skim is one long one)
+      int want = rdVar == RD_SKIM ? (u < 0.5f ? 1 : 3) : min(3, 1 + (int)(u * 3));
+      if (want > rdSacc) {
+        rdSacc = want;
+        float pad = (0.15f + 0.2f * (rdSacc - 1)) * (rdSide ? -1 : 1);
+        float py = constrain((codeBackdrop.rowY(rdRow) + 3 - icy) / 60.0f, -0.6f, 0.6f);
+        if (!up) look(pad, py, (unsigned long)rdMs, now);
+        ledPos = rdSacc;
+      }
+      if (u >= 1) {   // carriage return: pen up, back to the start, next row
+        rdStep = 1; rdT0 = now;
+        readersLam(0.55f, 0);
+        if (!up) look(0.1f * (rdSide ? 1 : -1), -0.2f, CODE_READ_CR_MS + 200, now);
+        if (eyeRnd01() < 0.3f) botEyes.blinkStart(now, BW_SWAP);
+        ledPos = 0;
+      }
+    } else {
+      p = 1 - eyeSmooth(min(1.0f, (now - rdT0) / (float)CODE_READ_CR_MS));
+      if (now - rdT0 >= CODE_READ_CR_MS) { rdRow = nextRow(rdRow); newLine(now, e); p = 0; }
+    }
+    float d = (CODE_READ_L0 + (CODE_READ_L1 - CODE_READ_L0) * p) * r;
+    readerTip(1, d, a->tx, a->ty);
+    readerTip(-1, d, b->tx, b->ty);
+    if (rdStep == 0) codeBackdrop.row(rdRow).hl = 1;   // the line being read glows (400 ms trail)
+  }
+
+  // ---- Code mode: the playlist (spec §2.2) -----------------------------------
+  bool codeEligible(uint8_t id, unsigned long now, bool layering) const {
+    const PartySeqDef &e = PARTY_SEQ_DEF[id];
+    if (seqRunning(id) || !eyeReached(now, schCd[id])) return false;
+    if (id == SEQ_AHA && liveTents() >= partyTentCap) return false;   // the readers have the pool
+    if (layering) return !e.solo;
+    if (id == schLast) return false;
+    return !(e.spikes && schSpikeRun >= 2);   // never a third spike pattern in a row
+  }
+  int pickCode(unsigned long now, bool layering, bool quipSoon) {
+    uint8_t tr = eyeRnd01() < 0.35f || quipSoon ? TIER_S : TIER_M;   // no medium start right before a quip
+    for (int pass = 0; pass < 2; pass++, tr = tr == TIER_S ? TIER_M : TIER_S) {
+      if (tr == TIER_M && quipSoon) continue;
+      int wsum = 0;
+      for (unsigned k = 0; k < CODE_SEQS; k++) { const CodeSeqDef &d = CODE_SEQ_DEF[k]; if (PARTY_SEQ_DEF[d.id].tier == tr && codeEligible(d.id, now, layering)) wsum += d.w; }
+      if (!wsum) continue;
+      int v = random(wsum);
+      for (unsigned k = 0; k < CODE_SEQS; k++) {
+        const CodeSeqDef &d = CODE_SEQ_DEF[k];
+        if (PARTY_SEQ_DEF[d.id].tier != tr || !codeEligible(d.id, now, layering)) continue;
+        if ((v -= d.w) < 0) return k;
+      }
+    }
+    return -1;
+  }
+  void scheduleCode(unsigned long now) {
+    unsigned long due = lastQuipAt + quipPeriod;   // the next quip, from the learned period
+    bool quipSoon = (long)(now + 2500 - due) > 0 && (long)(now - due) < 1500;
+    uint8_t most = codeStack == 0 ? 1 : (codeStack == 2 || now - codeT0 > 15000) ? 3 : 2;
+    float chance = codeStack == 0 ? 0 : codeStack == 2 ? 0.75f : 0.6f;
+    int n = nSeqs(), k = -1;
+    bool layer = false;
+    if (!n) {
+      if (!eyeReached(now, schNextAt)) return;
+      k = pickCode(now, false, quipSoon);
+      if (k < 0) { schSpikeRun = 0; schNextAt = now + 800; return; }
+    } else if (schLayerArmed && n < most && eyeReached(now, schLayerAt) && !seqSolo()) {
+      schLayerArmed = false;
+      if (eyeRnd01() >= chance || (k = pickCode(now, true, quipSoon)) < 0) return;
+      layer = true;
+    } else return;
+    const CodeSeqDef &d = CODE_SEQ_DEF[k];
+    startSeq(d.id, now, layer);
+    schCd[d.id] = now + d.cdS * 1000UL;
+  }
+
+  // ---- Code mode: quips (spec §2.3) ------------------------------------------
+  void startQuip(unsigned long now, bool heard) {
+    cPhase = CP_QUIP; phaseT0 = quipAt = now; quipAudio = false;
+    if (lastQuipAt && now - lastQuipAt > 3000) quipPeriod = constrain(now - lastQuipAt, 4000UL, 20000UL);
+    lastQuipAt = now; quipN++;
+    abortSeqs(now);   // the running patterns slump: he stops to tell you something
+    readersLam(0.3f, 0.08f);   // pens down: short nubs that sway, mirrored
+    uint8_t ex = quipExpr < BOT_NUM_EXPRESSIONS ? quipExpr : EXPR_HAPPY;
+    botEyes.blinkStart(now, BW_SWAP);
+    expr(ex, (uint16_t)(min((uint16_t)20000, quipMs ? quipMs : (uint16_t)3000) + 1500));
+    look(0, -0.1f, 4000, now);
+    head(0, 3, 1000, now, true);
+    ledBeat = CL_QUIP;
+    ticksLeft = 0;
+    if (heard) quipOnset(now);
+  }
+  bool quipSharp() const { return quipExpr == EXPR_MISCHIEF || quipExpr == EXPR_SASSY || quipExpr == EXPR_DEVIOUS || quipExpr == EXPR_ANGRY; }
+  void quipOnset(unsigned long now) {
+    quipAudio = true; quipHeardAt = quipLoudAt = now;
+    modeKick(2, 0.06f, 0);   // a breath in
+    startSeq(SEQ_VOICE, now, false, quipSharp() ? 1 : 0);   // a sharp face gets a pump, never spikes
+  }
+  void stepQuip(unsigned long now, int lvl, float e) {
+    codeKappa = 0.6f;
+    if (!quipAudio) {
+      if (lvl >= 2) quipOnset(now);
+      else if (now - quipAt > 1500) { endQuip(now, false, e); return; }   // no audio came: back to reading quietly
+      if (!quipAudio) return;
+    }
+    float L = lvlSm.x;
+    codeM2 = max(-0.10f, -0.010f * L);   // taller when loud
+    codeE += 0.02f * L;
+    if (quipSharp()) codePump = 0.006f * L;
+    bool quiet = now - quipLoudAt > 350 && now - quipHeardAt > 400;
+    bool over = quipMs && now - quipHeardAt > quipMs + 600UL;
+    if (quiet || over || (foundWait && eyeReached(now, foundWaitUntil))) endQuip(now, true, e);
+  }
+  void endQuip(unsigned long now, bool spoke, float e) {
+    abortSeqs(now);   // the voice crown drops
+    if (spoke) {   // ba-dum
+      modeKick(2, 0.08f, 0); modeKick(4, 0.03f, 0);
+      botEyes.blinkStart(now, BW_SWAP);
+      if (quipN % 3 == 0) sndReq = 3;   // rimshot (synth only)
+    }
+    quipMs = 0; quipExpr = 0xFF; quipEndAt = now;
+    cPhase = CP_LOOP; ledBeat = CL_SCAN;
+    schNextAt = now + 1300;
+    rdStep = 1; rdT0 = now;   // regrow onto the next row through a carriage return
+    cFace = 0xFF;
+    if (foundWait) startFound(now, false);
+  }
+
+  // ---- Code mode: "found it" (spec §2.4) and the shrug -----------------------
+  void startFound(unsigned long now, bool small) {
+    if (small) {   // "found one": a compile and a flash of the line; reading goes on
+      if (cPhase == CP_LOOP) { startSeq(SEQ_COMPILE, now, false); schCd[SEQ_COMPILE] = now + 14000; if (rdRow >= 0) codeBackdrop.row(rdRow).hl = 2.5f; }
+      return;
+    }
+    if (cPhase == CP_FOUND || cPhase == CP_SHRUG) return;
+    if (cPhase == CP_QUIP && quipAudio && !foundWait) { foundWait = true; foundWaitUntil = now + 1500; return; }   // let the joke land
+    foundWait = false;
+    cPhase = CP_FOUND; phaseT0 = now; fdF = 0;
+    abortSeqs(now);
+    if (rdRow < 0) rdRow = nextRow(-1);
+    codeBackdrop.foundRow = rdRow;
+    for (int s = 0; s < 2; s++) {   // whip out to full reach on the grab spring
+      PartyTent *t = reader(s);
+      if (!t || t->phase == PT_RETRACT) continue;
+      t->L = capLen(); t->lam.t = 1; t->lam.f = 3.0f; t->lam.z = 0.6f; t->swA = 0;
+    }
+    botEyes.blinkStart(now, BW_SWAP); expr(EXPR_SURPRISED, 900); popS(0.04f);
+    head(0, 5, 500, now, true);   // perk up
+    modeKick(2, -0.10f, 0);   // crouch
+    ledBeat = CL_NONE; ticksLeft = 0;
+  }
+  void stepFound(unsigned long now, int lvl) {
+    unsigned long t = now - phaseT0;
+    PartyTent *a = reader(0), *b = reader(1);
+    if (!(fdF & 4)) {   // the tips hold the line's two ends
+      if (a) readerTip(1, capLen(), a->tx, a->ty);
+      if (b) readerTip(-1, capLen(), b->tx, b->ty);
+    }
+    const int tip = PARTY_NN - 1;
+    codeBackdrop.fx0 = a && a->on ? a->nx[tip] : icx;
+    codeBackdrop.fx1 = b && b->on ? b->nx[tip] : icx;
+    if (!(fdF & 1) && t >= 150) { fdF |= 1; startSeq(SEQ_GRAND, now, false); sndReq = 2; ledBeat = CL_FOUND; ledAt = now; }
+    if (!(fdF & 2) && t >= 300) {   // a mirrored droplet pair flung from the tips
+      fdF |= 2;
+      for (int s = 0; s < 2; s++) {
+        PartyTent *x = reader(s);
+        if (!x) continue;
+        float ang = atan2f(x->ny[tip] - x->ny[tip - 1], x->nx[tip] - x->nx[tip - 1]);
+        spawnDrop(x->nx[tip], x->ny[tip], 180 * cosf(ang), 180 * sinf(ang), 0.09f * tier().r, now, false);
+      }
+    }
+    if (!(fdF & 4) && t >= 900) { fdF |= 4; if (a) retract(*a, true); if (b) retract(*b, true); }   // the yank: the line goes in
+    if (!(fdF & 8) && t >= 1000) { fdF |= 8; modeKick(2, 0.20f, 0); modeKick(4, 0.05f, 0); expr(EXPR_PROUD, 1200); }
+    if (t >= 1400 || (t >= 600 && lvl >= 2)) codeExit(now);   // into the answer
+  }
+  void startShrug(unsigned long now) {   // no result: readers in, a calm dome, a confused look, out
+    if (cPhase == CP_SHRUG) return;
+    cPhase = CP_SHRUG; phaseT0 = now; foundWait = false;
+    retractAll(true);
+    rdI[0] = rdI[1] = -1;
+    startSeq(SEQ_CALM, now, false, 1);
+    expr(EXPR_CONFUSED, 800);
+    ledBeat = CL_SHRUG; ledAt = now; ticksLeft = 0;
+  }
+  static const char *codePhaseName(uint8_t p) {
+    static const char *names[] = {"off", "enter", "loop", "quip", "found", "shrug"};
+    return p < 6 ? names[p] : "?";
+  }
+  // Where the readers' tips are, and the found line's ends (for tuning)
+  String tipsJson() const {
+    String j = ",\"tips\":[";
+    for (int s = 0; s < 2; s++) {
+      int8_t i = rdI[s];
+      const PartyTent *t = i >= 0 && i < PARTY_TENTS && tents[i].on && tents[i].gen == rdG[s] ? &tents[i] : nullptr;
+      j += String(s ? "," : "") + (t ? "[" + String((int)t->nx[PARTY_NN - 1]) + "," + String((int)t->ny[PARTY_NN - 1]) + "," + String(t->lam.x, 2) + "]" : "null");
+    }
+    return j + "],\"line\":[" + String((int)codeBackdrop.fx0) + "," + String((int)codeBackdrop.fx1) + "," + String(codeBackdrop.foundRow) + "]";
+  }
+  String codeJson(unsigned long now) const {
+    static const char *vars[] = {"read", "skim", "stare"};
+    bool exiting = !codeOn && code;
+    return String("{\"on\":") + (codeOn ? "true" : "false") + ",\"phase\":\"" + (exiting ? "exit" : codePhaseName(cPhase)) + "\"" +
+           ",\"t\":" + String(codeOn ? now - codeT0 : 0) + ",\"party\":" + (codeParty ? "true" : "false") +
+           ",\"seqs\":\"" + seqNames() + "\",\"reader\":\"" + vars[rdVar % 3] + "\",\"quips\":" + String(quipN) +
+           ",\"quipPeriod\":" + String(quipPeriod) + ",\"why\":\"" + codeWhy + "\"" + tipsJson() + "}";
   }
 
   // ---- Tentacles (motion spec §2) ---------------------------------------------
@@ -1575,25 +2234,27 @@ struct PartyBlob {
     lastMs = now;
     if (dt <= 0) return;
     t = eyeSecs(now);
+    cW.step(code ? 1 : 0, dt);
+    syncTier();
     runEvents(now);
     if (morph) stepMorph(now, dt);
     const float R = morphR(), r = tier().r;
     bool free = !run && !morph;   // settled in his corner
-    if (free) heroRequest(now);
+    if (free && !code) heroRequest(now);
     stepSeqs(now, dt);
 
     // Corner run: crouch for the lead-in, then follow an arc to the new corner's home
     free = !run && !morph;
     if (run) stepRun(now, dt);
-    else if (holdCorner) { if (eyeReached(now, nextRoam)) nextRoam = now + 4000; }   // a roam waits until 4 s after the turn
+    else if (holdCorner || code) { if (eyeReached(now, nextRoam)) nextRoam = now + 4000; }   // a roam waits until 4 s after the turn
     else if (free && eyeReached(now, nextRoam) && !nSeqs()) roam(now);   // a roam waits for the patterns to finish
     free = !run && !morph;
 
     if (padUntil && eyeReached(now, padUntil)) { padUntil = 0; if (!run && !morph) botEyes.padX = botEyes.padY = 0; }
-    if (free && eyeReached(now, nextFidget)) fidget(now);
+    if (free && !code && eyeReached(now, nextFidget)) fidget(now);
 
     // Wander: a new spot in the corner box every 3.5-8 s; half the long moves are a scoot hop
-    if (free && eyeReached(now, nextWander) && !seqHolds()) {
+    if (free && !code && eyeReached(now, nextWander) && !seqHolds()) {
       float x0, x1, y0, y1;
       box(corner, x0, x1, y0, y1);
       float nx = eyeRnd(min(x0, x1), max(x0, x1)), ny = eyeRnd(min(y0, y1), max(y0, y1));
@@ -1607,15 +2268,15 @@ struct PartyBlob {
     // fast tempos pump instead of strobing) and tentacles drum it. Without a mic,
     // a spike fan every 5-12 s, and sometimes a flick.
     #ifdef TARGET_CORES3
-    bool heard = audioSpectrum.alive;
+    bool heard = audioSpectrum.alive && !code;
     float env = heard ? audioSpectrum.beatEnv : 0, bass = heard ? constrain(audioSpectrum.bass, 0.0f, 1.0f) : 0;
     #else
     bool heard = false;
     float env = 0, bass = 0;
     #endif
     beatSm.step(env, dt);
-    if (talk) {
-      // a voice turn owns the spikes (stepTalk)
+    if (talk || code) {
+      // a voice turn owns the spikes (stepTalk), and code mode its own beats (stepCode)
     } else if (heard) {
       if (free && env > 0.9f && prevEnv < 0.5f && nSeqs()) {   // a pattern owns the spikes: the beat throbs it
         throbUntil = now + 250; modeKick(2, 0.03f + 0.04f * bass, 0);
@@ -1637,10 +2298,11 @@ struct PartyBlob {
       nextPulse = now + (unsigned long)eyeRnd(5000, 12000);
     }
     prevEnv = env;
-    stepTalk(now, dt, r, free);
+    stepTalk(now, dt, r, free && !code);
+    stepCode(now, dt);
 
     // The pattern library's scheduler (feeler groups are one of its entries now); it rests during a voice turn
-    if (free && !talk) scheduleSeq(now, heard);
+    if (free && !talk && !code) scheduleSeq(now, heard);
     stepSlots(now, dt);
 
     // Field, attractor, spikes (up to 0.55 r). Spike k starts |k-4| x 35 ms late so the fan opens outward.
@@ -1669,11 +2331,11 @@ struct PartyBlob {
     float vx = wx.v, vy = wy.v - L.v, speed = hypotf(vx, vy);
     if (speed > 0.2f * R) phiV = atan2f(vy, vx);   // freeze the stretch axis when slow
     float Sv = 0.18f * constrain(speed / (2.5f * R), 0.0f, 1.0f) * PARTY_JIGGLE;
-    float c2 = 0.05f + (PARTY_MORPH_J - 0.05f) * (1 - morphOn());
+    float c2 = 0.05f + (PARTY_MORPH_J - 0.05f) * (1 - morphOn()) + codeM2;
     if (L.x < 0) c2 += -L.x / R * 0.9f;
     float msq = 0;
     for (int k = 0; k < PARTY_MODES; k++) {
-      mc[k].step(k == 0 ? c2 + Sv * cosf(2 * phiV) : k == 1 ? swC : 0, dt);
+      mc[k].step(k == 0 ? c2 + Sv * cosf(2 * phiV) : k == 1 ? swC + codePump : 0, dt);
       ms[k].step(k == 0 ? Sv * sinf(2 * phiV) : k == 1 ? swS : 0, dt);
       float cl = PARTY_MODE_DEF[k].cl * max(1.0f, PARTY_JIGGLE);
       mc[k].x = constrain(mc[k].x, -cl, cl); ms[k].x = constrain(ms[k].x, -cl, cl);
@@ -1682,7 +2344,7 @@ struct PartyBlob {
     tapT *= expf(-dt / 0.6f);
     shakeT *= expf(-dt / 0.6f);
     D.step(0, dt);
-    E.step((run && going) || morph ? 0.8f : constrain(speed / (3 * R) + 0.6f * tapT + shakeT + 0.25f * beatSm.x, 0.0f, 1.0f) * kappa.x, dt);
+    E.step((run && going) || morph ? 0.8f : constrain(speed / (3 * R) + 0.6f * tapT + shakeT + 0.25f * beatSm.x + codeE, 0.0f, 1.0f) * kappa.x, dt);
 
     // Bulge toward the gaze, or toward the spikes while a field is up
     float gx = botEyes.gxOut, gy = botEyes.gyOut;
@@ -1710,7 +2372,7 @@ struct PartyBlob {
     // Eyes trail the body, look with the whole face, ride the squash and the breath
     // (mid-morph they stay centred, where the face's eyes are)
     ox.step(0.20f * R * gx / 0.35f * on, dt);
-    oy.step((0.15f * R * gy / 0.25f + 0.6f * mc[0].x * R - 0.3f * (B - 1) * R) * on, dt);
+    oy.step((0.15f * R * gy / 0.25f + 0.6f * mc[0].x * R - 0.3f * (B - 1) * R - (mouthOn ? 0.12f * R : 0)) * on, dt);   // up a bit for the mouth
   }
 
   // The hop between the face's place and his corner, along an arc that rises a
@@ -1730,7 +2392,10 @@ struct PartyBlob {
     wx.v = (x - wx.x) / dt; wy.v = (y - wy.x) / dt;
     wx.x = wx.t = x; wy.x = wy.t = y;
     wTx = hx; wTy = hy;
-    if (morph == 1 && P.x > 0.97f) {   // landed in the corner: a jiggle, a spike burst, two droplets, then the stretch
+    if (morph == 1 && P.x > 0.97f && code) {   // code mode: the drop lands in place, a thought pops up
+      morph = 0;
+      codeLanded(now);
+    } else if (morph == 1 && P.x > 0.97f) {   // landed in the corner: a jiggle, a spike burst, two droplets, then the stretch
       morph = 0;
       modeKick(2, 0.16f, 0); modeKick(4, 0.03f, 0);
       field(alphaHome(), 0.8f, 300, now);
@@ -1748,6 +2413,7 @@ struct PartyBlob {
     } else if (morph == 2 && P.t == 0 && P.x < 0.03f) {   // back to the face
       morph = 0;
       active = false; haveCorner = false;
+      if (code && !codeOn) codeClear();
       clearExtras();
       botEyes.padX = botEyes.padY = 0;
       botEyes.blinkStart(now, BW_SWAP);
@@ -1802,6 +2468,7 @@ struct PartyBlob {
     if (grab && p > 0.55f) retract(*grab, true);   // past the latch: let go
     if (Q.x > 0.97f) {   // landed: squash, spike burst, blink; the streamers flick a droplet and drain
       run = nullptr;
+      if (code) landedAt = now;
       modeKick(2, m.jLand, 0); modeKick(4, 0.06f, 0);
       field(alphaHome(), m.land, 300, now);
       botEyes.blinkStart(now, BW_SWAP);
@@ -1962,6 +2629,8 @@ struct PartyBlob {
     if (!active) enter(now);
     uint32_t t0 = micros(), ts = t0;
     auto stage = [&](int i) { uint32_t n = micros(); partyRenderStats.stageUs[i] += n - ts; ts = n; };
+    codeBackdrop.draw(botFaceColor);   // code mode's minimap goes under everything (bot_mode cleared the screen)
+    stage(6);
     step(now);
     stage(0);
 
@@ -2014,6 +2683,8 @@ struct PartyBlob {
     if (fabsf(ex - iox) > 0.6f) iox = (int16_t)lroundf(ex);
     if (fabsf(ey - ioy) > 0.6f) ioy = (int16_t)lroundf(ey);
     botEyes.render(icx + iox, icy + ioy, k, botFaceColor, false, now, T.brows || P.x < 0.9f);
+    mouthX = icx + iox; mouthY = icy + ioy; mouthK = k;   // bot_mode adds the face's mouth offset (x k), kept off the floor
+    mouthFloor = icy + (int16_t)(0.85f * R) - 6;
     stage(5);
 
     uint32_t us = micros() - t0;

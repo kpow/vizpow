@@ -247,6 +247,11 @@ class Hub:
     def owns(self, name: str) -> bool:
         return name in self._tools
 
+    def conf_of(self, name: str) -> dict | None:
+        """The connectors.json settings of the connector that owns this tool."""
+        tool = self._tools.get(name)
+        return self.live[tool.connector].conf if tool else None
+
     def reads(self, name: str) -> bool | None:
         tool = self._tools.get(name)
         return tool.reads if tool else None

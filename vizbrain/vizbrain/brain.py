@@ -19,8 +19,10 @@ from .bot import EXPRESSIONS, GESTURES
 from .tools import Toolbox
 
 MAX_TOOL_ROUNDS = 6
+MAX_CODE_ROUNDS = 12   # a code-mode connector digs for longer, and the bot puts on a show meanwhile
 # Connector look-ups per turn: at most this many calls, and this much waiting
-# in all, so a slow server can't keep the bot quiet for long.
+# in all, so a slow server can't keep the bot quiet for long. A connector can
+# set its own ("max_lookups", "lookup_budget_s" in connectors.json).
 MAX_LOOKUPS = 4
 LOOKUP_BUDGET_S = 15.0
 # Said when Claude goes straight to a connector without a word, so the bot
@@ -105,6 +107,14 @@ CONNECTORS_LINE = ("- Tools with a double underscore in the name (like kpow__boo
                    "its album cover appears on your screen by itself for a few seconds: if {user} asks to see "
                    "the cover, check what's playing and it will show.\n")
 
+CODE_LINE = ("- Tools starting with {prefixes} are your own source code, design notes and hardware. When {user} "
+             "asks about you (how you see, hear, move, talk, remember or light up, what you're made of, your code, "
+             "what changed lately), look it up there before answering, every time, even when you think you know. "
+             "This is the exception to using tools only to change things. Several look-ups are fine. Before the "
+             "first one say at most a few words, like \"let me check\", and never why you're looking; between "
+             "look-ups say nothing. Then answer once, in plain words, briefly. Never read code, file names or line "
+             "numbers aloud unless asked.\n")
+
 
 TAG_RE = re.compile(r"\[(face|gesture)\s*:\s*([a-z_]+)\]", re.I)
 
@@ -126,14 +136,19 @@ class Brain:
         # Only an install with connectors gets the connector line, so everyone
         # else's prompt (and its cache) is unchanged.
         has_connectors = getattr(toolbox, "connectors", None) is not None
+        code = [f"{n}__" for n, live in (getattr(getattr(toolbox, "connectors", None), "live", None) or {}).items()
+                if getattr(live, "conf", {}).get("code_mode")]
+        code_line = CODE_LINE.replace("{prefixes}", " or ".join(code)) if code else ""
         self.system_prompt = (SYSTEM_PROMPT.replace("{faces}", ", ".join(EXPRESSIONS))
-                              .replace("{connectors}", CONNECTORS_LINE if has_connectors else "")
+                              .replace("{connectors}", (CONNECTORS_LINE + code_line) if has_connectors else "")
                               .replace("{user}", self.user))
         # "none", "present" (not tried yet), "valid", "rejected" or "no_credit".
         self.key_state = "present" if api_key else "none"
         self.last_error: dict | None = None      # {"at", "what"} of the last failed call
         # Called with a cover URL when a connector's answer points at one (pictures.py).
         self.on_picture = None
+        # The bot (or None), for code mode's animation (codemode.py). Set by the app.
+        self.get_bot = None
         if api_key:
             self.client = make_client(settings, api_key)
 
@@ -158,9 +173,11 @@ class Brain:
                 f"Weather (refreshed every 15 minutes): {self.toolbox.cached_weather() or 'not loaded yet; use get_weather'}")
 
     def turn(self, heard: str, personality: str = "Chill", on_text=None,
-             images: list[bytes] | None = None) -> dict:
+             images: list[bytes] | None = None, on_quip=None) -> dict:
         """Run one conversational turn. Returns {text, tools, expression, gesture}.
-        images: JPEGs attached to this message only (not kept in history)."""
+        images: JPEGs attached to this message only (not kept in history).
+        on_quip(text, after): speak a line that isn't part of the reply (code
+        mode's quips), calling after(pcm_bytes) once it is in the clip."""
         capped = self.capped()
         if capped:   # said by local speech, so it costs nothing
             return {"text": CAP_TEXT[capped], "tools": [f"capped ({capped})"],
@@ -175,7 +192,7 @@ class Brain:
                 result = self._offline_turn(heard)
             else:
                 try:
-                    result = self._claude_turn(user_msg, personality, on_text, images)
+                    result = self._claude_turn(user_msg, personality, on_text, images, on_quip)
                 except Exception as e:  # noqa: BLE001 - say it out loud rather than go silent
                     result = {"text": self._failed(e), "tools": [f"error: {e}"[:200]]}
             actions = [t for t in result.get("tools", []) if self._was_action(t)]
@@ -203,6 +220,14 @@ class Brain:
         hub = getattr(self.toolbox, "connectors", None)
         return bool(hub and hub.owns(name))
 
+    def _conf(self, name: str) -> dict:
+        hub = getattr(self.toolbox, "connectors", None)
+        conf_of = getattr(hub, "conf_of", None)
+        return (conf_of(name) if conf_of else None) or {}
+
+    def _code_mode(self, name: str) -> bool:
+        return self._is_connector(name) and bool(self._conf(name).get("code_mode"))
+
     def _run_call(self, call, turn: dict) -> tuple:
         """Run one tool call, within this turn's look-up budget and guard rails."""
         if turn["tainted"] and self.toolbox.keeps(call.name):
@@ -210,16 +235,22 @@ class Brain:
                     f"so check with {self.user} first and do it next turn if they say so."), True
         if not self._is_connector(call.name):
             return self.toolbox.run(call.name, call.input)
-        left = LOOKUP_BUDGET_S - turn["lookup_s"]
-        if turn["lookups"] >= MAX_LOOKUPS or left < 1:
+        # The turn's shared budget, or the connector's own when it sets one
+        conf = self._conf(call.name)
+        own = conf.get("budget")
+        key = conf.get("name", call.name) if own else ""
+        spent = turn["budgets"].setdefault(key, {"n": 0, "s": 0.0})
+        most = own.get("max_lookups", MAX_LOOKUPS) if own else MAX_LOOKUPS
+        left = (own.get("lookup_budget_s", LOOKUP_BUDGET_S) if own else LOOKUP_BUDGET_S) - spent["s"]
+        if spent["n"] >= most or left < 1:
             return "error: no time left for more look-ups this turn; answer with what you have.", True
-        turn["lookups"] += 1
+        spent["n"] += 1
         turn["fed"] = True
         started = time.monotonic()
         try:
             out, is_err = self.toolbox.run(call.name, call.input, timeout=left)
         finally:
-            turn["lookup_s"] += time.monotonic() - started
+            spent["s"] += time.monotonic() - started
         if not is_err and self.on_picture and isinstance(out, str):
             from .pictures import cover_url
             url = cover_url(out)
@@ -287,7 +318,7 @@ class Brain:
     # ---- Claude ---------------------------------------------------------
 
     def _claude_turn(self, heard: str, personality: str, on_text=None,
-                     images: list[bytes] | None = None) -> dict:
+                     images: list[bytes] | None = None, on_quip=None) -> dict:
         import anthropic
 
         # Prompt caching: the fixed instructions (+ tools, which render first)
@@ -321,13 +352,25 @@ class Brain:
         used: list[str] = []
         text_parts: list[str] = []
         speak = None
-        turn = {"said": False, "lookups": 0, "lookup_s": 0.0, "fed": False, "tainted": False}
+        turn = {"said": False, "budgets": {}, "fed": False, "tainted": False, "show": None, "held": []}
         if on_text is not None:
             def speak(s: str) -> None:
+                if turn["show"] and turn["show"].digging:
+                    # Talk between code look-ups is held back: said only if this round is the answer
+                    turn["held"].append(s)
+                    return
                 turn["said"] = turn["said"] or bool(s.strip())
                 on_text(s)
+        try:
+            return self._tool_loop(system, messages, tools, speak, used, text_parts, turn, on_quip)
+        finally:
+            if turn["show"]:
+                turn["show"].end()   # no answer came (or it failed): he shrugs out of code mode
 
-        for _ in range(MAX_TOOL_ROUNDS):
+    def _tool_loop(self, system, messages, tools, speak, used, text_parts, turn, on_quip) -> dict:
+        rounds = 0
+        while rounds < (MAX_CODE_ROUNDS if turn["show"] else MAX_TOOL_ROUNDS):
+            rounds += 1
             # Memory and routine changes are refused once a connector's words are in the conversation.
             turn["tainted"] = turn["fed"]
             resp = self._create(system, messages, tools, speak)
@@ -345,11 +388,22 @@ class Brain:
                 messages.append({"role": "assistant", "content": resp.content})
                 continue
             calls = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
+            held, turn["held"] = turn["held"], []
             if resp.stop_reason != "tool_use" or not calls:
+                if any(h.strip() for h in held):   # the answer: a "found it" line, then the words
+                    turn["show"].found()
+                    for h in held:
+                        speak(h)
                 break
             # Append the assistant turn unchanged (thinking/progress blocks included).
             messages.append({"role": "assistant", "content": resp.content})
-            if speak and not turn["said"] and any(self._is_connector(c.name) for c in calls):
+            if speak and on_quip and self.get_bot and any(self._code_mode(c.name) for c in calls):
+                if turn["show"] is None:
+                    from .codemode import CodeShow
+                    turn["show"] = CodeShow(self.get_bot, lambda line, after: on_quip(line, after))
+                turn["show"].start(opener=not turn["said"])   # its opener replaces the filler
+                turn["said"] = True
+            elif speak and not turn["said"] and any(self._is_connector(c.name) for c in calls):
                 speak(f"[face:thinking] {random.choice(FILLERS)} ")
             results = []
             for call in calls:

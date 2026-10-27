@@ -46,7 +46,7 @@ It's `~/Library/Application Support/vizbrain/connectors.json`, readable only by 
 }
 ```
 
-Other keys: `args`, `env`, `cwd`, `url` (instead of `command`), `tools` (an allowlist), `enabled` (false switches it off), `timeout_s`, `start_timeout_s`, `max_result_chars`.
+Other keys: `args`, `env`, `cwd`, `url` (instead of `command`), `tools` (an allowlist), `enabled` (false switches it off), `timeout_s`, `start_timeout_s`, `max_result_chars`, `max_lookups` and `lookup_budget_s` (its own look-up budget per question, 1-20 calls and 5-120 s), `code_mode` (true: while it looks things up the bot plays code mode and cracks a joke every ~8 s; for vizself, see `vizself/README.md`).
 
 - **Names:** lowercase letters, digits and dashes, up to 16 characters. Claude sees each tool as `name__tool`, for example `spotify__play`.
 - **Commands:** found in `~/.local/bin`, Homebrew and vizbrain's own folder, even though the login agent starts with a bare PATH.
@@ -55,7 +55,7 @@ Other keys: `args`, `env`, `cwd`, `url` (instead of `command`), `tools` (an allo
 ## What vizbrain does with them
 
 - **Starting:** each server runs in the background while vizbrain runs, and is checked once a minute. A server that crashes is restarted, and its tools stay offered meanwhile.
-- **Limits:** 12 tools per connector, 24 in all. Up to 4 look-ups and 15 seconds of waiting per question, so a slow server can't keep him quiet for long.
+- **Limits:** 12 tools per connector, 24 in all. Up to 4 look-ups and 15 seconds of waiting per question, so a slow server can't keep him quiet for long, unless a connector sets its own budget.
 - **Speaking:** he says "let me check" while a look-up runs. If Claude goes straight to the tool, he says a short filler himself.
 - **Trust:** results are labelled as data from that connector. After one, he won't change his memory or routines in the same answer, so a server can't plant anything that sticks.
 - **Names:** a server can offer a resource named `vocabulary`, with names to expect, one per line. Speech-to-text gets them as hints, and it's re-read every minute.

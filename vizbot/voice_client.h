@@ -53,7 +53,8 @@ extern char mdnsHostname[];
 #define VOICE_SPEECH_FLOOR    300.0f   // min RMS that counts as speech
 #define VOICE_GARBAGE_NOISE   1500.0f  // noise floor that means the mic isn't really capturing
 #define VOICE_PLAY_RATE       24000
-#define VOICE_MAX_PLAY_MS     30000
+#define VOICE_MAX_PLAY_MS     60000   // a whole turn: code mode's quips go in the same clip (2.9 MB PSRAM)
+#define VOICE_MIN_PLAY_MS     30000   // if PSRAM is short, at least this (1.4 MB)
 #define VOICE_BRAIN_PORT      4050
 #define VOICE_CONNECT_MS      2500
 #define VOICE_HTTP_TIMEOUT_MS 45000   // a web search can pause a reply ~20 s
@@ -197,12 +198,12 @@ static bool voiceAllocBuffers() {
     voice.recBuf = (int16_t*)heap_caps_malloc(
         (voice.recCapSamples + VOICE_WAV_HDR_SAMPLES) * sizeof(int16_t), MALLOC_CAP_SPIRAM);
   }
-  if (!voice.playBuf) {
-    voice.playCapSamples = (size_t)VOICE_PLAY_RATE * VOICE_MAX_PLAY_MS / 1000;
+  for (uint32_t ms = VOICE_MAX_PLAY_MS; !voice.playBuf && ms >= VOICE_MIN_PLAY_MS; ms /= 2) {
+    voice.playCapSamples = (size_t)VOICE_PLAY_RATE * ms / 1000;
     voice.playBuf = (int16_t*)heap_caps_malloc(voice.playCapSamples * sizeof(int16_t), MALLOC_CAP_SPIRAM);
   }
   if (!voice.env) {
-    voice.envCap = VOICE_MAX_PLAY_MS / VOICE_ENV_FRAME_MS + 2;
+    voice.envCap = voice.playCapSamples / (VOICE_PLAY_RATE * VOICE_ENV_FRAME_MS / 1000) + 2;
     voice.env = (uint8_t*)heap_caps_malloc(voice.envCap, MALLOC_CAP_SPIRAM);
   }
   return voice.recBuf && voice.playBuf && voice.env;

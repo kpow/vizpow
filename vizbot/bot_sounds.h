@@ -78,6 +78,8 @@ enum MidiSequenceId : uint8_t {
   SEQ_SONG_CHILL_WAVE,  // 36 - Ambient chill
   SEQ_SONG_RETRO_QUEST, // 37 - Retro game theme
 
+  SEQ_RIMSHOT,          // 38 - Ba-dum-tss (code mode, after a quip)
+
   SEQ_BUILTIN_COUNT,    // Sentinel
 
   // Cloud-delivered sequences start here
@@ -277,6 +279,13 @@ static const MidiEvent PROGMEM _evTyping[] = {
 // --- Rain Drop: Glockenspiel single soft note ---
 static const MidiEvent PROGMEM _evRain[] = {
   {84, 50, 0, GM_GLOCKENSPIEL, 300, 0},   // C6 very soft, long ring
+};
+
+// --- Rimshot: ba-dum-tss ---
+static const MidiEvent PROGMEM _evRimshot[] = {
+  {PERC_SNARE, 90, 9, 255, 20, 0},
+  {PERC_BASS_DRUM, 100, 9, 255, 20, 170},
+  {PERC_OPEN_HH, 95, 9, 255, 300, 340},
 };
 
 // --- Countdown Tick: Woodblock metronome ---
@@ -710,6 +719,8 @@ static const MidiSequenceDef builtinSequences[] = {
   { "Funky Bot",      sizeof(_evFunkyBot)/sizeof(MidiEvent),   GM_BRIGHT_PIANO, SEQ_FLAG_PERCUSSION, _evFunkyBot },
   { "Chill Wave",     sizeof(_evChillWave)/sizeof(MidiEvent),  GM_VIBRAPHONE,   SEQ_FLAG_PERCUSSION, _evChillWave },
   { "Retro Quest",    sizeof(_evRetroQuest)/sizeof(MidiEvent), GM_MUSIC_BOX,    SEQ_FLAG_PERCUSSION, _evRetroQuest },
+  // Code mode (38)
+  { "Rimshot",        3, 0,               SEQ_FLAG_PERCUSSION, _evRimshot },
 };
 
 #define BUILTIN_SEQ_COUNT (sizeof(builtinSequences) / sizeof(builtinSequences[0]))

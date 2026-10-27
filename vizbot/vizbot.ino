@@ -627,7 +627,7 @@ void loop() {
   if (!scTouch_state.chillMode && !voiceTurn) scServoWatchdogTick();
 
   // Idle head drift — suppressed during chill mode and voice turns
-  if (!scTouch_state.chillMode && !voiceTurn) {
+  if (!scTouch_state.chillMode && !voiceTurn && !partyBlob.code) {   // code mode moves the head itself
     scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);
   }
   #endif

@@ -472,22 +472,29 @@ class Mouth:
 
     def __init__(self, clip: LiveClip, voice: str, rate: int):
         self.clip, self.voice, self.rate = clip, voice, rate
-        self._q: "queue.Queue[str | None]" = queue.Queue()
+        self._q: "queue.Queue[tuple | None]" = queue.Queue()
         self.spoken: list[str] = []
         threading.Thread(target=self._run, daemon=True).start()
 
-    def say(self, text: str) -> None:
+    def say(self, text: str, after=None, record: bool = True) -> None:
+        """after(pcm_bytes) runs once the sentence is in the clip. record=False
+        keeps it out of `spoken` (the reply): code mode's quips."""
         if text.strip():
-            self.spoken.append(text.strip())
-            self._q.put(text.strip())
+            if record:
+                self.spoken.append(text.strip())
+            self._q.put((text.strip(), after))
 
     def close(self) -> None:
         self._q.put(None)
 
     def _run(self) -> None:
-        while (text := self._q.get()) is not None:
+        while (item := self._q.get()) is not None:
+            text, after = item
             try:
-                self.clip.append(synthesize(text, self.voice, self.rate))
+                pcm = synthesize(text, self.voice, self.rate)
+                self.clip.append(pcm)
+                if after:
+                    after(len(pcm))
             except Exception as e:  # noqa: BLE001 - skip a bad sentence, keep talking
                 print(f"[tts] failed on {text!r}: {e}")
         self.clip.finish()

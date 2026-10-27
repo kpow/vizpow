@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vizself"
+version = "0.1.0"
+description = "vizBot's own code and hardware as an MCP server, for vizbrain's connectors."
+requires-python = ">=3.11"
+dependencies = [
+    "mcp==2.2.0",   # same version vizbrain pins
+    "numpy>=1.26",
+    "onnxruntime>=1.20",   # the embedding model, same runtime vizbrain uses for Kokoro
+    "tokenizers>=0.20",
+    "huggingface_hub>=0.20",
+]
+
+[project.scripts]
+vizself = "vizself.server:run"
+
+[tool.setuptools.packages.find]
+include = ["vizself*"]

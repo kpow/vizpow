@@ -1299,6 +1299,7 @@ void handleState() {
                   ",\"seq\":\"" + partyBlob.seqNames() + "\"" +                    // library patterns playing, e.g. crown+bloom
                   ",\"stack\":\"" + String(partyStack == 0 ? "off" : partyStack == 1 ? "some" : "wild") + "\"" +
                   ",\"render\":" + partyRenderStatsJson() + "}" +              // µs per blob + eyes render
+                ",\"code\":" + partyBlob.codeJson(millis()) +              // code mode (GET /bot/code)
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
                 ",\"timezone\":\"" + String(timezoneTZ) + "\"" +
@@ -1517,6 +1518,42 @@ void handleBotParty() {
   uint8_t nowSize = size == 0xFF ? partySize : size;
   server.send(200, "application/json", String("{\"party\":") + (nowOn ? "true" : "false") +
               ",\"size\":\"" + String("sml"[nowSize % 3]) + "\"}");
+}
+
+// GET /bot/code — code mode, "Ink Reader" (docs/vizself/code-mode-motion-spec.md):
+// vizBot reading his own code while vizbrain's vizself connector digs. The
+// handler only sets requests; the render loop acts on them.
+// v=1 start (&why= is shown in /state) | v=0 leave with a shrug (&fast=1: at once)
+// quip=<ms> a quip of about <ms> audio is coming (&expr=<expression index>)
+// found=1 the "found it" hero, then out into the answer (&exit=0: a small one, keep reading)
+// seq=compile|aha|grand|<party key> play a pattern | stack=off|some|wild
+// hero=quip|found|shrug play a beat with no voice turn (tuning)
+void handleBotCode() {
+  codeSignalMs = millis();
+  if (server.hasArg("why")) codeWhy = server.arg("why").substring(0, 24);
+  if (server.hasArg("v")) {
+    bool on = server.arg("v").toInt() == 1;
+    codeReq = on ? CR_START : (server.arg("fast") == "1" ? CR_CANCEL : CR_SHRUG);
+  }
+  if (server.hasArg("quip")) {
+    String e = server.arg("expr");   // an expression index (vizbrain maps the names)
+    codeQuipExpr = e.length() && isDigit(e.charAt(0)) && e.toInt() < BOT_NUM_EXPRESSIONS ? (uint8_t)e.toInt() : 0xFF;
+    codeQuipReq = (uint16_t)constrain(server.arg("quip").toInt(), 1, 20000);
+  }
+  if (server.hasArg("found")) codeReq = server.arg("exit") == "0" ? CR_FOUND_SMALL : CR_FOUND;
+  if (server.hasArg("seq")) {
+    String q = server.arg("seq");
+    for (uint8_t i = 0; i < SEQ_COUNT; i++) if (q == PARTY_SEQ_DEF[i].key) codeSeqReq = i + 1;
+  }
+  if (server.hasArg("stack")) {
+    String k = server.arg("stack");
+    if (k == "off") codeStack = 0; else if (k == "some") codeStack = 1; else if (k == "wild") codeStack = 2;
+  }
+  if (server.hasArg("hero")) {
+    String h = server.arg("hero");
+    codeHeroReq = h == "quip" ? CH_QUIP : h == "found" ? CH_FOUND : h == "shrug" ? CH_SHRUG : CH_NONE;
+  }
+  server.send(200, "application/json", partyBlob.codeJson(millis()));
 }
 
 void handleBotAmbient() {
@@ -2690,6 +2727,7 @@ void setupWebServer() {
   server.on("/bot/background", handleBotBackground);
   server.on("/bot/ambient", handleBotAmbient);
   server.on("/bot/party", handleBotParty);
+  server.on("/bot/code", handleBotCode);
   server.on("/bot/autocycle", handleAutoCycle);
   server.on("/bot/kscope", handleKscope);
   server.on("/bot/kscope/spin", handleKscopeSpin);
