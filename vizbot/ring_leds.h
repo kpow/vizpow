@@ -36,15 +36,30 @@
 
 static CRGB scBaseLeds[SC_BASE_LED_COUNT];
 static CLEDController* scBaseCtrl = nullptr;
+#ifdef RING_LED_PIN2
+// Second output on RING_LED_PIN2 driving the same buffer, so a panel works
+// whichever pin it is wired to.
+static CLEDController* scBaseCtrl2 = nullptr;
+#endif
 
 inline void scInitBaseLeds() {
   scBaseCtrl = &FastLED.addLeds<RING_LED_CHIPSET, RING_LED_PIN, RING_LED_ORDER>(
       scBaseLeds, SC_BASE_LED_COUNT);
+#ifdef RING_LED_PIN2
+  scBaseCtrl2 = &FastLED.addLeds<RING_LED_CHIPSET, RING_LED_PIN2, RING_LED_ORDER>(
+      scBaseLeds, SC_BASE_LED_COUNT);
+#endif
   for (int i = 0; i < SC_BASE_LED_COUNT; i++) scBaseLeds[i] = CRGB::Black;
   scBaseCtrl->showLeds(255);
-  sysStatus.scBaseLedsReady = true;
+#ifdef RING_LED_PIN2
+  scBaseCtrl2->showLeds(255);
+  Serial.printf("[ring] %dx%d matrix on GPIO%d + GPIO%d\n", RING_MATRIX_W,
+                RING_MATRIX_H, RING_LED_PIN, RING_LED_PIN2);
+#else
   Serial.printf("[ring] %dx%d matrix on GPIO%d\n", RING_MATRIX_W, RING_MATRIX_H,
                 RING_LED_PIN);
+#endif
+  sysStatus.scBaseLedsReady = true;
 }
 
 // Chain index of panel cell (x, y); (0, 0) = top-left as seen from outside
@@ -63,6 +78,9 @@ inline void scSetBaseLedColor(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
 inline void scRefreshBaseLeds() {
   if (!sysStatus.scBaseLedsReady || !scBaseCtrl) return;
   scBaseCtrl->showLeds(255);   // our controller only — see header comment
+#ifdef RING_LED_PIN2
+  if (scBaseCtrl2) scBaseCtrl2->showLeds(255);
+#endif
 }
 
 inline void scShowBaseLedColor(uint8_t r, uint8_t g, uint8_t b) {
