@@ -186,7 +186,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.10.0"
+#define FIRMWARE_VERSION "3.10.1"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -240,13 +240,14 @@
 // /state "ring" object stay stable.
 #ifdef BOARD_HAS_RING_LEDS
   #ifndef BOARD_ESP32S3_LCD_169
-    #error "BOARD_HAS_RING_LEDS is wired for the 1.69 only (GPIO17)"
+    #error "BOARD_HAS_RING_LEDS is wired for the 1.69 only (GPIO17/GPIO3)"
   #endif
   #define RING_MATRIX_W      5            // 5x5 WS2812B, powered from 5V
   #define RING_MATRIX_H      5
   #define RING_SERPENTINE    1            // odd rows run right-to-left
   #define SC_BASE_LED_COUNT  (RING_MATRIX_W * RING_MATRIX_H)
   #define RING_LED_PIN       17
+  #define RING_LED_PIN2      3            // same data mirrored here (newer builds wire GPIO3)
   #define RING_LED_CHIPSET   WS2812B
   #define RING_LED_ORDER     GRB
 #endif
