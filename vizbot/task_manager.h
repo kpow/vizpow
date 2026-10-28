@@ -474,16 +474,30 @@ TaskHandle_t wifiTaskHandle = nullptr;
 static StackType_t wifiTaskStack[8192];   // 8KB in BSS
 static StaticTask_t wifiTaskTCB;
 
+// Worst time each job took since GET /state last read it (µs): anything slow
+// here holds up every HTTP request, /brain/wake included.
+#define WEB_JOBS 7
+static const char* const WEB_JOB_NAMES[WEB_JOBS] = {"connect", "wled", "weather", "sched", "mesh", "dns", "http"};
+volatile uint32_t webJobMaxUs[WEB_JOBS];
+
+String webJobsJson() {
+  String j = "{";
+  for (int i = 0; i < WEB_JOBS; i++) { j += String(i ? ",\"" : "\"") + WEB_JOB_NAMES[i] + "\":" + String(webJobMaxUs[i]); webJobMaxUs[i] = 0; }
+  return j + "}";
+}
+
 void wifiServerTask(void* param) {
   for (;;) {
     if (wifiEnabled) {
-      pollWifiConnectTask();             // connect request + STA poll
-      pollWledDisplay();                 // WLED text send + restore
-      pollWeatherFetch();                // Weather API fetch (if requested)
-      pollScheduledContent();              // Periodic weather + emoji cycles
-      pollMeshBroadcast();               // ESP-NOW mesh broadcast + stale eviction
-      dnsServer.processNextRequest();    // Captive portal DNS
-      server.handleClient();             // HTTP
+      uint32_t t = micros();
+      auto job = [&](int i) { uint32_t n = micros(); if (n - t > webJobMaxUs[i]) webJobMaxUs[i] = n - t; t = n; };
+      pollWifiConnectTask(); job(0);     // connect request + STA poll
+      pollWledDisplay(); job(1);         // WLED text send + restore
+      pollWeatherFetch(); job(2);        // Weather API fetch (if requested)
+      pollScheduledContent(); job(3);    // Periodic weather + emoji cycles
+      pollMeshBroadcast(); job(4);       // ESP-NOW mesh broadcast + stale eviction
+      dnsServer.processNextRequest(); job(5);   // Captive portal DNS
+      server.handleClient(); job(6);     // HTTP
     }
     // NOTE: cloud sync (blocking TLS, up to CLOUD_CONNECT_TIMEOUT) runs in its
     // own task (cloudTask) so a slow/failing handshake never freezes HTTP and

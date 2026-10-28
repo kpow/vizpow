@@ -1256,6 +1256,8 @@ extern const char* getCloudStateStr();
 extern CloudMeta cloudMeta;
 #endif
 
+String webJobsJson();   // task_manager.h
+
 void handleState() {
   String json = "{\"brightness\":" + String(brightness) +
                 ",\"speed\":" + String(speed) +
@@ -1292,6 +1294,7 @@ void handleState() {
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
                 ",\"loop\":" + loopStatsJson() +                  // real fps, loop work and panel push µs since the last read
                 ",\"faceRender\":" + botFaceRenderStatsJson() +   // µs per face render since the last read
+                ",\"webJobs\":" + webJobsJson() +                // worst µs per job on the HTTP task since the last read
                 ",\"party\":{\"on\":" + (partyMode ? "true" : "false") +
                   ",\"size\":\"" + String("sml"[partySize % 3]) + "\"" +
                   ",\"active\":" + (partyBlob.active ? "true" : "false") +
@@ -2543,6 +2546,8 @@ void handleBrainStatus() {
   wk["sendFails"] = wake.sendFails;
   wk["bursts"] = wake.bursts;
   wk["wakes"] = wake.wakes;
+  wk["udpWakes"] = wake.udpWakes;     // wakes that came over the stream socket (not /brain/wake)
+  wk["udpRefused"] = wake.udpRefused;
   wk["lastWakeSecAgo"] = wake.lastWakeMs ? (long)((millis() - wake.lastWakeMs) / 1000) : -1L;
   wk["micRestarts"] = wake.micRestarts;
   d["psramFree"] = ESP.getFreePsram();

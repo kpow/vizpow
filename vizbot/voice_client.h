@@ -134,6 +134,7 @@ static void voiceSetState(VoiceState s) { voice.state = s; voicePhase = s; }
 
 // Wake-word mic stream state (see "Wake-word mic stream" below).
 #define WAKE_UDP_PORT        4051
+#define WAKE_RX_PORT         4052     // the stream's own port: vizbrain answers here ("VZK1" wake)
 #define WAKE_RING_CHUNKS     40       // 1.28 s of 32 ms chunks in PSRAM
 #define WAKE_PREROLL_CHUNKS  32       // ~1 s sent ahead of the chunk that opened the gate
 #define WAKE_HANGOVER_MS     1500     // quiet time that closes the gate
@@ -154,6 +155,8 @@ struct WakeStream {
   float    noise = 0, lastRms = 0;
   uint32_t lastLoudMs = 0, lastBeatMs = 0, lastWakeMs = 0;
   uint32_t sent = 0, sendFails = 0, bursts = 0, wakes = 0, micRestarts = 0;
+  uint32_t udpWakes = 0, udpRefused = 0, lastNonce = 0;
+  bool     bound = false;        // udp bound to WAKE_RX_PORT (sends go out from it too)
   char     host[64] = "";
   WiFiUDP  udp;
 };
@@ -854,6 +857,11 @@ static void voicePollSenses() {
 // vizbrain over UDP, which runs the "Hey vizBot" model and calls /brain/wake.
 // A quiet room sends nothing but a heartbeat every 5 s.
 //
+// The wake itself comes back on the same socket, not over HTTP, so a busy web
+// server can't make him miss it: "VZK1" | nonce u32 | pairing token. He starts
+// listening and answers "VZA1" | nonce u32 | ok u8 so vizbrain stops resending.
+// Only the brain's own address counts, and its token when he's paired.
+//
 // Packet: "VZW1" | seq u32 (chunk index) | flags u8 | pad[3] | 512 x s16le.
 // Flags: WAKE_F_START first chunk of a burst, WAKE_F_END burst over (no
 // samples), WAKE_F_BEAT heartbeat (payload: noise RMS u16, no samples).
@@ -888,6 +896,8 @@ static bool wakeStart() {
   if (len >= sizeof(wake.host)) return false;
   memcpy(wake.host, voice.resolved, len);
   wake.host[len] = '\0';
+  if (!wake.bound) wake.bound = wake.udp.begin(WAKE_RX_PORT);
+  else while (wake.udp.parsePacket() > 0) wake.udp.flush();   // a wake that arrived mid-turn is stale now
   if (!M5.Mic.isRunning()) M5.Mic.begin();
   audioSpectrum.micRunning = M5.Mic.isRunning();
   wake.queued = wake.done = wake.chunks = 0;
@@ -975,6 +985,36 @@ static void wakeProcessChunk(uint32_t idx) {
   }
 }
 
+bool voiceOnWake();
+
+// "Hey vizBot" from vizbrain, over the stream's socket (see above)
+static void wakeCheckCommands() {
+  if (!wake.bound) return;
+  for (int n = wake.udp.parsePacket(); n > 0; n = wake.udp.parsePacket()) {
+    uint8_t buf[72];
+    int len = wake.udp.read(buf, sizeof(buf) - 1);
+    if (len < 8 || memcmp(buf, "VZK1", 4) != 0) continue;
+    buf[len] = '\0';
+    uint32_t nonce;
+    memcpy(&nonce, buf + 4, 4);
+    bool fromBrain = wake.udp.remoteIP().toString() == wake.host;
+    bool tokenOk = !voice.pairToken[0] || strcmp((const char*)buf + 8, voice.pairToken) == 0;
+    if (!fromBrain || !tokenOk) { wake.udpRefused++; continue; }
+    uint8_t ok = 1;
+    if (nonce != wake.lastNonce) {   // a resend of one already handled just gets its answer again
+      wake.lastNonce = nonce;
+      ok = voiceOnWake() ? 1 : 0;
+      if (ok) wake.udpWakes++;
+    }
+    uint8_t ack[9] = {'V', 'Z', 'A', '1'};
+    memcpy(ack + 4, &nonce, 4);
+    ack[8] = ok;
+    wake.udp.beginPacket(wake.udp.remoteIP(), wake.udp.remotePort());
+    wake.udp.write(ack, sizeof(ack));
+    wake.udp.endPacket();
+  }
+}
+
 // One step of the idle loop: queue the next chunk (blocks up to ~32 ms for a
 // free mic slot), then analyse whatever the mic task has finished.
 static void wakeStep() {
@@ -982,6 +1022,8 @@ static void wakeStep() {
     vTaskDelay(pdMS_TO_TICKS(20));
     return;
   }
+  wakeCheckCommands();
+  if (voice.listenRequested) return;   // the voice task starts the turn next
   if (!M5.Mic.isRunning()) {                            // someone else ended it
     wakeStop();
     return;
