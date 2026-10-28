@@ -319,6 +319,7 @@ inline void blitHiRes(CRGB* buf) {
 #define PIXEL_MODE_COLS (LCD_WIDTH / 20)
 #define PIXEL_MODE_ROWS (LCD_HEIGHT / 20)
 #define PIXEL_MODE_BLOCK 20
+#define PIXEL_MODE_GAP 2  // black grid between blocks so it reads as an LED matrix
 
 static CRGB pixelModeBuf[PIXEL_MODE_COLS * PIXEL_MODE_ROWS];
 
@@ -343,11 +344,20 @@ inline void fillCtxPixel(EffectCtx& ctx) {
   fillCtxAudio(ctx);
 }
 
+// Each block is inset by half the gap, so neighbors sit PIXEL_MODE_GAP apart
+// and the screen edge gets half. The grid lines are repainted every frame
+// because the canvas still holds the last frame's face there.
 inline void blitPixelMode(CRGB* buf) {
+  const int16_t inset = PIXEL_MODE_GAP / 2;
+  const int16_t cell  = PIXEL_MODE_BLOCK - PIXEL_MODE_GAP;
+  for (uint8_t x = 0; x <= PIXEL_MODE_COLS; x++)
+    gfx->fillRect(x * PIXEL_MODE_BLOCK - inset, 0, PIXEL_MODE_GAP, LCD_HEIGHT, 0x0000);
+  for (uint8_t y = 0; y <= PIXEL_MODE_ROWS; y++)
+    gfx->fillRect(0, y * PIXEL_MODE_BLOCK - inset, LCD_WIDTH, PIXEL_MODE_GAP, 0x0000);
   for (uint8_t y = 0; y < PIXEL_MODE_ROWS; y++) {
     for (uint8_t x = 0; x < PIXEL_MODE_COLS; x++) {
-      gfx->fillRect(x * PIXEL_MODE_BLOCK, y * PIXEL_MODE_BLOCK,
-                     PIXEL_MODE_BLOCK, PIXEL_MODE_BLOCK,
+      gfx->fillRect(x * PIXEL_MODE_BLOCK + inset, y * PIXEL_MODE_BLOCK + inset,
+                     cell, cell,
                      toRGB565(buf[y * PIXEL_MODE_COLS + x]));
     }
   }
