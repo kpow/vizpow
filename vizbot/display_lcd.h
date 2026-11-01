@@ -7,9 +7,9 @@
 #if defined(DISPLAY_LCD_ONLY) || defined(DISPLAY_DUAL)
 
 // LCD display constants (LCD_WIDTH / LCD_HEIGHT come from config.h per board)
-#define PIXEL_SIZE 26
-#define PIXEL_GAP 4
-#define GRID_SIZE (PIXEL_SIZE * MATRIX_WIDTH + PIXEL_GAP * (MATRIX_WIDTH - 1))  // 224 pixels total
+#define PIXEL_SIZE 28
+#define PIXEL_GAP 2  // same 2px black grid as pixel mode
+#define GRID_SIZE (PIXEL_SIZE * MATRIX_WIDTH + PIXEL_GAP * (MATRIX_WIDTH - 1))  // 238 pixels total
 #define COLOR_BLACK 0x0000  // RGB565 black
 
 // Calculate offsets to center the 8x8 grid on the display
