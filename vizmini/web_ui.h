@@ -270,6 +270,9 @@ inline bool tryStation(void (*onWait)(unsigned long ms)) {
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   WiFi.setSleep(false);
+  // IPv6 link-local so mDNS answers the AAAA half of a lookup: macOS asks for
+  // A and AAAA together and waited 5 s for an AAAA reply that never came
+  WiFi.enableIPv6();
   WiFi.setAutoReconnect(true);
   WiFi.begin(g_ssid.c_str(), g_pass.c_str());
   unsigned long start = millis();
@@ -290,6 +293,7 @@ inline void startAccessPoint() {
   WiFi.softAP(apName.c_str());
   dnsServer.start(53, "*", g_apIP);  // captive portal
   if (g_ssid.length() > 0) {
+    WiFi.enableIPv6();
     WiFi.setAutoReconnect(true);
     WiFi.begin(g_ssid.c_str(), g_pass.c_str());
     g_lastStaTry = millis();
