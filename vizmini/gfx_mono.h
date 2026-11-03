@@ -8,11 +8,12 @@
 // ============================================================================
 // GfxDevice — 1-bit adapter for the reused vizbot face renderer
 // ============================================================================
-// bot_eyes.h draws the whole face through six primitives on an object named
-// `gfx` of type `GfxDevice*`. On the LCD firmware that type is LovyanGFX. Here
-// we provide a tiny GfxDevice that maps the same six calls onto a monochrome
-// U8g2 full-frame buffer, applying a scale+translate from the renderer's
-// 240x280 design space down to the 128x64 OLED.
+// bot_eyes.h / bot_eye_model.h draw the whole face through a few primitives on
+// an object named `gfx` of type `GfxDevice*`. On the LCD firmware that type is
+// LovyanGFX. Here a tiny GfxDevice maps the same calls onto a monochrome U8g2
+// full-frame buffer. Coordinates are OLED pixels: the face is placed and
+// scaled by renderMiniFace() (vizmini.ino), the way vizbot's renderBotFaceAt()
+// shrinks it, so the eye model rasterises one span per real OLED column.
 //
 // Color mapping: the renderer uses RGB565. Anything that isn't the background
 // (0x0000) lights a pixel (draw color 1); the background / pupil color (0x0000)
@@ -24,19 +25,22 @@
   #if OLED_USE_SW_I2C
     U8G2_SH1106_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
   #else
-    U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
+    U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, OLED_SCL, OLED_SDA);
   #endif
 #else
   #if OLED_USE_SW_I2C
     U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
   #else
-    U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
+    U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, OLED_SCL, OLED_SDA);
   #endif
 #endif
 
 class GfxDevice {
 public:
   void begin() {
+  #if !OLED_USE_SW_I2C
+    u8g2.setBusClock(OLED_I2C_HZ);   // before begin(): U8g2 starts Wire on our pins at this clock
+  #endif
     u8g2.begin();
     u8g2.setContrast(DEFAULT_CONTRAST);
     u8g2.setBitmapMode(1);
@@ -47,7 +51,7 @@ public:
   void display() { u8g2.sendBuffer(); }
   void setContrast(uint8_t c) { u8g2.setContrast(c); }
 
-  // ---- the six primitives bot_eyes.h calls ----
+  // ---- the primitives the face renderer calls ----
   void fillEllipse(int16_t cx, int16_t cy, int16_t rx, int16_t ry, uint16_t color) {
     int16_t srx = sr(rx), sry = sr(ry);
     if (srx < 1 || sry < 1) return;
@@ -91,16 +95,10 @@ private:
   static const uint16_t BG = 0x0000;  // background / pupil color
   inline void setColor(uint16_t c) { u8g2.setDrawColor(c == BG ? 0 : 1); }
 
-  // design-space -> screen-space transforms
-  inline int16_t sx(int16_t x) {
-    return FACE_ORIGIN_X + (int16_t)lroundf((x - FACE_DESIGN_CX) * FACE_SCALE);
-  }
-  inline int16_t sy(int16_t y) {
-    return FACE_ORIGIN_Y + (int16_t)lroundf((y - FACE_DESIGN_CY) * FACE_SCALE);
-  }
-  inline int16_t sr(int16_t r) {  // scale a radius/length (no translate)
-    return (int16_t)lroundf(r * FACE_SCALE);
-  }
+  // Screen space already (see the header comment)
+  static inline int16_t sx(int16_t x) { return x; }
+  static inline int16_t sy(int16_t y) { return y; }
+  static inline int16_t sr(int16_t r) { return r; }
 };
 
 #endif // GFX_MONO_H

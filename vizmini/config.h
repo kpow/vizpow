@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.6.1"
+#define FIRMWARE_VERSION "0.7.3.1"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
@@ -49,25 +49,51 @@
 // 0.96" are usually SSD1306. If the image is shifted ~2px or garbled, flip this.
 #define OLED_DRIVER_SH1106   1   // set to 0 to use SSD1306 instead
 
-// Use bit-banged (software) I2C so the SDA/SCL pins are explicit and never
-// depend on the board variant's default Wire pins. Set to 0 to use hardware
-// I2C (faster) once you've confirmed Wire maps to GPIO8/9 on your board.
-#define OLED_USE_SW_I2C      1
+// Hardware I2C on OLED_SDA / OLED_SCL (U8g2 passes the pins to Wire.begin).
+// Bit-banged software I2C took ~520 ms per frame (2 fps); hardware I2C at
+// 400 kHz sends the 1 KB frame in ~25 ms. 1 = back to software I2C.
+#define OLED_USE_SW_I2C      0
+#define OLED_I2C_HZ          400000
 
 #define OLED_WIDTH   128
 #define OLED_HEIGHT  64
+// The vizbot eye model clips to the screen with these names
+#define LCD_WIDTH    OLED_WIDTH
+#define LCD_HEIGHT   OLED_HEIGHT
 
-// ---- Face transform (design space -> OLED) ---------------------------------
-// The reused renderer draws in its native 240x280 "design space" centered on
-// (BOT_FACE_CX, BOT_FACE_CY) = (120, 118) (defaults from bot_faces.h). The
-// GfxDevice adapter maps every coordinate/radius through:
-//     screen = ORIGIN + (design - DESIGN_CENTER) * FACE_SCALE
-// Tune these three on real hardware to frame the face nicely.
-#define FACE_DESIGN_CX   120.0f
-#define FACE_DESIGN_CY   118.0f
-#define FACE_SCALE       0.45f          // ~240px design -> ~108px drawn
-#define FACE_ORIGIN_X    64             // screen x that design-cx maps to
-#define FACE_ORIGIN_Y    30             // screen y that design-cy maps to
+// ---- Face placement (OLED pixels) ------------------------------------------
+// The eye model is designed for a 240 px wide face (eye R 48). renderMiniFace()
+// draws it centred on (FACE_ORIGIN_X, FACE_ORIGIN_Y) at FACE_SCALE, the way
+// vizbot's renderBotFaceAt() shrinks the face; the mouth gets a scaled copy.
+// Tallest faces span about -66 (brows) .. +84 (mouth + curve) design px, so
+// 0.41 fits all 25 into 64 rows with a pixel to spare (0.45 clipped mouths).
+#define FACE_SCALE       0.41f          // eye R 48 -> ~20 px, face ~100 px wide
+#define FACE_ORIGIN_X    64             // screen x of the face centre
+#define FACE_ORIGIN_Y    28             // screen y of the face centre (between the eyes)
+
+// ---- Face motion (face_motion.h) -------------------------------------------
+// Whole-face rotation: tilts, wobbles, pendulum swings, drifts, spins, flips.
+// Rare by default; level (off / rare / often) is saved in NVS from the web page.
+#define MOTION_RARE_MIN_S    120       // rare: a move every 2 ...
+#define MOTION_RARE_MAX_S    360       // ... to 6 minutes
+#define MOTION_OFTEN_MIN_S   10        // often: every 10 ...
+#define MOTION_OFTEN_MAX_S   30        // ... to 30 s
+#define MOTION_FIT_A         54.0f     // face half-width kept on screen while turned (px)
+#define MOTION_FIT_B         32.0f     // face half-height
+#define MOTION_DIZZY_MS      2500      // dizzy face after a double spin
+
+// ---- Ferro mode (ferro_blob.h) ---------------------------------------------
+// Black ferrofluid drop on a white screen, floating free. Sizes from the
+// motion spec §1-2 (spikes ~1.45x party's share of r so medium reads).
+#define FERRO_R_M            15.0f     // body radius, px (S 12, L 18)
+#define FERRO_SPIKE_M        10.0f     // tall spike, medium pattern (px)
+#define FERRO_SPIKE_B        13.5f     // tall spike, big pattern
+#define FERRO_CONTRAST_K     0.55f     // panel brightness in ferro vs the user's value
+#define FERRO_CONTRAST_MIN   40
+#define FERRO_CONTRAST_MAX   140
+#define FERRO_VISIT_MS       60000     // auto: how long a visit lasts
+#define FERRO_VISIT_GAP_MIN_S 480      // auto: face time between visits, 8 ...
+#define FERRO_VISIT_GAP_MAX_S 900      // ... to 15 min
 
 // ---- Behavior --------------------------------------------------------------
 #define FRAME_INTERVAL_MS      40       // ~25 FPS render cap
@@ -77,18 +103,16 @@
 #define DEFAULT_CONTRAST       180      // OLED contrast / "brightness" (0-255)
 #define SNOW_DEFAULT_ON        1        // little falling-snow ambiance by default
 
-// ---- Onboard NeoPixel "spark" (WS2812 on GPIO8) ----------------------------
-// Long rainbow bursts that glow through the yeti's skin, separated by short
-// dark gaps — on more than it's off (~70% duty), but still clearly cycling.
-#define SPARK_ENABLED      1           // 1 = onboard NeoPixel spark on; 0 = never driven
-#define NEOPIXEL_PIN       8           // onboard WS2812 data
-#define SPARK_FIRST_MS     4000        // first burst ~4s after boot
-#define SPARK_MIN_MS       8000        // dark gap between bursts: 8s ...
-#define SPARK_MAX_MS       18000       // ... to 18s (shorter than the burst)
-#define SPARK_DURATION_MS  30000       // each rainbow burst lasts ~30s (the "on")
-#define SPARK_MAX_BRIGHT   1.0f        // full brightness (bleeds through the skin)
-#define SPARK_CYCLE_MS     12000       // time for one full rainbow rotation
-                                       // (higher = gentler, smoother color drift)
+// ---- Inside lights (strip_leds.h) ------------------------------------------
+// 8x WS2812B strip glowing through the translucent body. The onboard WS2812
+// (hardwired to GPIO8) is left dark: the strip needs both RMT channels.
+#define LED_STRIP_PIN        4         // strip DIN (free, not a strapping pin)
+#define LED_STRIP_COUNT      8
+#define LED_MAX_MA           450       // FastLED power cap so USB never browns out
+#define LED_DEFAULT_BRI      160       // 0-255, saved per bot in NVS once changed
+#define LED_FRAME_MS         20        // 50 Hz light updates
+#define LED_AMBIENT_HOLD_MS  40000     // ambient show: time on each pattern
+#define LED_SPARK_MS         3000      // rainbow burst laid over any mode
 
 // ---- Touch gestures --------------------------------------------------------
 #define DOUBLE_TAP_MS  450      // two touches within this window = double-tap
