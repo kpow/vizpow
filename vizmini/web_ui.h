@@ -18,6 +18,12 @@ extern void   ctlSetInfo(bool on);
 extern void   ctlSetContrast(uint8_t c);
 extern void   ctlSetSnow(bool on);
 extern void   ctlSpark();
+extern void   ctlSetLeds(int mode, int bri);   // -1 = leave unchanged
+extern void   ctlMotion(int level, int move);  // -1 / 0 = leave unchanged
+extern void   ctlSetFerro(bool on);
+extern void   ctlFerroPlay(const String &pat, const String &tent);
+extern void   ctlFerroSetting(const String &v);
+extern void   ctlFerroVisit();
 extern String ctlStateJson();
 
 // ============================================================================
@@ -73,7 +79,35 @@ label{font-size:12px;color:#7d8590}
 <button onclick="g('/bot/info?v=1')">Time/Wx</button>
 <button onclick="snow()">Snow</button>
 <button onclick="g('/bot/spark')">Spark</button>
-</div></div>
+</div>
+<div class=row>
+<button onclick="g('/bot/ferro?v=1')">Ferro now</button>
+<button onclick="g('/bot/ferro?visit=1')">Visit (60s)</button>
+<button onclick="g('/bot/ferro?v=0')">Back to face</button>
+</div>
+<div class=row>
+<button onclick="fs('off')">Ferro: off</button>
+<button onclick="fs('auto')">auto</button>
+<button onclick="fs('on')">always</button>
+<span id=fsl></span>
+</div>
+<div class=grid id=fp></div></div>
+
+<div class=card><label>Lights</label>
+<div class=row>
+<button onclick="g('/bot/leds?mode=0')">Mood</button>
+<button onclick="g('/bot/leds?mode=1')">Ambient</button>
+<button onclick="g('/bot/leds?mode=2')">Off</button>
+</div>
+<input id=lb type=range min=0 max=255 value=160 onchange="g('/bot/leds?bri='+this.value)"></div>
+
+<div class=card><label>Motion <span id=ml></span></label>
+<div class=row>
+<button onclick="lvl('off')">Off</button>
+<button onclick="lvl('rare')">Rare</button>
+<button onclick="lvl('often')">Often</button>
+</div>
+<div class=grid id=mv></div></div>
 
 <div class=card><a href="/update" style="color:#58a6ff;text-decoration:none">&#8593; Firmware update</a></div>
 
@@ -88,7 +122,19 @@ function snow(){snowOn=!snowOn;g('/bot/snow?v='+(snowOn?1:0))}
 var e=document.getElementById('ex');
 X.forEach(function(n,i){var b=document.createElement('button');b.textContent=n;
  b.onclick=function(){g('/bot/expression?v='+i)};e.appendChild(b)});
+function fs(n){g('/bot/ferro?set='+n);document.getElementById('fsl').textContent=n}
+function lvl(n){g('/bot/motion?level='+n);document.getElementById('ml').textContent='('+n+')'}
+["tilt","wobble","pendulum","drift","spin","spin2","flip"].forEach(function(n){
+ var b=document.createElement('button');b.textContent=n;
+ b.onclick=function(){g('/bot/motion?move='+n)};document.getElementById('mv').appendChild(b)});
+["crown3","crown5","star6","field12","dipole","porcupine","split","wave","breathe","bloom","carousel"].forEach(function(n){
+ var b=document.createElement('button');b.textContent=n;b.onclick=function(){g('/bot/ferro?pat='+n)};document.getElementById('fp').appendChild(b)});
+["reach","feeler","flick","arm"].forEach(function(n){
+ var b=document.createElement('button');b.textContent='~'+n;b.onclick=function(){g('/bot/ferro?tent='+n)};document.getElementById('fp').appendChild(b)});
 fetch('/state').then(r=>r.json()).then(s=>{document.getElementById('c').value=s.contrast;
+ document.getElementById('lb').value=s.ledBri;
+ document.getElementById('ml').textContent='('+s.motion+')';
+ document.getElementById('fsl').textContent=s.ferroSet;
  document.getElementById('sub').textContent='v'+s.fw+' · '+s.ip}).catch(()=>{});
 </script></body></html>
 )HTML";
@@ -184,7 +230,44 @@ inline void handleInfo()       { ctlSetInfo(argU8("v", 1) != 0);            serv
 inline void handleContrast()   { ctlSetContrast(argU8("v", DEFAULT_CONTRAST)); server.send(200, "text/plain", "ok"); }
 inline void handleSnow()       { ctlSetSnow(argU8("v", 1) != 0);            server.send(200, "text/plain", "ok"); }
 inline void handleSpark()      { ctlSpark();                                server.send(200, "text/plain", "ok"); }
+// /bot/motion?level=off|rare|often (or 0-2)  &  ?move=tilt|wobble|pendulum|drift|spin|spin2|flip
+inline void handleMotion() {
+  int level = -1, move = 0;
+  if (server.hasArg("level")) {
+    String l = server.arg("level");
+    level = l == "off" ? 0 : l == "rare" ? 1 : l == "often" ? 2 : l.toInt();
+  }
+  if (server.hasArg("move")) {
+    String m = server.arg("move");
+    for (uint8_t i = 1; i < MOVE_NUM; i++) if (m == faceMoveNames[i]) move = i;
+  }
+  ctlMotion(level, move);
+  server.send(200, "text/plain", "ok");
+}
+// /bot/ferro?v=1|0 (now / back to face)  &  ?visit=1 (a 60 s visit)  &  ?set=off|on|auto
+//            &  ?pat=crown5 (see ferroPatternNames)  &  ?tent=reach|feeler|flick|arm
+inline void handleFerro() {
+  if (server.hasArg("set")) ctlFerroSetting(server.arg("set"));
+  if (server.hasArg("visit")) ctlFerroVisit();
+  if (server.hasArg("v")) ctlSetFerro(argU8("v", 1) != 0);
+  if (server.hasArg("pat") || server.hasArg("tent")) ctlFerroPlay(server.arg("pat"), server.arg("tent"));
+  server.send(200, "text/plain", "ok");
+}
+inline void handleLeds() {
+  int mode = -1, bri = -1;
+  if (server.hasArg("mode")) {
+    String m = server.arg("mode");
+    mode = m == "mood" ? 0 : m == "ambient" ? 1 : m == "off" ? 2 : m.toInt();
+  }
+  if (server.hasArg("bri")) bri = constrain(server.arg("bri").toInt(), 0, 255);
+  ctlSetLeds(mode, bri);
+  server.send(200, "text/plain", "ok");
+}
 inline void handleState()      { server.send(200, "application/json", ctlStateJson()); }
+// Raw U8g2 frame buffer (1024 bytes: 8 pages of 128 columns, LSB = top pixel)
+inline void handleScreen() {
+  server.send_P(200, "application/octet-stream", (PGM_P)u8g2.getBufferPtr(), 8 * u8g2.getBufferTileWidth() * u8g2.getBufferTileHeight() * 8 / 8);
+}
 
 // ---- OTA firmware update (writes to the spare app slot, then reboots) ------
 inline void handleUpdatePage() { server.send_P(200, "text/html", UPDATE_HTML); }
@@ -226,8 +309,12 @@ inline void registerRoutes() {
   server.on("/bot/info", handleInfo);
   server.on("/bot/snow", handleSnow);
   server.on("/bot/spark", handleSpark);
+  server.on("/bot/leds", handleLeds);
+  server.on("/bot/motion", handleMotion);
+  server.on("/bot/ferro", handleFerro);
   server.on("/contrast", handleContrast);
   server.on("/state", handleState);
+  server.on("/debug/screen", handleScreen);
   server.on("/update", HTTP_GET, handleUpdatePage);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.onNotFound(handleNotFound);
