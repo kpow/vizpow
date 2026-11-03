@@ -360,6 +360,7 @@ String ctlStateJson() {
   s += "\"ap\":" + String(webIsAP() ? "true" : "false") + ",";
   s += "\"expr\":" + String(g_expr) + ",";
   s += "\"mode\":\"" + String(g_mode == MODE_INFO ? "info" : g_mode == MODE_FERRO ? "ferro" : "face") + "\",";
+  s += "\"info\":\"" + String(g_infoView == VIEW_WEATHER ? "weather" : "time") + "\",";
   s += "\"ferroUs\":" + String(ferro.cnt ? ferro.sumUs / ferro.cnt : 0) + ",";
   s += "\"ferroMaxUs\":" + String(ferro.maxUs) + ",";
   s += "\"ferroPat\":\"" + String(ferro.patternName()) + "\",";
@@ -400,21 +401,32 @@ void drawSayText() {
 }
 
 // ============================================================================
-// Boot splash — show where to reach the bot
+// Boot — he sleeps while the WiFi joins, then wakes up and says where he is
 // ============================================================================
-void splash(const String& where) {
+// Interim intro: the face with shut eyes and a "joining <ssid>..." bubble,
+// animated while tryStation() waits. On a join the eyes open and the bubble
+// shows his address; on the hotspot fallback it shows the hotspot name. The
+// stylised intro from the clock/weather concepts replaces the drawing here.
+void bootStatus(const char *text) {
+  strncpy(g_sayText, text, sizeof(g_sayText) - 1);
+  g_sayText[sizeof(g_sayText) - 1] = 0;
+}
+
+void bootFrame(unsigned long ms) {
+  static unsigned long last = 0;
+  if (millis() - last < FRAME_INTERVAL_MS) return;
+  last = millis();
+  char t[40];
+  int dots = (ms / 400) % 4;
+  snprintf(t, sizeof(t), "joining %s%.*s", webSsid().c_str(), dots, "...");
+  bootStatus(t);
+  tweenManager.update();
+  face.update();
+  botEyes.step(millis());
+  leds.update();
   u8g2.clearBuffer();
-  u8g2.setDrawColor(1);
-  u8g2.setFont(u8g2_font_7x14B_tf);
-  u8g2.drawStr(28, 22, "vizMini");
-  u8g2.setFont(u8g2_font_5x8_tf);
-  if (webIsAP()) {
-    u8g2.drawStr(4, 40, "join wifi:");
-    u8g2.drawStr(4, 52, where.c_str());
-  } else {
-    u8g2.drawStr(4, 40, "http://");
-    u8g2.drawStr(4, 52, where.c_str());
-  }
+  renderMiniFace();
+  drawSayText();
   u8g2.sendBuffer();
 }
 
@@ -426,14 +438,11 @@ void setup() {
   randomSeed(esp_random());
 
   gfxDev.begin();
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_7x14B_tf);
-  u8g2.drawStr(20, 36, "vizMini...");
-  u8g2.sendBuffer();
 
   touch.begin();
   face.init();
   botEyes.init(millis());
+  botEyes.sleeping = true;           // asleep until the WiFi joins
   motion.begin();                    // level from NVS (rare by default)
   motion.onDizzy = dizzyAfterSpin;
   ferro.begin();
@@ -450,7 +459,7 @@ void setup() {
 
   String where;
 #if WIFI_ENABLED
-  where = webBegin();                // join wifi or start AP + captive portal
+  where = webBegin(bootFrame);       // join wifi (animating) or start AP + captive portal
   if (!webIsAP()) {                  // start NTP clock sync once on a network
     configTzTime(TZ_POSIX, NTP_SERVER_1, NTP_SERVER_2);
   }
@@ -458,9 +467,11 @@ void setup() {
   WiFi.mode(WIFI_OFF);               // TEMP: radio fully off for the noise test
   where = "wifi-off-test";
 #endif
-  splash(where);
   Serial.printf("[vizMini] %s  ->  %s\n", webIsAP() ? "AP" : "STA", where.c_str());
-  delay(2000);
+  // Wake up and say where to find him (the bubble stays longer on the hotspot)
+  botEyes.sleeping = false;
+  bootStatus(webIsAP() ? (String("wifi: ") + where).c_str() : where.c_str());
+  g_sayUntil = millis() + (webIsAP() ? BOOT_AP_NOTE_MS : BOOT_IP_NOTE_MS);
 
   g_lastInputMs = millis();
   if (g_ferroSet == FERRO_SET_ON) enterFerro();

@@ -48,96 +48,7 @@ inline String chipSuffix() {
 // ============================================================================
 // HTML — control page (STA mode) and provisioning page (AP mode)
 // ============================================================================
-static const char CONTROL_HTML[] PROGMEM = R"HTML(
-<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>vizMini</title><style>
-:root{color-scheme:dark}
-body{margin:0;background:#0b0f14;color:#e6edf3;font:15px system-ui,sans-serif;padding:16px}
-h1{font-size:18px;margin:0 0 4px}.sub{color:#7d8590;font-size:12px;margin-bottom:14px}
-.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px;margin-bottom:12px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px}
-button{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;
- padding:9px 6px;font-size:13px;cursor:pointer}button:active{background:#2d333b}
-input[type=text]{width:100%;box-sizing:border-box;background:#0d1117;color:#e6edf3;
- border:1px solid #30363d;border-radius:8px;padding:9px}
-input[type=range]{width:100%}.row{display:flex;gap:8px;margin-top:8px}
-label{font-size:12px;color:#7d8590}
-</style></head><body>
-<h1>vizMini</h1><div class=sub id=sub>the little yeti</div>
-
-<div class=card><label>Say something</label>
-<div class=row><input id=t type=text maxlength=48 placeholder="hello!">
-<button onclick="say()">Say</button></div></div>
-
-<div class=card><label>Expression</label>
-<div class=grid id=ex></div></div>
-
-<div class=card><label>Contrast</label>
-<input id=c type=range min=10 max=255 value=180 oninput="g('/contrast?v='+this.value)">
-<div class=row>
-<button onclick="g('/bot/info?v=1')">Time/Wx</button>
-<button onclick="snow()">Snow</button>
-<button onclick="g('/bot/spark')">Spark</button>
-</div>
-<div class=row>
-<button onclick="g('/bot/ferro?v=1')">Ferro now</button>
-<button onclick="g('/bot/ferro?visit=1')">Visit (60s)</button>
-<button onclick="g('/bot/ferro?v=0')">Back to face</button>
-</div>
-<div class=row>
-<button onclick="fs('off')">Ferro: off</button>
-<button onclick="fs('auto')">auto</button>
-<button onclick="fs('on')">always</button>
-<span id=fsl></span>
-</div>
-<div class=grid id=fp></div></div>
-
-<div class=card><label>Lights</label>
-<div class=row>
-<button onclick="g('/bot/leds?mode=0')">Mood</button>
-<button onclick="g('/bot/leds?mode=1')">Ambient</button>
-<button onclick="g('/bot/leds?mode=2')">Off</button>
-</div>
-<input id=lb type=range min=0 max=255 value=160 onchange="g('/bot/leds?bri='+this.value)"></div>
-
-<div class=card><label>Motion <span id=ml></span></label>
-<div class=row>
-<button onclick="lvl('off')">Off</button>
-<button onclick="lvl('rare')">Rare</button>
-<button onclick="lvl('often')">Often</button>
-</div>
-<div class=grid id=mv></div></div>
-
-<div class=card><a href="/update" style="color:#58a6ff;text-decoration:none">&#8593; Firmware update</a></div>
-
-<script>
-var X=["neutral","happy","sad","surprised","chill","angry","love","dizzy","thinking",
-"excited","mischief","skeptical","worried","confused","proud","shy","annoyed","focused",
-"winking","devious","shocked","kissing","nervous","glitch","sassy"];
-var snowOn=true;
-function g(u){fetch(u)}
-function say(){var v=document.getElementById('t').value;if(v)fetch('/bot/say?text='+encodeURIComponent(v))}
-function snow(){snowOn=!snowOn;g('/bot/snow?v='+(snowOn?1:0))}
-var e=document.getElementById('ex');
-X.forEach(function(n,i){var b=document.createElement('button');b.textContent=n;
- b.onclick=function(){g('/bot/expression?v='+i)};e.appendChild(b)});
-function fs(n){g('/bot/ferro?set='+n);document.getElementById('fsl').textContent=n}
-function lvl(n){g('/bot/motion?level='+n);document.getElementById('ml').textContent='('+n+')'}
-["tilt","wobble","pendulum","drift","spin","spin2","flip"].forEach(function(n){
- var b=document.createElement('button');b.textContent=n;
- b.onclick=function(){g('/bot/motion?move='+n)};document.getElementById('mv').appendChild(b)});
-["crown3","crown5","star6","field12","dipole","porcupine","split","wave","breathe","bloom","carousel"].forEach(function(n){
- var b=document.createElement('button');b.textContent=n;b.onclick=function(){g('/bot/ferro?pat='+n)};document.getElementById('fp').appendChild(b)});
-["reach","feeler","flick","arm"].forEach(function(n){
- var b=document.createElement('button');b.textContent='~'+n;b.onclick=function(){g('/bot/ferro?tent='+n)};document.getElementById('fp').appendChild(b)});
-fetch('/state').then(r=>r.json()).then(s=>{document.getElementById('c').value=s.contrast;
- document.getElementById('lb').value=s.ledBri;
- document.getElementById('ml').textContent='('+s.motion+')';
- document.getElementById('fsl').textContent=s.ferroSet;
- document.getElementById('sub').textContent='v'+s.fw+' · '+s.ip}).catch(()=>{});
-</script></body></html>
-)HTML";
+#include "web_page.h"   // CONTROL_HTML: the control page (vizBot house style)
 
 static const char PROVISION_HTML[] PROGMEM = R"HTML(
 <!doctype html><html><head><meta charset=utf-8>
@@ -331,15 +242,40 @@ inline bool loadCreds() {
   return g_ssid.length() > 0;
 }
 
-inline bool tryStation() {
-  if (!loadCreds()) return false;
+// Boot WiFi diagnostics: every STA event with its time and reason code
+inline void wifiEventLog(WiFiEvent_t ev, WiFiEventInfo_t info) {
+  switch (ev) {
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:    Serial.printf("[wifi] %lu ms associated ch %d\n", millis(), info.wifi_sta_connected.channel); break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:       Serial.printf("[wifi] %lu ms got ip\n", millis()); break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: Serial.printf("[wifi] %lu ms disconnected reason %d rssi %d\n", millis(),
+                                                info.wifi_sta_disconnected.reason, info.wifi_sta_disconnected.rssi); break;
+    default: break;
+  }
+}
 
+// Join the saved network. onWait runs every ~40 ms while it tries, so the
+// boot screen can animate instead of freezing.
+//
+// The scan method is the fix for "not connected" at boot (2026-11-03): with
+// the default fast scan the C3 fired hundreds of join attempts 30 ms apart
+// (reason 1 / 203), hit a 202 auth fail that stops the retries, and fell back
+// to the hotspot on 4 of 5 boots. A full all-channel scan first joins on the
+// first try (5/5, IP at ~7 s); putting the fast scan back brought the storm
+// straight back. vizbot's wifi_provisioning.h uses the same settings.
+inline bool tryStation(void (*onWait)(unsigned long ms)) {
+  if (!loadCreds()) return false;
+  WiFi.onEvent(wifiEventLog);
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   WiFi.begin(g_ssid.c_str(), g_pass.c_str());
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < STA_CONNECT_TIMEOUT_MS) {
-    delay(150);
+    if (onWait) onWait(millis() - start);
+    delay(40);
   }
   return WiFi.status() == WL_CONNECTED;
 }
@@ -372,9 +308,9 @@ inline void promoteToStation() {
 }
 
 // Returns the address the user can reach the bot at.
-inline String webBegin() {
+inline String webBegin(void (*onWait)(unsigned long ms) = nullptr) {
   String where;
-  if (tryStation()) {
+  if (tryStation(onWait)) {
     g_apMode = false;
     if (MDNS.begin(MDNS_HOSTNAME)) MDNS.addService("http", "tcp", 80);
     where = WiFi.localIP().toString();
@@ -403,6 +339,7 @@ inline void webLoop() {
 }
 
 inline bool webIsAP()     { return g_apMode; }
+inline const String &webSsid() { return g_ssid; }
 inline String webIP()     { return g_apMode ? g_apIP.toString() : WiFi.localIP().toString(); }
 
 #endif // WEB_UI_H
