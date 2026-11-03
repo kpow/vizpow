@@ -373,6 +373,8 @@ String ctlStateJson() {
   s += "\"contrast\":" + String(g_contrast) + ",";
   s += "\"leds\":\"" + String(leds.modeName()) + "\",";
   s += "\"ledBri\":" + String(leds.getBrightness()) + ",";
+  s += "\"ledPat\":" + String(leds.ambientPattern()) + ",";
+  s += "\"ledPal\":" + String(leds.ambientPalette()) + ",";
   s += "\"motion\":\"" + String(motion.levelName()) + "\",";
   s += "\"move\":\"" + String(motion.moveName()) + "\",";
   s += "\"angle\":" + String(motion.angle(), 1) + ",";

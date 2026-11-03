@@ -16,8 +16,13 @@
 // onboard NeoPixel on GPIO8 stays dark; the strip replaces it.
 // The body is translucent, so these are a primary feature, not a status LED.
 // Modes (web-switchable, saved in NVS):
-//   LEDS_MOOD    — colour + motion follow the face's expression; blinks dim it
-//   LEDS_AMBIENT — independent light show, cycles patterns on its own
+//   LEDS_MOOD    — colour + motion follow the face's expression; blinks dim it.
+//                  vizMini rarely changes face on his own, so every
+//                  LED_MOOD_CYCLE_MS the mood swaps to a companion motion and
+//                  its hue drifts, keeping the mood's colours but never still
+//   LEDS_AMBIENT — independent light show: 8 patterns x 8 palettes, the pattern
+//                  changing every LED_PATTERN_MS and the palette every
+//                  LED_PALETTE_MS on their own clocks (palettes cross-fade)
 //   LEDS_OFF
 // A "spark" is a short rainbow burst laid over either mode.
 //
@@ -88,6 +93,7 @@ public:
     fill_solid(strip, LED_STRIP_COUNT, CRGB::Black);
     FastLED.show();
     ambientStart = millis();
+    pal = palTarget = paletteN(0);
   }
 
   void setMode(uint8_t m) { if (m < LEDS_NUM_MODES) { mode = m; save(); } }
@@ -99,6 +105,8 @@ public:
   uint8_t getMode() const { return mode; }
   uint8_t getBrightness() const { return bri; }
   const char *modeName() const { return ledModeNames[mode]; }
+  uint8_t ambientPattern() const { return ambPat; }
+  uint8_t ambientPalette() const { return palIdx; }
 
   // Call every loop pass; renders at most every LED_FRAME_MS
   void update() {
@@ -137,9 +145,35 @@ private:
   // 0..255 phase that advances at `speed` (1..10) — about 0.2 to 2 cycles a second
   static uint8_t phase(unsigned long t, uint8_t speed) { return (uint8_t)((t * (uint32_t)speed * 13UL) >> 8); }
 
+  // The mood's own motion, then companions that suit its energy, swapped every LED_MOOD_CYCLE_MS
   void renderMood(CRGB *out, unsigned long now) {
-    const LedMood &m = ledMoods[moodExpr];
+    LedMood m = ledMoods[moodExpr];
     unsigned long t = now - moodStart;
+    uint32_t step = t / LED_MOOD_CYCLE_MS;
+    if (step % 3) {
+      static const uint8_t calm[3] = { LM_WAVE, LM_CHASE, LM_BREATHE };
+      static const uint8_t lively[4] = { LM_SPARKLE, LM_CHASE, LM_WAVE, LM_DUAL };
+      bool hot = m.speed >= 5 || m.motion == LM_STROBE || m.motion == LM_GLITCH || m.motion == LM_RAINBOW;
+      uint8_t pick = hot ? lively[(step + moodExpr) % 4] : calm[(step + moodExpr) % 3];
+      if (pick == m.motion) pick = hot ? LM_WAVE : LM_CHASE;
+      m.motion = pick;
+      if (step & 1) { uint8_t h = m.hue; m.hue = m.hue2; m.hue2 = h; }   // the accent leads
+      if (m.hue2 == m.hue) m.hue2 = m.hue + 24;
+      if (m.speed < 3) m.speed = 3;
+    }
+    // A slow +-20 hue drift so even a steady mood moves through its colour family
+    int16_t drift = ((int16_t)sin8((uint8_t)(now / 120)) - 128) * 20 / 128;
+    m.hue += drift; m.hue2 += drift;
+    renderMotion(m, out, t);
+
+    // Blinks dim the glow, so the body "blinks" with the eyes
+    if (blinkAmt > 0.02f) {
+      uint8_t keep = 255 - (uint8_t)(blinkAmt * 170.0f);
+      for (uint8_t i = 0; i < LED_STRIP_COUNT; i++) out[i].nscale8_video(keep);
+    }
+  }
+
+  void renderMotion(const LedMood &m, CRGB *out, unsigned long t) {
     uint8_t ph = phase(t, m.speed);
     const uint8_t N = LED_STRIP_COUNT;
 
@@ -210,45 +244,100 @@ private:
         }
         break;
     }
+  }
 
-    // Blinks dim the glow, so the body "blinks" with the eyes
-    if (blinkAmt > 0.02f) {
-      uint8_t keep = 255 - (uint8_t)(blinkAmt * 170.0f);
-      for (uint8_t i = 0; i < N; i++) out[i].nscale8_video(keep);
+  // Ambient show: pattern and palette change on their own clocks, so the
+  // combinations keep turning over; palettes blend into each other
+  CRGBPalette16 pal, palTarget;
+  uint8_t ambPat = 0, palIdx = 0;
+  unsigned long nextPat = 0, nextPal = 0;
+
+  static CRGBPalette16 paletteN(uint8_t i) {
+    switch (i) {
+      case 0:  return RainbowColors_p;
+      case 1:  return LavaColors_p;
+      case 2:  return OceanColors_p;
+      case 3:  return ForestColors_p;
+      case 4:  return PartyColors_p;
+      case 5:  return HeatColors_p;
+      case 6:  return CRGBPalette16(CRGB(255, 40, 0), CRGB(255, 0, 90), CRGB(120, 0, 255), CRGB(255, 120, 0));   // sunset
+      default: return CRGBPalette16(CRGB(0, 255, 220), CRGB(255, 0, 200), CRGB(0, 80, 255), CRGB(180, 0, 255));  // neon
     }
   }
 
-  // Ambient show: a few patterns, each held LED_AMBIENT_HOLD_MS
   void renderAmbient(CRGB *out, unsigned long now) {
     const uint8_t N = LED_STRIP_COUNT;
-    unsigned long t = now - ambientStart;
-    uint8_t which = (t / LED_AMBIENT_HOLD_MS) % 4;
-    uint8_t ph = phase(t, 2);
+    if ((long)(now - nextPat) >= 0) {
+      uint8_t p = random8(LED_AMBIENT_PATTERNS);
+      ambPat = p == ambPat ? (p + 1) % LED_AMBIENT_PATTERNS : p;
+      nextPat = now + LED_PATTERN_MS + random16(LED_PATTERN_MS / 3);
+    }
+    if ((long)(now - nextPal) >= 0) {
+      uint8_t q = random8(LED_AMBIENT_PALETTES);
+      palIdx = q == palIdx ? (q + 1) % LED_AMBIENT_PALETTES : q;
+      palTarget = paletteN(palIdx);
+      nextPal = now + LED_PALETTE_MS + random16(LED_PALETTE_MS / 3);
+    }
+    nblendPaletteTowardPalette(pal, palTarget, 24);
 
-    switch (which) {
-      case 0:   // rainbow drift
-        for (uint8_t i = 0; i < N; i++) out[i] = CHSV(ph + i * 12, 240, 220);
+    unsigned long t = now - ambientStart;
+    uint8_t ph = phase(t, 3);
+    switch (ambPat) {
+      case 0:   // drift: the palette slides along the strip
+        for (uint8_t i = 0; i < N; i++) out[i] = ColorFromPalette(pal, ph * 2 + i * 22, 230);
         break;
-      case 1: { // lava: two slow sine blobs of warm colour
+      case 1: { // comet: a bright head with a palette tail
+        uint16_t pos = ((uint16_t)(ph * 2) * N) >> 8;
         for (uint8_t i = 0; i < N; i++) {
-          uint8_t a = sin8(ph + i * 40), b = sin8(ph * 2 - i * 25);
-          out[i] = CHSV(250 + scale8(a, 40), 255, 60 + scale8(qadd8(a, b) / 2 + 64, 195));
+          uint8_t d = (pos - i + N) % N;
+          out[i] = ColorFromPalette(pal, ph + d * 18, d == 0 ? 255 : d == 1 ? 140 : d == 2 ? 60 : 12);
         }
         break;
       }
-      case 2: { // ocean: blue/teal swell
-        for (uint8_t i = 0; i < N; i++) {
-          uint8_t s = sin8(ph * 3 + i * 32);
-          out[i] = CHSV(140 + scale8(s, 30), 230, 60 + scale8(s, 180));
-        }
-        break;
-      }
-      default: { // twinkle stars over a dim violet sky
+      case 2: { // twinkle: palette stars over a dim palette sky
         static CRGB stars[LED_STRIP_COUNT];
         for (uint8_t i = 0; i < N; i++) {
-          stars[i].fadeToBlackBy(12);
-          if (random8() < 4) stars[i] = CHSV(random8(), 120, 255);
-          out[i] = CRGB(CHSV(200, 200, 30)) + stars[i];
+          stars[i].fadeToBlackBy(18);
+          if (random8() < 10) stars[i] = ColorFromPalette(pal, random8(), 255);
+          out[i] = ColorFromPalette(pal, ph + i * 8, 28) + stars[i];
+        }
+        break;
+      }
+      case 3: { // swell: the whole body breathes through the palette
+        uint8_t v = 50 + scale8(sin8(ph * 3), 205);
+        fill_solid(out, N, ColorFromPalette(pal, ph, v));
+        break;
+      }
+      case 4: { // bounce: a ping-pong dot with a short trail
+        uint8_t tri = triwave8(ph * 3);
+        uint8_t pos = scale8(tri, N - 1);
+        for (uint8_t i = 0; i < N; i++) {
+          uint8_t d = abs((int)i - (int)pos);
+          out[i] = ColorFromPalette(pal, ph * 2 + i * 10, d == 0 ? 255 : d == 1 ? 90 : 10);
+        }
+        break;
+      }
+      case 5: { // mirror: waves ripple out from the middle
+        for (uint8_t i = 0; i < N; i++) {
+          uint8_t d = i < N / 2 ? N / 2 - 1 - i : i - N / 2;
+          uint8_t sw = sin8(ph * 4 - d * 48);
+          out[i] = ColorFromPalette(pal, ph + d * 30, 40 + scale8(sw, 215));
+        }
+        break;
+      }
+      case 6: { // lava: two slow blobs
+        for (uint8_t i = 0; i < N; i++) {
+          uint8_t a = sin8(ph * 2 + i * 40), b = sin8(ph * 3 - i * 25);
+          out[i] = ColorFromPalette(pal, qadd8(a / 2, b / 2), 60 + scale8(qadd8(a / 2, b / 2), 195));
+        }
+        break;
+      }
+      default: { // confetti: fast palette sparks
+        static CRGB c[LED_STRIP_COUNT];
+        for (uint8_t i = 0; i < N; i++) {
+          c[i].fadeToBlackBy(40);
+          if (random8() < 40) c[i] = ColorFromPalette(pal, random8(), 255);
+          out[i] = c[i];
         }
         break;
       }
