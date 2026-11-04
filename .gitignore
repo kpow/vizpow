@@ -10,3 +10,11 @@ builds/
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Local tooling: Claude Code settings and scratch, project notes for it
+.claude/
+CLAUDE.md
+
+# Leftovers from the eyelab branch (its node_modules and parity builds)
+eyelab/node_modules/
+eyelab/parity/

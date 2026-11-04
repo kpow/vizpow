@@ -72,3 +72,7 @@ Strip power is capped in firmware at `LED_MAX_MA` (450 mA) so USB never browns o
    (measure ms) → F2 spikes/tentacles/droplets + party patterns → F3 new
    wide-screen patterns + scheduler + stacking + show → F4 enter/exit morph,
    peek eyes, auto visits, LED pairing.
+7. **Info screens = Ink Time** (Kevin's pick from the concept pitch, built
+   2026-11-03, merged in PR #124): ink_time.h clock, weather, transitions
+   and boot intro. **On hold:** LED pairing for the ink screens until Kevin
+   sees vizMini in the printed translucent case.
