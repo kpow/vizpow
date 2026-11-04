@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.7.11.4"
+#define FIRMWARE_VERSION "0.7.11.6"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
@@ -136,6 +136,11 @@
 #define WEATHER_UNIT_F  1           // 1 = Fahrenheit, 0 = Celsius
 #define WEATHER_REFRESH_MS  600000  // re-fetch at most every 10 min
 #define INK_WINDY_MPH       15      // Ink Time shows "wind" at or above this (no WMO code for it)
+// Clock + weather are pulled toward the middle so the bezel can't hide the edges
+#define INK_CLOCK_INSET     0.76f   // clock scale toward the middle
+#define INK_CLOCK_CY        28.0f   // ...about this line (the date line sits below)
+#define INK_WEATHER_INSET   0.80f   // weather scale toward the middle
+#define INK_WEATHER_CY      26.0f   // ...about this line (two text lines below)
 #define INK_ENTER_MS        1400    // face -> ink: eyes shut, the black contracts into the drop, it splits out
 #define INK_EXIT_MS         1400    // ink -> face: gather into the drop, swell over the screen, eyes open
 #define INK_FLIP_MS         1200    // clock <-> weather through the drop
