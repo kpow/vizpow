@@ -24,6 +24,7 @@ extern void   ctlSetFerro(bool on);
 extern void   ctlFerroPlay(const String &pat, const String &tent);
 extern void   ctlFerroSetting(const String &v);
 extern void   ctlFerroVisit();
+extern void   ctlPartyStack(const String &v);
 extern String ctlStateJson();
 
 // ============================================================================
@@ -157,21 +158,37 @@ inline void handleMotion() {
 }
 // /bot/ferro?v=1|0 (now / back to face)  &  ?visit=1 (a 60 s visit)  &  ?set=off|on|auto
 //            &  ?pat=crown5 (see ferroPatternNames)  &  ?tent=reach|feeler|flick|arm
-inline void handleFerro() {
+// Party mode (the ferrofluid drop; named like vizBot's /bot/party):
+// ?v=1|0 now / back to the face, ?visit=1 a 60 s visit, ?set=off|auto|on,
+// ?seq=<pattern> (vizMini or vizBot names), ?hero=reach|feeler|flick|arm,
+// ?stack=off|some|wild. /bot/ferro is the old name, kept as an alias.
+inline void handleParty() {
   if (server.hasArg("set")) ctlFerroSetting(server.arg("set"));
   if (server.hasArg("visit")) ctlFerroVisit();
   if (server.hasArg("v")) ctlSetFerro(argU8("v", 1) != 0);
-  if (server.hasArg("pat") || server.hasArg("tent")) ctlFerroPlay(server.arg("pat"), server.arg("tent"));
+  if (server.hasArg("stack")) ctlPartyStack(server.arg("stack"));
+  String seq = server.hasArg("seq") ? server.arg("seq") : server.arg("pat");
+  String hero = server.hasArg("hero") ? server.arg("hero") : server.arg("tent");
+  if (seq.length() || hero.length()) ctlFerroPlay(seq, hero);
   server.send(200, "text/plain", "ok");
 }
+// /bot/leds?mode=mood|ambient|solid|off &bri=0-255 &pat=auto|<pattern>
+//   &pal=auto|<palette> &speed=1-10 &pace=chill|normal|fast &c1/c2/c3=RRGGBB
 inline void handleLeds() {
   int mode = -1, bri = -1;
   if (server.hasArg("mode")) {
     String m = server.arg("mode");
-    mode = m == "mood" ? 0 : m == "ambient" ? 1 : m == "off" ? 2 : m.toInt();
+    for (uint8_t i = 0; i < LEDS_NUM_MODES; i++) if (m == ledModeNames[i]) mode = i;
+    if (mode < 0 && m.length() == 1 && isDigit(m[0])) mode = m.toInt();
   }
   if (server.hasArg("bri")) bri = constrain(server.arg("bri").toInt(), 0, 255);
   ctlSetLeds(mode, bri);
+  if (server.hasArg("pat")) leds.setPattern(server.arg("pat"));
+  if (server.hasArg("pal")) leds.setPalette(server.arg("pal"));
+  if (server.hasArg("speed")) leds.setSpeed(server.arg("speed").toInt());
+  if (server.hasArg("pace")) leds.setPace(server.arg("pace"));
+  static const char *const ck[3] = { "c1", "c2", "c3" };
+  for (int i = 0; i < 3; i++) if (server.hasArg(ck[i])) leds.setColor(i, server.arg(ck[i]));
   server.send(200, "text/plain", "ok");
 }
 inline void handleState()      { server.send(200, "application/json", ctlStateJson()); }
@@ -222,7 +239,8 @@ inline void registerRoutes() {
   server.on("/bot/spark", handleSpark);
   server.on("/bot/leds", handleLeds);
   server.on("/bot/motion", handleMotion);
-  server.on("/bot/ferro", handleFerro);
+  server.on("/bot/party", handleParty);
+  server.on("/bot/ferro", handleParty);   // old name
   server.on("/contrast", handleContrast);
   server.on("/state", handleState);
   server.on("/debug/screen", handleScreen);

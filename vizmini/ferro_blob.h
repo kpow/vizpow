@@ -7,7 +7,8 @@
 #include "bot_eye_model.h"   // eyeRnd(), eyeRnd01()
 
 // ============================================================================
-// Ferro mode — vizMini as a black ferrofluid drop on a white screen
+// Party mode (the ferro drop) — vizMini as a black ferrofluid drop on a white screen
+// (named "party mode" like the other vizBots; the code calls it ferro)
 // ============================================================================
 // Motion: docs/vizmini-ferro-motion-spec.md. Look:
 // docs/vizmini-ferro-art-direction.md (its §11 wins where the two differ).
@@ -81,6 +82,7 @@ enum FerroPattern : uint8_t {
   FP_NONE = 0, FP_CROWN3, FP_CROWN5, FP_STAR6, FP_FIELD12, FP_DIPOLE, FP_PORCUPINE,
   FP_SPLIT, FP_WAVE, FP_BREATHE, FP_BLOOM, FP_CAROUSEL, FP_NUM
 };
+static const char *const ferroStackNames[3] = { "off", "some", "wild" };   // pattern stacking
 static const char *const ferroPatternNames[FP_NUM] = {
   "none", "crown3", "crown5", "star6", "field12", "dipole", "porcupine",
   "split", "wave", "breathe", "bloom", "carousel"
@@ -124,6 +126,7 @@ public:
   bool glintOn = true;              // art direction bench A/B (§2.1)
   uint32_t sumUs = 0, cnt = 0, maxUs = 0;   // render cost, read and reset by /state
   uint8_t forcedPattern = FP_NONE;  // web: run this next
+  uint8_t stack = 1;                // stacking: 0 off, 1 some (half the time), 2 wild (always, busier)
 
   void begin() {
     for (int i = 0; i < 256; i++) ferroSin[i] = (int16_t)lroundf(sinf(i * TWO_PI / 256.0f) * 32767.0f);
@@ -188,7 +191,9 @@ public:
   // Web: start a pattern now (replaces the lead layer), or a tentacle move
   void startPattern(uint8_t p, unsigned long now) {
     if (p == FP_NONE || p >= FP_NUM) return;
-    runPattern(0, p, now, big(), (unsigned long)random(5000, 9001));
+    unsigned long ms = (unsigned long)random(5000, 9001);
+    runPattern(0, p, now, big(), ms);
+    nextPattern = now + ms;           // the scheduler waits until it has played out
   }
   void tentMove(uint8_t kind, unsigned long now) { spawnTentMove(kind, now); }
 
@@ -354,7 +359,8 @@ private:
       uint8_t p = forcedPattern != FP_NONE ? forcedPattern : pickPattern();
       forcedPattern = FP_NONE;
       runPattern(0, p, now, big(), (unsigned long)random(4000, 8001));
-      if (eyeRnd01() < 0.5f) {
+      static const float stackOdds[3] = { 0.0f, 0.5f, 1.0f };
+      if (eyeRnd01() < stackOdds[stack]) {
         uint8_t q = pickPattern();
         if (q != p) runPattern(1, q, now + 600, FERRO_SPIKE_M * 0.8f, (unsigned long)random(3000, 6001));
       }
@@ -366,7 +372,7 @@ private:
     if ((long)(now - nextTent) >= 0) {
       int k = random(10);
       spawnTentMove(k < 4 ? FT_REACH : k < 7 ? FT_FEELER : k < 9 ? FT_FLICK : FT_ARM, now);
-      nextTent = now + random(1500, 4001);
+      nextTent = now + (stack == 2 ? random(800, 2201) : random(1500, 4001));
     }
   }
 

@@ -308,12 +308,27 @@ void ctlFerroSetting(const String &v) {
   for (uint8_t i = 0; i < 3; i++) if (v == ferroSetNames[i]) setFerroSetting(i);
 }
 void ctlFerroVisit() { g_lastInputMs = millis(); enterFerro(FERRO_VISIT_MS); }
+// Party patterns and tentacle moves, by vizMini name or the nearest vizBot
+// name (breath, crown, calm, feelers, long, big)
 void ctlFerroPlay(const String &pat, const String &tent) {
   g_lastInputMs = millis();
   if (g_mode != MODE_FERRO) enterFerro();
-  for (uint8_t i = 1; i < FP_NUM; i++) if (pat == ferroPatternNames[i]) ferro.startPattern(i, millis());
+  String p = pat, t = tent;
+  if (p == "breath") p = "breathe"; else if (p == "crown") p = "crown5"; else if (p == "calm") p = "crown3";
+  else if (p == "feelers") { p = ""; t = "feeler"; } else if (p == "long") { p = ""; t = "reach"; }
+  if (t == "big") t = "reach";
+  for (uint8_t i = 1; i < FP_NUM; i++) if (p == ferroPatternNames[i]) ferro.startPattern(i, millis());
   static const char *const kinds[4] = { "reach", "feeler", "flick", "arm" };
-  for (uint8_t i = 0; i < 4; i++) if (tent == kinds[i]) ferro.tentMove(i, millis());
+  for (uint8_t i = 0; i < 4; i++) if (t == kinds[i]) ferro.tentMove(i, millis());
+}
+void ctlPartyStack(const String &v) {
+  for (uint8_t i = 0; i < 3; i++) if (v == ferroStackNames[i]) {
+    ferro.stack = i;
+    Preferences p;
+    p.begin(NVS_NAMESPACE, false);
+    p.putUChar("pStack", i);
+    p.end();
+  }
 }
 void ctlSetExpression(uint8_t v) { g_lastInputMs = millis(); if (g_mode == MODE_INFO) exitInfo(); applyExpression(v); }
 void ctlSetInfo(bool on) {
@@ -359,13 +374,14 @@ String ctlStateJson() {
   s += "\"rssi\":" + String((WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0) + ",";
   s += "\"ap\":" + String(webIsAP() ? "true" : "false") + ",";
   s += "\"expr\":" + String(g_expr) + ",";
-  s += "\"mode\":\"" + String(g_mode == MODE_INFO ? "info" : g_mode == MODE_FERRO ? "ferro" : "face") + "\",";
+  s += "\"mode\":\"" + String(g_mode == MODE_INFO ? "info" : g_mode == MODE_FERRO ? "party" : "face") + "\",";
   s += "\"info\":\"" + String(g_infoView == VIEW_WEATHER ? "weather" : "time") + "\",";
-  s += "\"ferroUs\":" + String(ferro.cnt ? ferro.sumUs / ferro.cnt : 0) + ",";
-  s += "\"ferroMaxUs\":" + String(ferro.maxUs) + ",";
-  s += "\"ferroPat\":\"" + String(ferro.patternName()) + "\",";
+  s += "\"partyUs\":" + String(ferro.cnt ? ferro.sumUs / ferro.cnt : 0) + ",";
+  s += "\"partyMaxUs\":" + String(ferro.maxUs) + ",";
+  s += "\"partyPat\":\"" + String(ferro.patternName()) + "\",";
+  s += "\"partyStack\":\"" + String(ferroStackNames[ferro.stack]) + "\",";
   s += "\"tents\":" + String(ferro.liveTents()) + ",";
-  s += "\"ferroSet\":\"" + String(ferroSetNames[g_ferroSet]) + "\",";
+  s += "\"partySet\":\"" + String(ferroSetNames[g_ferroSet]) + "\",";
   s += "\"nextVisitS\":" + String(g_ferroSet == FERRO_SET_AUTO && g_mode == MODE_FACE ? (long)(g_nextVisitAt - millis()) / 1000 : -1) + ",";
   s += "\"visitLeftS\":" + String(g_mode == MODE_FERRO && g_visitEndAt ? (long)(g_visitEndAt - millis()) / 1000 : -1) + ",";
   s += "\"panel\":" + String(g_panelContrast) + ",";
@@ -374,8 +390,13 @@ String ctlStateJson() {
   s += "\"contrast\":" + String(g_contrast) + ",";
   s += "\"leds\":\"" + String(leds.modeName()) + "\",";
   s += "\"ledBri\":" + String(leds.getBrightness()) + ",";
-  s += "\"ledPat\":" + String(leds.ambientPattern()) + ",";
-  s += "\"ledPal\":" + String(leds.ambientPalette()) + ",";
+  s += "\"ledPat\":\"" + String(leds.patternName()) + "\",";
+  s += "\"ledPal\":\"" + String(leds.paletteName()) + "\",";
+  s += "\"ledPatSel\":\"" + String(leds.patternSel()) + "\",";
+  s += "\"ledPalSel\":\"" + String(leds.paletteSel()) + "\",";
+  s += "\"ledSpeed\":" + String(leds.getSpeed()) + ",";
+  s += "\"ledPace\":\"" + String(leds.paceName()) + "\",";
+  for (int i = 0; i < 3; i++) s += "\"ledC" + String(i + 1) + "\":\"" + leds.colorHex(i) + "\",";
   s += "\"motion\":\"" + String(motion.levelName()) + "\",";
   s += "\"move\":\"" + String(motion.moveName()) + "\",";
   s += "\"angle\":" + String(motion.angle(), 1) + ",";
@@ -450,6 +471,7 @@ void setup() {
     Preferences p;
     p.begin(NVS_NAMESPACE, true);
     g_ferroSet = p.getUChar("ferro", FERRO_SET_AUTO);
+    ferro.stack = min((int)p.getUChar("pStack", 1), 2);
     p.end();
     if (g_ferroSet > FERRO_SET_AUTO) g_ferroSet = FERRO_SET_AUTO;
   }

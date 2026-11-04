@@ -3,7 +3,7 @@
 // OTA page (vizbot/ota_update.h): yellow header bar, cream cards with hard
 // black shadows, square buttons, yellow = active, collapsible sections.
 // Self-contained (no external fonts/libs). Polls /state every >= 2 s (that read
-// resets the ferro timing counters) and /debug/screen once a second for the
+// resets the party timing counters) and /debug/screen once a second for the
 // live OLED preview; both pause while the tab is hidden.
 #pragma once
 #include <Arduino.h>
@@ -61,6 +61,13 @@ canvas{display:block;width:100%;aspect-ratio:2/1;image-rendering:crisp-edges;ima
 .cy{background:#FFD23F}.cb{background:#74B9FF}.cp{background:#B8A9FA}.co{background:#FFA552}.cg{background:#88D498}
 .ck{background:#000;color:#fff}.ck b{color:#fffa}
 .fx{margin-top:12px;padding:10px 12px;border:2px solid #000;background:#fff;font-size:14px;font-weight:700}
+.sw{text-transform:capitalize}.sw i{display:block;height:14px;border:2px solid #000;margin:-2px 0 6px}
+.gq{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}.gq button{height:34px;padding:0}
+.gq button.on{box-shadow:inset 0 0 0 3px #000,inset 0 0 0 5px #fff,3px 3px 0 0 #000}
+input[type=color]{-webkit-appearance:none;appearance:none;border:2px solid #000;box-shadow:3px 3px 0 0 #000;background:#fff;padding:2px;height:40px;width:100%;cursor:pointer;border-radius:0}
+input[type=color]::-webkit-color-swatch-wrapper{padding:0}input[type=color]::-webkit-color-swatch{border:0}input[type=color]::-moz-color-swatch{border:0}
+.big{width:74px!important;height:auto!important;flex:none}
+.cd{display:inline-block;width:9px;height:9px;border:1px solid #000;margin-left:5px}
 .kv{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #eee}
 .kv span:first-child{color:#666;font-weight:600}.kv span:last-child{font-weight:700}
 .btn{display:inline-block;padding:7px 12px;background:#FFD23F;border:2px solid #000;box-shadow:2px 2px 0 0 #000;font-weight:700;font-size:11px;text-transform:uppercase;color:#000;text-decoration:none}
@@ -87,17 +94,25 @@ canvas{display:block;width:100%;aspect-ratio:2/1;image-rendering:crisp-edges;ima
 <div class=seg id=gL></div>
 <div class=srow><span>Brightness</span><span id=lbv></span></div>
 <input type=range id=lb min=0 max=255 value=160>
+<div id=la><span class=lbl>Pattern</span><div class=gx id=lp></div>
+<span class=lbl>Palette</span><div class=gx id=lq></div>
+<div id=lc><span class=lbl>Custom palette colours</span><div class=row><input type=color id=k1><input type=color id=k2><input type=color id=k3></div></div>
+<div class=srow><span>Speed</span><span id=lsv></span></div>
+<input type=range id=ls min=1 max=10 value=3>
+<span class=lbl>Auto change pace</span><div class=seg id=gP></div><div class=hint id=lph></div></div>
+<div id=lo><span class=lbl>Colour</span><div class=row style="align-items:stretch"><input type=color id=k0 class=big><div class="gq f1" id=lw></div></div></div>
 <button class=go onclick="g('/bot/spark')">&#10024; Spark</button>
 <div class=hint id=lh></div></div></div>
 
 <div class=card><h2 class=shdr onclick="tg('sM')">Motion <span class=chv>&#9662;</span></h2><div class=sbody id=sM>
 <div class=seg id=gM></div><div class=hint id=mh></div></div></div>
 
-<div class=card><h2 class=shdr onclick="tg('sF')">Ferro mode <span class=chv>&#9662;</span></h2><div class=sbody id=sF>
+<div class=card><h2 class=shdr onclick="tg('sF')">Party mode <span class=chv>&#9662;</span></h2><div class=sbody id=sF>
 <div class=seg id=gF></div>
 <div class=fx id=fx>&hellip;</div>
-<div class=g3 style="margin-top:12px"><button onclick="g('/bot/ferro?v=1')">Ferro now</button><button onclick="g('/bot/ferro?visit=1')">Visit 60s</button><button onclick="g('/bot/ferro?v=0')">Back to face</button></div>
-<div class=hint>Auto: a 60 s visit every 8&ndash;15 min. Always: he stays a drop.</div></div></div>
+<div class=g3 style="margin-top:12px"><button onclick="g('/bot/party?v=1')">Party now</button><button onclick="g('/bot/party?visit=1')">Visit 60s</button><button onclick="g('/bot/party?v=0')">Back to face</button></div>
+<span class=lbl>Pattern stacking</span><div class=seg id=gK></div>
+<div class=hint>Auto visits: 60 s of party every 8&ndash;15 min. Always: he stays a party drop. Stacking: how many patterns layer at once.</div></div></div>
 
 <div class=card><h2 class=shdr onclick="tg('sS')">Screen <span class=chv>&#9662;</span></h2><div class=sbody id=sS>
 <div class=seg id=gS></div>
@@ -107,11 +122,11 @@ canvas{display:block;width:100%;aspect-ratio:2/1;image-rendering:crisp-edges;ima
 <input type=range id=co min=10 max=255 value=180></div></div>
 
 <div class=card><h2 class="shdr shut" onclick="tg('sP')">Playground <span class=chv>&#9662;</span></h2><div class="sbody shut" id=sP>
-<span class=lbl style="margin-top:0">Ferro patterns</span><div class=gx id=fp></div>
+<span class=lbl style="margin-top:0">Party patterns</span><div class=gx id=fp></div>
 <span class=lbl>Tentacles</span><div class=seg id=ft></div>
 <span class=lbl>Motion test moves</span><div class=gx id=mv></div>
 <span class=lbl>Timing</span><div id=pf></div>
-<div class=hint>Ferro buttons switch him into ferro mode first.</div></div></div>
+<div class=hint>Party buttons switch him into party mode first.</div></div></div>
 
 <div class=card><h2 class=shdr onclick="tg('sY')">System <span class=chv>&#9662;</span></h2><div class=sbody id=sY>
 <div id=sy></div>
@@ -133,20 +148,36 @@ function mm(n){n=Math.max(0,n|0);return (n/60|0)+':'+('0'+n%60).slice(-2)}
 function esc(t){return String(t).replace(/[&<>"]/g,function(c){return'&#'+c.charCodeAt(0)+';'})}
 
 mk('ex',X.map(function(n,i){return i}),function(i){set('expr',i);g('/bot/expression?v='+i)},X);
-mk('gL',['mood','ambient','off'],function(v){set('leds',v);g('/bot/leds?mode='+v)});
+function L(k,v,q){set(k,v);g('/bot/leds?'+q+'='+v)}
+mk('gL',['mood','ambient','solid','off'],function(v){L('leds',v,'mode')});
+mk('lp',['auto','drift','comet','twinkle','swell','bounce','mirror','lava','confetti'],function(v){L('ledPatSel',v,'pat')});
+var PAL={},PN=['auto'];"rainbow:ff0000,ff8000,ffff00,00ff00,0000ff,4b0082,8f00ff|lava:000000,ff0000,ff8000,ffff00|ocean:000060,0040ff,00a0a0,00ffff|forest:003000,00a000,a0ff00|party:8000ff,ff40a0,ff8000,ffe000,0060ff|heat:000000,ff0000,ffff00,ffffff|sunset:ff2800,ff005a,7800ff,ff7800|neon:00ffdc,ff00c8,0050ff,b400ff|ice:001040,0080ff,80e0ff,ffffff|candy:ff40a0,ffa0d0,80c0ff,c080ff|matrix:001000,00ff40,004010,80ff80|fire:200000,ff2000,ff8000,ffd000|aurora:00ff80,00a0ff,8000ff,00ffc0|cyber:ff00ff,00ffff,ffff00,ff0080|pastel:ffb0b0,b0ffb0,b0b0ff,ffffb0".split('|').forEach(function(x){x=x.split(':');PN.push(x[0]);PAL[x[0]]=x[1].split(',')});PN.push('custom');
+function grad(c){return'linear-gradient(90deg,#'+c.join(',#')+')'}
+mk('lq',PN,function(v){L('ledPalSel',v,'pal')});
+[].forEach.call($('lq').children,function(b){var i=document.createElement('i'),v=b.dataset.v;i.style.background=v=='auto'?'repeating-linear-gradient(45deg,#bbb 0 4px,#fff 4px 8px)':PAL[v]?grad(PAL[v]):'#fff';b.className='sw';b.prepend(i)});
+var QC=['ff0000','ff5a00','ffb000','ffe600','60ff00','00ff50','00ffd0','00a0ff','0030ff','8a00ff','ff00b0','ffc890'];
+mk('lw',QC,function(v){L('ledC1',v,'c1')},QC.map(function(){return''}));
+[].forEach.call($('lw').children,function(b){b.style.background='#'+b.dataset.v;b.title='#'+b.dataset.v});
+mk('gP',['chill','normal','fast'],function(v){L('ledPace',v,'pace')});
 mk('gM',['off','rare','often'],function(v){set('motion',v);g('/bot/motion?level='+v)});
-mk('gF',['off','auto','on'],function(v){set('ferroSet',v);g('/bot/ferro?set='+v)},['Off','Auto','Always']);
-mk('gS',['face','info','ferro'],function(v){
- g(v=='info'?'/bot/info?v=1':v=='ferro'?'/bot/ferro?v=1':S.mode=='ferro'?'/bot/ferro?v=0':'/bot/info?v=0');
- if(v!='info')set('mode',v)},['Face','Time / Wx','Ferro']);
-mk('fp',FP,function(v){g('/bot/ferro?pat='+v)});
-mk('ft',['reach','feeler','flick','arm'],function(v){g('/bot/ferro?tent='+v)});
+mk('gF',['off','auto','on'],function(v){set('partySet',v);g('/bot/party?set='+v)},['Off','Auto visits','Always']);
+mk('gK',['off','some','wild'],function(v){set('partyStack',v);g('/bot/party?stack='+v)});
+mk('gS',['face','info','party'],function(v){
+ g(v=='info'?'/bot/info?v=1':v=='party'?'/bot/party?v=1':S.mode=='party'?'/bot/party?v=0':'/bot/info?v=0');
+ if(v!='info')set('mode',v)},['Face','Time / Wx','Party']);
+mk('fp',FP,function(v){g('/bot/party?seq='+v)});
+mk('ft',['reach','feeler','flick','arm'],function(v){g('/bot/party?hero='+v)});
 mk('mv',['tilt','wobble','pendulum','drift','spin','spin2','flip'],function(v){g('/bot/motion?move='+v)});
 
-function sl(id,url){var e=$(id),t=0;
- e.oninput=function(){D[id]=1;$(id+'v').textContent=pc(e.value);if(!t)t=setTimeout(function(){t=0;fetch(url+e.value).catch(function(){})},150)};
+function sl(id,url,f){var e=$(id),t=0;
+ e.oninput=function(){D[id]=1;$(id+'v').textContent=(f||pc)(e.value);if(!t)t=setTimeout(function(){t=0;fetch(url+e.value).catch(function(){})},150)};
  e.onchange=function(){clearTimeout(t);t=0;D[id]=0;g(url+e.value)}}
-sl('lb','/bot/leds?bri=');sl('co','/contrast?v=');
+sl('lb','/bot/leds?bri=');sl('co','/contrast?v=');sl('ls','/bot/leds?speed=',String);
+function cp(id,k){var e=$(id),t=0,K='led'+k.toUpperCase(),h=function(){return e.value.slice(1)};
+ e.oninput=function(){D[id]=1;S[K]=h();if(!t)t=setTimeout(function(){t=0;fetch('/bot/leds?'+k+'='+h()).catch(function(){})},200)};
+ e.onchange=function(){clearTimeout(t);t=0;D[id]=0;L(K,h(),k)}}
+cp('k0','c1');cp('k1','c1');cp('k2','c2');cp('k3','c3');
+function hx(c){return/^[0-9a-f]{6}$/i.test(c||'')?c.toLowerCase():'000000'}
 
 function say(){var e=$('t'),v=e.value.trim();if(!v)return;g('/bot/say?text='+encodeURIComponent(v));$('sh').textContent='Said: “'+v+'”';e.value=''}
 function snow(){set('snow',!S.snow);g('/bot/snow?v='+(S.snow?1:0))}
@@ -154,31 +185,38 @@ function tg(id){var b=$(id),sh=b.classList.toggle('shut');b.previousElementSibli
  try{var o=JSON.parse(localStorage.vm||'{}');o[id]=sh;localStorage.vm=JSON.stringify(o)}catch(e){}}
 try{var o=JSON.parse(localStorage.vm||'{}');for(var k in o){var b=$(k);if(b){b.classList.toggle('shut',o[k]);b.previousElementSibling.classList.toggle('shut',o[k])}}}catch(e){}
 
-function ferroText(){var s=S,e=(Date.now()-T0)/1000|0;
- if(s.mode=='ferro')return s.visitLeftS>=0?'Visiting · back to his face in '+mm(s.visitLeftS-e):'Ferro drop · staying';
- if(s.ferroSet=='off')return'Visits off';
- if(s.ferroSet=='on')return'Always a drop';
+function partyText(){var s=S,e=(Date.now()-T0)/1000|0;
+ if(s.mode=='party')return s.visitLeftS>=0?'Partying · back to his face in '+mm(s.visitLeftS-e):'Party on · staying';
+ if(s.partySet=='off')return'Visits off';
+ if(s.partySet=='on')return'Always partying';
  return s.nextVisitS>=0?'Next visit in '+mm(s.nextVisitS-e):'Next visit waits for his face';}
-function chip(c,k,v){return'<span class="chip '+c+'"><b>'+k+'</b>'+esc(v)+'</span>'}
-function tick(){if(!T0)return;var s=S,f=ferroText(),M={face:['cy','face'],info:['cb',s.info||'time / wx'],ferro:['ck','ferro']}[s.mode]||['','?'];
+function chip(c,k,v,x){return'<span class="chip '+c+'"><b>'+k+'</b>'+esc(v)+(x||'')+'</span>'}
+function tick(){if(!T0)return;var s=S,f=partyText(),M={face:['cy','face'],info:['cb',s.info||'time / wx'],party:['ck','party']}[s.mode]||['','?'];
  $('fx').textContent=f;
  $('ch').innerHTML=chip(M[0],'showing',M[1])+(s.mode=='face'?chip('','face',X[s.expr]||s.expr):'')+
-  chip('cp','lights',s.leds)+chip('co','ferro',s.ferroSet=='on'?'always':s.mode!='ferro'&&s.nextVisitS>=0?'auto · '+mm(s.nextVisitS-((Date.now()-T0)/1000|0)):s.ferroSet)+
+  chip('cp','lights',s.leds=='ambient'?'ambient · '+s.ledPat:s.leds,s.leds=='solid'?'<i class=cd style="background:#'+hx(s.ledC1)+'"></i>':'')+
+  chip('co','party',s.partySet=='on'?'always':s.mode!='party'&&s.nextVisitS>=0?'auto · '+mm(s.nextVisitS-((Date.now()-T0)/1000|0)):s.partySet)+
   chip('cg','motion',s.motion)}
 function kv(k,v){return'<div class=kv><span>'+k+'</span><span>'+esc(v)+'</span></div>'}
 function sig(r){return!r?0:r>=-55?4:r>=-65?3:r>=-75?2:1}
 function up(){var s=S;if(!T0)return;
- hi('ex',s.expr);hi('gL',s.leds);hi('gM',s.motion);hi('gF',s.ferroSet);hi('gS',s.mode);hi('fp',s.mode=='ferro'?s.ferroPat:'');hi('mv',s.move);
+ hi('ex',s.expr);hi('gL',s.leds);hi('gM',s.motion);hi('gF',s.partySet);hi('gK',s.partyStack);hi('gS',s.mode);hi('fp',s.mode=='party'?s.partyPat:'');hi('mv',s.move);
+ hi('lp',s.ledPatSel);hi('lq',s.ledPalSel);hi('gP',s.ledPace);hi('lw',hx(s.ledC1));
  $('sn').className='tog'+(s.snow?' on':'');
- if(!D.lb)$('lb').value=s.ledBri;if(!D.co)$('co').value=s.contrast;
- $('lbv').textContent=pc($('lb').value);$('cov').textContent=pc($('co').value);
- $('lh').textContent={mood:'Colour and motion follow his face.',ambient:'His own light show · pattern '+(s.ledPat+1)+' · palette '+(s.ledPal+1),off:'Lights off. Spark still works.'}[s.leds]||'';
+ if(!D.lb)$('lb').value=s.ledBri;if(!D.co)$('co').value=s.contrast;if(!D.ls&&s.ledSpeed)$('ls').value=s.ledSpeed;
+ $('lbv').textContent=pc($('lb').value);$('cov').textContent=pc($('co').value);$('lsv').textContent=$('ls').value;
+ ['k0','k1','k2','k3'].forEach(function(id,i){if(!D[id])$(id).value='#'+hx(s['ledC'+(i||1)])});
+ $('lq').lastChild.firstChild.style.background=grad([hx(s.ledC1),hx(s.ledC2),hx(s.ledC3)]);
+ $('la').style.display=s.leds=='ambient'?'':'none';$('lo').style.display=s.leds=='solid'?'':'none';$('lc').style.display=s.ledPalSel=='custom'?'':'none';
+ var P={chill:[20,12],normal:[10,7],fast:[5,3.5]}[s.ledPace]||[10,7];
+ $('lph').textContent=s.ledPatSel!='auto'&&s.ledPalSel!='auto'?'Both locked, so nothing auto-changes.':'Auto picks a new '+(s.ledPatSel=='auto'?'pattern every ~'+P[0]+' s':'')+(s.ledPatSel=='auto'&&s.ledPalSel=='auto'?' and ':'')+(s.ledPalSel=='auto'?'palette every ~'+P[1]+' s':'')+'.';
+ $('lh').textContent={mood:'Colour and motion follow his face.',ambient:'Now: '+s.ledPat+' on '+s.ledPal+'.',solid:'One steady colour: #'+hx(s.ledC1).toUpperCase()+'.',off:'Lights off. Spark still works.'}[s.leds]||'';
  $('mh').textContent={off:'Face stays still.',rare:'A move every 2–6 min.',often:'Moves a lot.'}[s.motion]+(s.move&&s.move!='none'?' Now: '+s.move+' ('+Math.round(s.angle)+'°)':'');
  $('shh').textContent=s.mode=='info'?'Tap Time / Wx again to flip between time and weather.':'Time and weather flip every 30 s.';
  var n=sig(s.rssi);[].forEach.call($('sb').children,function(b,i){b.classList.toggle('on',i<n)});
  $('hv').textContent='v'+s.fw;
- $('pf').innerHTML=kv('Frame',s.frameMs+' ms')+kv('Face render',s.faceUs+' µs')+kv('Ferro avg / max',s.ferroUs+' / '+s.ferroMaxUs+' µs')+
-  kv('Panel send',s.sendUs+' µs')+kv('Ferro pattern',s.mode=='ferro'?s.ferroPat+' · '+s.tents+' tentacles':'—')+kv('Panel',s.panel);
+ $('pf').innerHTML=kv('Frame',s.frameMs+' ms')+kv('Face render',s.faceUs+' µs')+kv('Party avg / max',s.partyUs+' / '+s.partyMaxUs+' µs')+
+  kv('Panel send',s.sendUs+' µs')+kv('Party pattern',s.mode=='party'?s.partyPat+' · '+s.tents+' tentacles · stack '+s.partyStack:'—')+kv('Panel',s.panel);
  $('sy').innerHTML=kv('Firmware','v'+s.fw)+kv('Address',s.ip)+kv('Network',s.ap?'Setup hotspot':'WiFi')+kv('Signal',s.rssi?s.rssi+' dBm ('+['','weak','ok','good','strong'][n]+')':'—');
  tick();net()}
 function net(){var ok=fails<2&&T0;$('cd').className='dot '+(ok?'on':fails>1?'err':'');

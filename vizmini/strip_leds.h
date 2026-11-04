@@ -20,17 +20,21 @@
 //                  vizMini rarely changes face on his own, so every
 //                  LED_MOOD_CYCLE_MS the mood swaps to a companion motion and
 //                  its hue drifts, keeping the mood's colours but never still
-//   LEDS_AMBIENT — independent light show: 8 patterns x 8 palettes, the pattern
-//                  changing every LED_PATTERN_MS and the palette every
-//                  LED_PALETTE_MS on their own clocks (palettes cross-fade)
+//   LEDS_AMBIENT — independent light show: 8 patterns x 16 palettes (+ a
+//                  custom one from three picked colours). Pattern and palette
+//                  each either cycle on their own clocks (pace: chill / normal /
+//                  fast) or stay locked on one; palettes cross-fade; speed 1-10
+//   LEDS_SOLID   — one steady picked colour
 //   LEDS_OFF
+// Everything the web page sets is saved in NVS.
 // A "spark" is a short rainbow burst laid over either mode.
 //
 // Each tick renders a target frame, then the shown frame eases toward it, so
 // mood changes cross-fade instead of snapping.
 // ============================================================================
 
-enum LedMode : uint8_t { LEDS_MOOD = 0, LEDS_AMBIENT, LEDS_OFF, LEDS_NUM_MODES };
+// Off stays 2 so modes saved by older firmware keep their meaning
+enum LedMode : uint8_t { LEDS_MOOD = 0, LEDS_AMBIENT, LEDS_OFF, LEDS_SOLID, LEDS_NUM_MODES };
 
 enum LedMotion : uint8_t {
   LM_STEADY, LM_BREATHE, LM_PULSE, LM_HEART, LM_WAVE, LM_CHASE,
@@ -73,7 +77,20 @@ static const LedMood ledMoods[BOT_NUM_EXPRESSIONS] = {
   /* SASSY     */ { 214, 255, 230, LM_CHASE,   7, 236 },
 };
 
-static const char *const ledModeNames[LEDS_NUM_MODES] = { "mood", "ambient", "off" };
+static const char *const ledModeNames[LEDS_NUM_MODES] = { "mood", "ambient", "off", "solid" };
+
+#define LED_PATTERNS   8
+#define LED_PALETTES   17              // 16 built in + custom (c1..c3)
+#define LED_PAL_CUSTOM 16
+#define LED_AUTO       255             // pattern / palette selection: cycle
+static const char *const ledPatternNames[LED_PATTERNS] = {
+  "drift", "comet", "twinkle", "swell", "bounce", "mirror", "lava", "confetti"
+};
+static const char *const ledPaletteNames[LED_PALETTES] = {
+  "rainbow", "lava", "ocean", "forest", "party", "heat", "sunset", "neon",
+  "ice", "candy", "matrix", "fire", "aurora", "cyber", "pastel", "mono", "custom"
+};
+static const char *const ledPaceNames[3] = { "chill", "normal", "fast" };
 
 class StripLeds {
 public:
@@ -86,14 +103,27 @@ public:
     p.begin(NVS_NAMESPACE, true);
     mode = p.getUChar("ledMode", LEDS_MOOD);
     bri  = p.getUChar("ledBri", LED_DEFAULT_BRI);
+    patSel = p.getUChar("ledPat", LED_AUTO);
+    palSel = p.getUChar("ledPal", LED_AUTO);
+    speed  = p.getUChar("ledSpd", 3);
+    pace   = p.getUChar("ledPace", 1);
+    c[0] = CRGB(p.getULong("ledC1", 0xFF2080));
+    c[1] = CRGB(p.getULong("ledC2", 0x20C0FF));
+    c[2] = CRGB(p.getULong("ledC3", 0xFFC000));
     p.end();
     if (mode >= LEDS_NUM_MODES) mode = LEDS_MOOD;
+    if (patSel >= LED_PATTERNS) patSel = LED_AUTO;
+    if (palSel >= LED_PALETTES) palSel = LED_AUTO;
+    speed = constrain(speed, 1, 10);
+    if (pace > 2) pace = 1;
+    if (patSel != LED_AUTO) ambPat = patSel;
+    if (palSel != LED_AUTO) palIdx = palSel;
 
     FastLED.setBrightness(bri);
     fill_solid(strip, LED_STRIP_COUNT, CRGB::Black);
     FastLED.show();
     ambientStart = millis();
-    pal = palTarget = paletteN(0);
+    pal = palTarget = paletteN(palIdx);
   }
 
   void setMode(uint8_t m) { if (m < LEDS_NUM_MODES) { mode = m; save(); } }
@@ -105,8 +135,36 @@ public:
   uint8_t getMode() const { return mode; }
   uint8_t getBrightness() const { return bri; }
   const char *modeName() const { return ledModeNames[mode]; }
-  uint8_t ambientPattern() const { return ambPat; }
-  uint8_t ambientPalette() const { return palIdx; }
+  const char *patternName() const { return ledPatternNames[ambPat]; }
+  const char *paletteName() const { return ledPaletteNames[palIdx]; }
+  const char *patternSel() const { return patSel == LED_AUTO ? "auto" : ledPatternNames[patSel]; }
+  const char *paletteSel() const { return palSel == LED_AUTO ? "auto" : ledPaletteNames[palSel]; }
+  const char *paceName() const { return ledPaceNames[pace]; }
+  uint8_t getSpeed() const { return speed; }
+  String colorHex(int i) const { char b[7]; snprintf(b, sizeof(b), "%02X%02X%02X", c[i].r, c[i].g, c[i].b); return String(b); }
+
+  // Web settings: a name ("auto" or one from the tables), and save
+  void setPattern(const String &n) {
+    if (n == "auto") patSel = LED_AUTO;
+    else for (uint8_t i = 0; i < LED_PATTERNS; i++) if (n == ledPatternNames[i]) { patSel = i; ambPat = i; }
+    nextPat = millis() + patternMs();
+    save();
+  }
+  void setPalette(const String &n) {
+    if (n == "auto") palSel = LED_AUTO;
+    else for (uint8_t i = 0; i < LED_PALETTES; i++) if (n == ledPaletteNames[i]) { palSel = i; palIdx = i; palTarget = paletteN(i); }
+    nextPal = millis() + paletteMs();
+    save();
+  }
+  void setSpeed(int v) { speed = constrain(v, 1, 10); save(); }
+  void setPace(const String &n) { for (uint8_t i = 0; i < 3; i++) if (n == ledPaceNames[i]) pace = i; nextPat = nextPal = 0; save(); }
+  // i = 0..2, hex RRGGBB. c1 is the solid colour; c1..c3 build the custom palette
+  void setColor(int i, const String &hex) {
+    if (i < 0 || i > 2 || hex.length() < 6) return;
+    c[i] = CRGB((uint32_t)strtoul(hex.c_str() + (hex[0] == '#'), nullptr, 16));
+    if (palIdx == LED_PAL_CUSTOM) palTarget = paletteN(LED_PAL_CUSTOM);
+    save();
+  }
 
   // Call every loop pass; renders at most every LED_FRAME_MS
   void update() {
@@ -117,6 +175,7 @@ public:
     CRGB target[LED_STRIP_COUNT];
     if (mode == LEDS_MOOD)         renderMood(target, now);
     else if (mode == LEDS_AMBIENT) renderAmbient(target, now);
+    else if (mode == LEDS_SOLID)   fill_solid(target, LED_STRIP_COUNT, c[0]);
     else                           fill_solid(target, LED_STRIP_COUNT, CRGB::Black);
 
     if (sparking) renderSpark(target, now);
@@ -130,6 +189,8 @@ private:
   CRGB strip[LED_STRIP_COUNT];
   uint8_t mode = LEDS_MOOD, bri = LED_DEFAULT_BRI;
   uint8_t moodExpr = EXPR_NEUTRAL;
+  uint8_t patSel = LED_AUTO, palSel = LED_AUTO, speed = 3, pace = 1;
+  CRGB c[3];
   float blinkAmt = 0;
   bool sparking = false;
   unsigned long lastTick = 0, moodStart = 0, sparkStart = 0, ambientStart = 0;
@@ -139,6 +200,14 @@ private:
     p.begin(NVS_NAMESPACE, false);
     p.putUChar("ledMode", mode);
     p.putUChar("ledBri", bri);
+    p.putUChar("ledPat", patSel);
+    p.putUChar("ledPal", palSel);
+    p.putUChar("ledSpd", speed);
+    p.putUChar("ledPace", pace);
+    for (int i = 0; i < 3; i++) {
+      static const char *const k[3] = { "ledC1", "ledC2", "ledC3" };
+      p.putULong(k[i], ((uint32_t)c[i].r << 16) | ((uint32_t)c[i].g << 8) | c[i].b);
+    }
     p.end();
   }
 
@@ -252,7 +321,10 @@ private:
   uint8_t ambPat = 0, palIdx = 0;
   unsigned long nextPat = 0, nextPal = 0;
 
-  static CRGBPalette16 paletteN(uint8_t i) {
+  uint32_t patternMs() const { static const uint16_t ms[3] = { 20000, 10000, 5000 }; return ms[pace]; }
+  uint32_t paletteMs() const { static const uint16_t ms[3] = { 12000, 7000, 3500 }; return ms[pace]; }
+
+  CRGBPalette16 paletteN(uint8_t i) const {
     switch (i) {
       case 0:  return RainbowColors_p;
       case 1:  return LavaColors_p;
@@ -260,28 +332,37 @@ private:
       case 3:  return ForestColors_p;
       case 4:  return PartyColors_p;
       case 5:  return HeatColors_p;
-      case 6:  return CRGBPalette16(CRGB(255, 40, 0), CRGB(255, 0, 90), CRGB(120, 0, 255), CRGB(255, 120, 0));   // sunset
-      default: return CRGBPalette16(CRGB(0, 255, 220), CRGB(255, 0, 200), CRGB(0, 80, 255), CRGB(180, 0, 255));  // neon
+      case 6:  return CRGBPalette16(CRGB(0xFF2800), CRGB(0xFF005A), CRGB(0x7800FF), CRGB(0xFF7800));   // sunset
+      case 7:  return CRGBPalette16(CRGB(0x00FFDC), CRGB(0xFF00C8), CRGB(0x0050FF), CRGB(0xB400FF));   // neon
+      case 8:  return CRGBPalette16(CRGB(0x001040), CRGB(0x0080FF), CRGB(0x80E0FF), CRGB(0xFFFFFF));   // ice
+      case 9:  return CRGBPalette16(CRGB(0xFF40A0), CRGB(0xFFA0D0), CRGB(0x80C0FF), CRGB(0xC080FF));   // candy
+      case 10: return CRGBPalette16(CRGB(0x001000), CRGB(0x00FF40), CRGB(0x004010), CRGB(0x80FF80));   // matrix
+      case 11: return CRGBPalette16(CRGB(0x200000), CRGB(0xFF2000), CRGB(0xFF8000), CRGB(0xFFD000));   // fire
+      case 12: return CRGBPalette16(CRGB(0x00FF80), CRGB(0x00A0FF), CRGB(0x8000FF), CRGB(0x00FFC0));   // aurora
+      case 13: return CRGBPalette16(CRGB(0xFF00FF), CRGB(0x00FFFF), CRGB(0xFFFF00), CRGB(0xFF0080));   // cyber
+      case 14: return CRGBPalette16(CRGB(0xFFB0B0), CRGB(0xB0FFB0), CRGB(0xB0B0FF), CRGB(0xFFFFB0));   // pastel
+      case 15: return CRGBPalette16(CRGB(0x202020), CRGB(0xFFFFFF), CRGB(0x606060), CRGB(0xFFFFFF));   // mono
+      default: return CRGBPalette16(c[0], c[1], c[2], c[0]);                                           // custom
     }
   }
 
   void renderAmbient(CRGB *out, unsigned long now) {
     const uint8_t N = LED_STRIP_COUNT;
-    if ((long)(now - nextPat) >= 0) {
-      uint8_t p = random8(LED_AMBIENT_PATTERNS);
-      ambPat = p == ambPat ? (p + 1) % LED_AMBIENT_PATTERNS : p;
-      nextPat = now + LED_PATTERN_MS + random16(LED_PATTERN_MS / 3);
+    if (patSel == LED_AUTO && (long)(now - nextPat) >= 0) {
+      uint8_t p = random8(LED_PATTERNS);
+      ambPat = p == ambPat ? (p + 1) % LED_PATTERNS : p;
+      nextPat = now + patternMs() + random16(patternMs() / 3);
     }
-    if ((long)(now - nextPal) >= 0) {
-      uint8_t q = random8(LED_AMBIENT_PALETTES);
-      palIdx = q == palIdx ? (q + 1) % LED_AMBIENT_PALETTES : q;
+    if (palSel == LED_AUTO && (long)(now - nextPal) >= 0) {   // auto skips custom and mono
+      uint8_t q = random8(LED_PALETTES - 2);
+      palIdx = q == palIdx ? (q + 1) % (LED_PALETTES - 2) : q;
       palTarget = paletteN(palIdx);
-      nextPal = now + LED_PALETTE_MS + random16(LED_PALETTE_MS / 3);
+      nextPal = now + paletteMs() + random16(paletteMs() / 3);
     }
     nblendPaletteTowardPalette(pal, palTarget, 24);
 
     unsigned long t = now - ambientStart;
-    uint8_t ph = phase(t, 3);
+    uint8_t ph = phase(t, speed);
     switch (ambPat) {
       case 0:   // drift: the palette slides along the strip
         for (uint8_t i = 0; i < N; i++) out[i] = ColorFromPalette(pal, ph * 2 + i * 22, 230);

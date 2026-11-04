@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.7.5.2"
+#define FIRMWARE_VERSION "0.7.6.2"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
@@ -111,10 +111,6 @@
 #define LED_MAX_MA           450       // FastLED power cap so USB never browns out
 #define LED_DEFAULT_BRI      160       // 0-255, saved per bot in NVS once changed
 #define LED_FRAME_MS         20        // 50 Hz light updates
-#define LED_PATTERN_MS       9000      // ambient: a new pattern every 9-12 s
-#define LED_PALETTE_MS       6000      // ambient: a new palette every 6-8 s (own clock)
-#define LED_AMBIENT_PATTERNS 8
-#define LED_AMBIENT_PALETTES 8
 #define LED_MOOD_CYCLE_MS    10000     // mood: swap to a companion motion every 10 s
 #define LED_SPARK_MS         3000      // rainbow burst laid over any mode
 
