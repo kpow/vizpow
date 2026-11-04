@@ -112,28 +112,53 @@ void startle() {
 }
 
 // ---- Time + Weather (info) mode -------------------------------------------
-// Ink Time: the clock and the weather as ferrofluid on a white lightbox
+// Ink Time: the clock and the weather as ferrofluid on a white lightbox.
+// Entering, flipping and leaving all move through the drop (ink_time.h); while
+// his face shows over the drop it is drawn on top here.
 void renderInfo() {
-  if (g_infoView == VIEW_WEATHER) ink.renderWeather(u8g2.getBufferPtr(), millis(), weatherNow());
-  else                            ink.renderClock(u8g2.getBufferPtr(), millis());
+  unsigned long now = millis();
+  ink.render(u8g2.getBufferPtr(), now, weatherNow());
+  bool shut;
+  if (ink.faceOver(now, shut)) {
+    tweenManager.update();
+    face.update();
+    botEyes.sleeping = shut;
+    botEyes.step(now);
+    renderMiniFace();
+  }
   u8g2.sendBuffer();
+  if (ink.exitDone()) {                  // swelled back into the face
+    g_mode = MODE_FACE;
+    botEyes.sleeping = false;
+    applyExpression(g_expr);
+  }
 }
 
-// Flip Time <-> Weather and restart the auto-switch timer.
+// Flip Time <-> Weather through the drop and restart the auto-switch timer
 void toggleInfoView() {
   g_infoView = (g_infoView == VIEW_TIME) ? VIEW_WEATHER : VIEW_TIME;
   g_viewSwitchMs = millis();
+  ink.startFlip(g_infoView == VIEW_WEATHER ? InkTime::SC_WEATHER : InkTime::SC_CLOCK, millis());
 }
 
-void enterInfo() {
+void enterInfo(bool weather = false) {
   g_mode = MODE_INFO;
-  g_infoView = VIEW_TIME;                // open on the clock
+  g_infoView = weather ? VIEW_WEATHER : VIEW_TIME;   // the clock, unless asked for the weather
   g_viewSwitchMs = millis();
   g_lastInputMs = millis();
+  ink.startEnter(weather ? InkTime::SC_WEATHER : InkTime::SC_CLOCK, millis());
 }
 
+// Leave through the drop: the face takes over when it has swelled back
 void exitInfo() {
+  if (g_mode == MODE_INFO) ink.startExit(millis());
+}
+
+// Cut straight back (party mode and motion tests take the screen now)
+void exitInfoNow() {
+  if (g_mode != MODE_INFO) return;
   g_mode = MODE_FACE;
+  botEyes.sleeping = false;
   applyExpression(g_expr);
 }
 
@@ -163,8 +188,10 @@ uint8_t g_panelContrast = DEFAULT_CONTRAST;   // what the panel is set to right 
 
 // Brightness follows the morph: lerp(face, ferro, P) (art direction §6.1)
 uint8_t panelContrastTarget() {
-  if (g_mode == MODE_INFO)                              // the ink screens' white lightbox
-    return (uint8_t)constrain(g_contrast * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
+  if (g_mode == MODE_INFO) {                            // the ink screens' white lightbox
+    float inkC = constrain(g_contrast * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
+    return (uint8_t)lroundf(g_contrast + (inkC - g_contrast) * ink.brightP(millis()));
+  }
   if (g_mode != MODE_FERRO) return g_contrast;
   float ferroC = constrain(g_contrast * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
   return (uint8_t)lroundf(g_contrast + (ferroC - g_contrast) * ferro.brightP());
@@ -192,7 +219,7 @@ void scheduleVisit() {
 }
 
 void enterFerro(unsigned long stayMs = 0) {
-  if (g_mode == MODE_INFO) exitInfo();
+  if (g_mode == MODE_INFO) exitInfoNow();
   g_visitEndAt = stayMs ? millis() + stayMs : 0;
   if (g_mode == MODE_FERRO) return;
   g_mode = MODE_FERRO;
@@ -274,8 +301,8 @@ void ctlInfoSky(const String &v) {
   ink.forceSky = 0xFF;
   for (uint8_t i = 0; i < SKY_NUM; i++) if (v == names[i]) ink.forceSky = i;
   if (ink.forceSky != 0xFF) {
-    if (g_mode != MODE_INFO) enterInfo();
-    g_infoView = VIEW_WEATHER;
+    if (g_mode != MODE_INFO) enterInfo(true);
+    else if (g_infoView != VIEW_WEATHER) toggleInfoView();
     g_viewSwitchMs = millis();
   }
 }
@@ -285,7 +312,7 @@ void ctlMotion(int level, int move) {
   g_lastInputMs = millis();
   if (level >= 0) motion.setLevel((uint8_t)level);
   if (move > 0) {
-    if (g_mode == MODE_INFO) exitInfo();
+    if (g_mode == MODE_INFO) exitInfoNow();
     if (g_mode == MODE_FERRO) exitFerroNow();   // stance moves for ferro are phase F3
     motion.start((uint8_t)move, /*force=*/true);
   }

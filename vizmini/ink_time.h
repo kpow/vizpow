@@ -41,73 +41,87 @@ public:
   uint32_t lastUs = 0, maxUs = 0;   // render cost (shown in /state)
   int inkPixels = 0;                // black pixels last frame (brightness, LEDs)
 
-  // ---- clock scene --------------------------------------------------------
-  void renderClock(uint8_t *buf, unsigned long now) {
-    uint32_t t0 = micros();
-    char digs[5]; struct tm ti; bool have = clockDigits(digs, ti);
-    unsigned long ms = subSecond(ti, now);
-    if (strcmp(digs, shown) != 0) {                       // a digit changed: morph
-      strcpy(prevDigs, shown); strcpy(shown, digs); chAt = now;
-    }
-    driftFor(ti);
-    n = 0;
-    float q = (now - chAt) / 700.0f;
-    if (prevDigs[0] && q < 1) {
-      InkPrim A[INK_MAX_PRIMS], B[INK_MAX_PRIMS];
-      int na = clockPrims(A, prevDigs, ms, now), nb = clockPrims(B, shown, ms, now);
-      morphKeyed(A, na, B, nb, q);
-    } else {
-      n = clockPrims(P, shown, ms, now);
-    }
-    stepDrips(shown, now);
-    memset(buf, 0xFF, OLED_WIDTH * OLED_HEIGHT / 8);      // the lightbox
-    inkPixels = renderField(buf);
-    // Date + AM/PM under the digits, bold black
-    char line[24];
-    if (have) {
-      static const char *const D[7] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
-      static const char *const M[12] = { "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
-      snprintf(line, sizeof(line), "%s %s %d %s", D[ti.tm_wday], M[ti.tm_mon], ti.tm_mday,
-               CLOCK_24H ? "" : (ti.tm_hour < 12 ? "AM" : "PM"));
-    } else {
-      strcpy(line, "SYNCING");
-    }
-    inkStr(line, 64 + dx, 62 + dy, true);
-    cost(t0);
-  }
-
-  // ---- weather scene ------------------------------------------------------
-  // The temperature in liquid digits on the left, the drop acting out the sky
-  // on the right, the condition / rain chance / high-low in bold underneath.
   uint8_t forceSky = 0xFF;          // test switch (/bot/info?sky=rain), 0xFF = real weather
 
-  void renderWeather(uint8_t *buf, unsigned long now, const Weather &w) {
+  // ---- scenes and transitions -------------------------------------------------
+  // One move everywhere (concept A): everything gathers into the drop, then
+  // splits out into the next screen.
+  //   enter: his eyes shut, the face's black is the drop and contracts like an
+  //          iris opening (corners first), then splits into the screen
+  //   flip:  clock <-> weather through the drop
+  //   exit:  the screen gathers into the drop, it swells over everything and
+  //          his eyes open on the black (vizmini.ino draws the face on top)
+  enum : uint8_t { SC_CLOCK = 0, SC_WEATHER };
+  enum : uint8_t { TR_NONE = 0, TR_ENTER, TR_EXIT, TR_FLIP };
+
+  void startEnter(uint8_t sc, unsigned long now) { scene = sc; begin(TR_ENTER, INK_ENTER_MS, now); }
+  void startExit(unsigned long now) { if (tr != TR_EXIT) begin(TR_EXIT, INK_EXIT_MS, now); }
+  void startFlip(uint8_t to, unsigned long now) {
+    if (tr == TR_EXIT || to == scene) return;
+    from = scene; scene = to; begin(TR_FLIP, INK_FLIP_MS, now);
+  }
+  uint8_t current() const { return scene; }
+  bool exitDone() const { return exited; }
+  bool busy() const { return tr != TR_NONE; }
+
+  // How far toward the ink screen the panel brightness should be, 0..1
+  float brightP(unsigned long now) const {
+    float p = progress(now);
+    if (tr == TR_ENTER) return seg01(p, .12f, .55f);
+    if (tr == TR_EXIT) return exited ? 0 : 1 - seg01(p, .45f, .85f);
+    return 1;
+  }
+  // The face drawn over the black this frame, and whether its eyes are shut
+  bool faceOver(unsigned long now, bool &shut) const {
+    float p = progress(now);
+    if (tr == TR_ENTER && p < .12f) { shut = true; return true; }
+    if (tr == TR_EXIT && (p >= .85f || exited)) { shut = p < .9f && !exited; return true; }
+    return false;
+  }
+
+  void render(uint8_t *buf, unsigned long now, const Weather &w) {
     uint32_t t0 = micros();
-    struct tm ti; time_t tn = time(nullptr); localtime_r(&tn, &ti);
-    driftFor(ti);
-    n = 0;
-    float t = (now % 600000UL) * 0.001f;
-    uint8_t sky = forceSky < SKY_NUM ? forceSky : (w.valid ? inkSky(w) : SKY_CLOUDY);
-    flash = 0;
-    if (w.valid || forceSky < SKY_NUM) tempPrims(w.valid ? w.tempF : 72, t);
-    skyPrims(sky, w.isDay || forceSky < SKY_NUM, t, now);
-    memset(buf, 0xFF, OLED_WIDTH * OLED_HEIGHT / 8);
-    inkPixels = renderField(buf);
-    skyPost(buf, sky, w.isDay || forceSky < SKY_NUM, t, now);
-    // Text, bold black, left column
-    if (w.valid || forceSky < SKY_NUM) {
-      static const char *const name[SKY_NUM] = { "CLEAR", "CLOUDY", "RAIN", "SNOW", "STORMS", "FOG", "WINDY" };
-      char l1[17], l2[24];
-      if (forceSky < SKY_NUM || !w.valid) strcpy(l1, name[sky]);
-      else { strncpy(l1, w.condition, 16); l1[16] = 0; for (char *c = l1; *c; c++) *c = toupper(*c); }
-      snprintf(l2, sizeof(l2), "H%d L%d  %d%%", w.valid ? w.hi : 79, w.valid ? w.lo : 58, w.valid ? w.pop : 40);
-      inkStr(l1, 4 + dx, 51 + dy);
-      inkStr(l2, 4 + dx, 62 + dy);
-    } else {
-      inkStr(WiFi.status() == WL_CONNECTED ? "No weather" : "No network", 4, 51);
+    float p = progress(now);
+    if (tr != TR_NONE && p >= 1) {
+      if (tr == TR_EXIT) exited = true;
+      else tr = TR_NONE;
     }
-    if (sky == SKY_WIND) shear(buf, t);
-    if (flash) { for (int i = 0; i < OLED_WIDTH * OLED_HEIGHT / 8; i++) buf[i] ^= 0xFF; }   // lightning
+    memset(buf, 0xFF, OLED_WIDTH * OLED_HEIGHT / 8);      // the lightbox
+    n = 0;
+    float tms = (float)(now % 600000UL);
+    switch (tr) {
+      case TR_NONE:
+        buildScene(scene, now, w);
+        inkPixels = renderField(buf);
+        postScene(buf, scene, now, w);
+        break;
+      case TR_FLIP: {
+        int na = buildInto(A, from, now, w), nb = buildInto(B, scene, now, w);
+        n = 0;
+        // gather 0-.42, a beat in the drop, then a longer split
+        float g = p < .42f ? p / .42f * .5f : (p < .55f ? .5f : .5f + .5f * (p - .55f) / .45f);
+        morphGather(A, na, B, nb, g, 64, 30, tms);
+        inkPixels = renderField(buf);
+        if (p < .3f) postScene(buf, from, now, w, false);
+        if (p > .7f) postScene(buf, scene, now, w, false);
+        break;
+      }
+      case TR_ENTER:
+        if (p < .12f) { memset(buf, 0, OLED_WIDTH * OLED_HEIGHT / 8); inkPixels = 8192; break; }   // all drop
+        // 72 px just covers the corners; shrink fast first so the white opens at once
+        if (p < .55f) { float u = seg01(p, .12f, .55f); dropPrims(72 - 59 * (1 - (1 - u) * (1 - u)), tms); }
+        else { int nb = buildInto(B, scene, now, w); n = 0; morphGather(nullptr, 0, B, nb, .5f + .5f * seg01(p, .55f, 1), 64, 32, tms); }
+        inkPixels = renderField(buf);
+        if (p > .85f) postScene(buf, scene, now, w, false);
+        break;
+      case TR_EXIT:
+        if (exited || p >= .85f) { memset(buf, 0, OLED_WIDTH * OLED_HEIGHT / 8); inkPixels = 8192; break; }
+        if (p < .45f) { int na = buildInto(A, scene, now, w); n = 0; morphGather(A, na, nullptr, 0, .5f * seg01(p, 0, .45f), 64, 32, tms); }
+        else { float u = seg01(p, .45f, .85f); dropPrims(13 + 59 * u * u, tms); }   // slow, then fast to the corners
+        inkPixels = renderField(buf);
+        if (p < .15f) postScene(buf, scene, now, w, false);
+        break;
+    }
     cost(t0);
   }
 
@@ -127,7 +141,119 @@ public:
   }
 
 private:
-  InkPrim P[INK_MAX_PRIMS];
+  InkPrim P[INK_MAX_PRIMS], A[INK_MAX_PRIMS], B[INK_MAX_PRIMS];
+  uint8_t scene = SC_CLOCK, from = SC_CLOCK, tr = TR_NONE;
+  unsigned long trAt = 0; uint16_t trMs = 1;
+  bool exited = false;
+  uint8_t sky = SKY_CLEAR; bool skyDay = true;
+  struct tm cti; bool cHave = false;           // the clock's time this frame (for its text)
+
+  void begin(uint8_t kind, uint16_t ms, unsigned long now) { tr = kind; trMs = ms; trAt = now; exited = false; }
+  float progress(unsigned long now) const { return tr == TR_NONE ? 1 : constrain((now - trAt) / (float)trMs, 0.0f, 1.0f); }
+  static float seg01(float p, float a, float b) { return constrain((p - a) / (b - a), 0.0f, 1.0f); }
+
+  // Build one scene's capsules into P (n)
+  void buildScene(uint8_t sc, unsigned long now, const Weather &w) {
+    if (sc == SC_CLOCK) buildClock(now); else buildWeather(now, w);
+  }
+  int buildInto(InkPrim *dst, uint8_t sc, unsigned long now, const Weather &w) {
+    n = 0; buildScene(sc, now, w);
+    memcpy(dst, P, n * sizeof(InkPrim));
+    return n;
+  }
+  // The text and pixel effects drawn after the field. `fx` = shear, flash and
+  // fog bands too (left out mid-transition so they don't fight the drop)
+  void postScene(uint8_t *buf, uint8_t sc, unsigned long now, const Weather &w, bool fx = true) {
+    if (sc == SC_CLOCK) clockText();
+    else weatherPost(buf, now, w, fx);
+  }
+
+  void buildClock(unsigned long now) {
+    char digs[5]; cHave = clockDigits(digs, cti);
+    unsigned long ms = subSecond(cti, now);
+    if (strcmp(digs, shown) != 0) { strcpy(prevDigs, shown); strcpy(shown, digs); chAt = now; }   // a digit changed: morph
+    driftFor(cti);
+    float q = (now - chAt) / 700.0f;
+    if (prevDigs[0] && q < 1) {
+      static InkPrim Am[INK_MAX_PRIMS], Bm[INK_MAX_PRIMS];   // static: the loop task's stack is only 8 KB
+      int na = clockPrims(Am, prevDigs, ms, now), nb = clockPrims(Bm, shown, ms, now);
+      morphKeyed(Am, na, Bm, nb, q);
+    } else {
+      n = clockPrims(P, shown, ms, now);
+    }
+    stepDrips(shown, now);
+  }
+  // Date + AM/PM under the digits
+  void clockText() {
+    char line[24];
+    if (cHave) {
+      static const char *const D[7] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+      static const char *const M[12] = { "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
+      snprintf(line, sizeof(line), "%s %s %d %s", D[cti.tm_wday], M[cti.tm_mon], cti.tm_mday,
+               CLOCK_24H ? "" : (cti.tm_hour < 12 ? "AM" : "PM"));
+    } else {
+      strcpy(line, "SYNCING");
+    }
+    inkStr(line, 64 + dx, 62 + dy, true);
+  }
+
+  // The temperature in liquid digits on the left, the drop acting out the sky
+  // on the right, the condition / high-low / rain chance in bold underneath
+  void buildWeather(unsigned long now, const Weather &w) {
+    struct tm ti; time_t tn = time(nullptr); localtime_r(&tn, &ti);
+    driftFor(ti);
+    float t = (now % 600000UL) * 0.001f;
+    bool forced = forceSky < SKY_NUM;
+    sky = forced ? forceSky : (w.valid ? inkSky(w) : SKY_CLOUDY);
+    skyDay = w.isDay || forced;
+    flash = false;
+    if (w.valid || forced) tempPrims(w.valid ? w.tempF : 72, t);
+    skyPrims(sky, skyDay, t, now);
+  }
+  void weatherPost(uint8_t *buf, unsigned long now, const Weather &w, bool fx) {
+    float t = (now % 600000UL) * 0.001f;
+    bool forced = forceSky < SKY_NUM;
+    skyPost(buf, sky, skyDay, t, now, fx);
+    if (w.valid || forced) {
+      static const char *const name[SKY_NUM] = { "CLEAR", "CLOUDY", "RAIN", "SNOW", "STORMS", "FOG", "WINDY" };
+      char l1[17], l2[24];
+      if (forced || !w.valid) strcpy(l1, name[sky]);
+      else { strncpy(l1, w.condition, 16); l1[16] = 0; for (char *c = l1; *c; c++) *c = toupper(*c); }
+      snprintf(l2, sizeof(l2), "H%d L%d  %d%%", w.valid ? w.hi : 79, w.valid ? w.lo : 58, w.valid ? w.pop : 40);
+      inkStr(l1, 4 + dx, 51 + dy);
+      inkStr(l2, 4 + dx, 62 + dy);
+    } else {
+      inkStr(WiFi.status() == WL_CONNECTED ? "No weather" : "No network", 4, 51);
+    }
+    if (!fx) return;
+    if (sky == SKY_WIND) shear(buf, t);
+    if (flash) { for (int i = 0; i < OLED_WIDTH * OLED_HEIGHT / 8; i++) buf[i] ^= 0xFF; }   // lightning
+  }
+
+  // ---- the drop -------------------------------------------------------------
+  // One big drop at the centre with six drops riding its rim, so the edge
+  // wobbles like liquid as it shrinks or swells
+  void dropPrims(float R, float tms) {
+    add({ 64, 32, 64, 32, R, R, 64, 32, 0xFF });
+    for (int i = 0; i < 6; i++) {
+      float a = tms * .004f + i * 1.047f, x = 64 + cosf(a) * R * .9f, y = 32 + sinf(a) * R * .9f, rr = R * .22f + 1;
+      add({ x, y, x, y, rr, rr, 64, 32, 0xFF });
+    }
+  }
+  // Gather list A into a drop at (gx, gy) over the first half, then split the
+  // drop out into list B over the second; three drops orbit inside it
+  void morphGather(const InkPrim *Al, int na, const InkPrim *Bl, int nb, float p, float gx, float gy, float tms) {
+    bool half = p < .5f;
+    float q = ease(half ? p * 2 : (1 - p) * 2);
+    const InkPrim *L = half ? Al : Bl; int nl = half ? na : nb;
+    for (int i = 0; i < nl; i++) add(toward(L[i], gx, gy, fmaxf(L[i].r1, L[i].r2) * .7f, q));
+    float R = 13 * q;
+    add({ gx, gy, gx, gy, R, R, gx, gy, 0xFF });
+    for (int i = 0; i < 3; i++) {
+      float a = tms * .006f + i * 2.1f, x = gx + cosf(a) * R * .55f, y = gy + sinf(a) * R * .45f, rr = R * .45f;
+      add({ x, y, x, y, rr, rr, gx, gy, 0xFF });
+    }
+  }
   int n = 0;
   char shown[5] = "", prevDigs[5] = "";
   unsigned long chAt = 0;
@@ -345,7 +471,7 @@ private:
 
   static float gust(float t) { return sinf(t * 1.7f) * .6f + sinf(t * 4.3f) * .4f; }
 
-  void skyPost(uint8_t *buf, uint8_t sky, bool day, float t, unsigned long now) {
+  void skyPost(uint8_t *buf, uint8_t sky, bool day, float t, unsigned long now, bool fx = true) {
     if (sky == SKY_CLEAR) {
       float bob = 1.2f * sinf(t * 2.1f);
       if (!day) {                                            // a bite out of the drop: the moon
@@ -366,7 +492,7 @@ private:
         setPx(buf, x, y, false); if (y > 52) setPx(buf, x + 1, y, false); else setPx(buf, x, y + 1, false);
       }
     }
-    if (sky == SKY_FOG) {                                    // white bands drift through everything
+    if (sky == SKY_FOG && fx) {                              // white bands drift through everything
       int off = (int)(now / 220) % 4;
       for (int y = 0; y < OLED_HEIGHT; y++) if ((y + off) % 4 == 0) for (int x = 0; x < OLED_WIDTH; x++) setPx(buf, x, y, true);
     }
