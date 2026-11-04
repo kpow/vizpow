@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.7.10.3"
+#define FIRMWARE_VERSION "0.7.11.2"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
@@ -104,10 +104,17 @@
 #define SNOW_DEFAULT_ON        1        // little falling-snow ambiance by default
 
 // ---- Inside lights (strip_leds.h) ------------------------------------------
-// 8x WS2812B strip glowing through the translucent body. The onboard WS2812
-// (hardwired to GPIO8) is left dark: the strip needs both RMT channels.
+// 12x WS2812B glowing through the translucent body, in three runs of 4 wired
+// in this order: right side, left side, bottom by the pants (right and left
+// as you face him). The onboard WS2812 (hardwired to GPIO8) is left dark: the
+// strip needs both RMT channels.
 #define LED_STRIP_PIN        4         // strip DIN (free, not a strapping pin)
-#define LED_STRIP_COUNT      8
+#define LED_RUN              4         // LEDs per run
+#define LED_STRIP_COUNT      (3 * LED_RUN)
+// Which end of each run is wired first (check with /debug/leds?id=runs)
+#define LED_RIGHT_TOP_FIRST  0         // 1 = the right run starts at the top
+#define LED_LEFT_TOP_FIRST   1         // 1 = the left run starts at the top
+#define LED_BOTTOM_LEFT_FIRST 1        // 1 = the bottom run starts at your left
 #define LED_MAX_MA           450       // FastLED power cap so USB never browns out
 #define LED_DEFAULT_BRI      160       // 0-255, saved per bot in NVS once changed
 #define LED_FRAME_MS         20        // 50 Hz light updates

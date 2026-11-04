@@ -150,7 +150,7 @@ function esc(t){return String(t).replace(/[&<>"]/g,function(c){return'&#'+c.char
 mk('ex',X.map(function(n,i){return i}),function(i){set('expr',i);g('/bot/expression?v='+i)},X);
 function L(k,v,q){set(k,v);g('/bot/leds?'+q+'='+v)}
 mk('gL',['mood','ambient','solid','off'],function(v){L('leds',v,'mode')});
-mk('lp',['auto','drift','comet','twinkle','swell','bounce','mirror','lava','confetti'],function(v){L('ledPatSel',v,'pat')});
+mk('lp',['auto','drift','comet','twinkle','swell','bounce','mirror','lava','confetti','rise','sides'],function(v){L('ledPatSel',v,'pat')});
 var PAL={},PN=['auto'];"rainbow:ff0000,ff8000,ffff00,00ff00,0000ff,4b0082,8f00ff|lava:000000,ff0000,ff8000,ffff00|ocean:000060,0040ff,00a0a0,00ffff|forest:003000,00a000,a0ff00|party:8000ff,ff40a0,ff8000,ffe000,0060ff|heat:000000,ff0000,ffff00,ffffff|sunset:ff2800,ff005a,7800ff,ff7800|neon:00ffdc,ff00c8,0050ff,b400ff|ice:001040,0080ff,80e0ff,ffffff|candy:ff40a0,ffa0d0,80c0ff,c080ff|matrix:001000,00ff40,004010,80ff80|fire:200000,ff2000,ff8000,ffd000|aurora:00ff80,00a0ff,8000ff,00ffc0|cyber:ff00ff,00ffff,ffff00,ff0080|pastel:ffb0b0,b0ffb0,b0b0ff,ffffb0".split('|').forEach(function(x){x=x.split(':');PN.push(x[0]);PAL[x[0]]=x[1].split(',')});PN.push('custom');
 function grad(c){return'linear-gradient(90deg,#'+c.join(',#')+')'}
 mk('lq',PN,function(v){L('ledPalSel',v,'pal')});
