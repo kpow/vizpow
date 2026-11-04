@@ -48,66 +48,11 @@ inline String chipSuffix() {
 }
 
 // ============================================================================
-// HTML — control page (STA mode) and provisioning page (AP mode)
+// HTML — control page (STA mode), setup page (AP mode), firmware update page
 // ============================================================================
 #include "web_page.h"   // CONTROL_HTML: the control page (vizBot house style)
 
-static const char PROVISION_HTML[] PROGMEM = R"HTML(
-<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>vizMini setup</title><style>
-:root{color-scheme:dark}body{margin:0;background:#0b0f14;color:#e6edf3;
-font:15px system-ui,sans-serif;padding:18px}h1{font-size:18px}
-input{width:100%;box-sizing:border-box;background:#0d1117;color:#e6edf3;
-border:1px solid #30363d;border-radius:8px;padding:10px;margin:6px 0}
-button{width:100%;background:#238636;color:#fff;border:0;border-radius:8px;
-padding:11px;font-size:15px;margin-top:8px}label{font-size:12px;color:#7d8590}
-</style></head><body><h1>Connect vizMini to WiFi</h1>
-<form action="/wifi/save" method="POST">
-<label>Network (SSID)</label><input name=ssid required>
-<label>Password</label><input name=pass type=password>
-<button type=submit>Save &amp; reboot</button></form>
-<p style="margin-top:16px"><a href="/update" style="color:#58a6ff">Firmware update</a></p></body></html>
-)HTML";
-
-static const char UPDATE_HTML[] PROGMEM = R"HTML(
-<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>vizMini update</title><style>
-:root{color-scheme:dark}body{margin:0;background:#0b0f14;color:#e6edf3;
-font:15px system-ui,sans-serif;padding:18px}h1{font-size:18px;margin:0 0 4px}
-.sub{color:#7d8590;font-size:12px;margin-bottom:14px}
-.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px}
-input[type=file]{width:100%;margin:8px 0;color:#e6edf3}
-button{width:100%;background:#238636;color:#fff;border:0;border-radius:8px;
-padding:11px;font-size:15px;margin-top:6px}button:disabled{opacity:.5}
-progress{width:100%;height:14px;margin-top:10px}#msg{margin-top:10px;font-size:14px}
-a{color:#58a6ff}.hint{color:#7d8590;font-size:12px;margin-top:10px}
-</style></head><body>
-<h1>vizMini firmware</h1><div class=sub id=ver>checking&hellip;</div>
-<div class=card>
-<input type=file id=f accept=".bin">
-<button id=b onclick=up()>Flash firmware</button>
-<progress id=pg max=100 value=0 hidden></progress>
-<div id=msg></div>
-<div class=hint>Upload <code>.pio/build/c3-oled/firmware.bin</code>.</div>
-</div>
-<p><a href="/">&larr; back</a></p>
-<script>
-fetch('/state').then(r=>r.json()).then(s=>{ver.textContent='running v'+s.fw}).catch(function(){ver.textContent=''});
-function M(t){msg.textContent=t}
-function up(){
- var fl=f.files[0]; if(!fl){M('Pick a firmware.bin first.');return;}
- b.disabled=true; pg.hidden=false; M('Uploading…');
- var fd=new FormData(); fd.append('firmware',fl);
- var x=new XMLHttpRequest(); x.open('POST','/update');
- x.upload.onprogress=function(e){if(e.lengthComputable)pg.value=Math.round(e.loaded/e.total*100)};
- x.onload=function(){if(x.status==200&&x.responseText.slice(0,2)=='OK'){M('✅ Success — rebooting. Reconnect in ~10s.')}else{M('❌ Failed: '+x.responseText);b.disabled=false}};
- x.onerror=function(){M('Connection lost (the device may be rebooting if the upload finished).')};
- x.send(fd);
-}
-</script></body></html>
-)HTML";
+#include "web_setup.h"  // SETUP_HTML (hotspot) + UPDATE_HTML, same house style
 
 // ============================================================================
 // Request handlers
@@ -118,23 +63,129 @@ inline uint8_t argU8(const char* name, uint8_t def = 0) {
 }
 
 inline void handleRoot() {
-  if (g_apMode) server.send_P(200, "text/html", PROVISION_HTML);
+  if (g_apMode) server.send_P(200, "text/html", SETUP_HTML);
   else          server.send_P(200, "text/html", CONTROL_HTML);
 }
 
-inline void handleWifiSave() {
+// ---- Setup: scan, test-join, then save ------------------------------------
+// The setup page never saves a network blind: /wifi/try joins it while the
+// hotspot stays up, webLoop() watches the result, and only a join that gets
+// an address is written to NVS (then the bot restarts onto it, so the boot
+// intro shows the new address).
+enum JoinState : uint8_t { JOIN_IDLE, JOIN_TRYING, JOIN_OK, JOIN_FAIL };
+static JoinState     g_join = JOIN_IDLE;
+static String        g_joinSsid, g_joinPass, g_joinWhy, g_joinIp;
+static unsigned long g_joinAt = 0, g_rebootAt = 0;
+static uint8_t       g_lastReason = 0;   // last STA disconnect reason
+static uint8_t       g_authFails  = 0;   // handshake/auth failures this try
+static const unsigned long JOIN_REBOOT_MS = 8000;   // time for the page to show "connected"
+static unsigned long g_setupSeenAt = 0;              // last scan/try from the setup page
+static const unsigned long SETUP_QUIET_MS = 60000;   // no background rejoins while someone is setting up
+
+inline String jsonStr(const String &v) {
+  String o = "\"";
+  for (size_t i = 0; i < v.length(); i++) {
+    char c = v[i];
+    if (c == '"' || c == '\\') { o += '\\'; o += c; }
+    else if ((uint8_t)c < 0x20) { char b[7]; snprintf(b, sizeof(b), "\\u%04x", c); o += b; }
+    else o += c;
+  }
+  return o + "\"";
+}
+
+// /wifi/scan[?fresh=1] — {"scanning":true} while the async scan runs, then
+// {"nets":[{"s":ssid,"r":rssi,"l":locked}],"saved":ssid}: one entry per name
+// (strongest), strongest first, hidden networks dropped, at most 20
+inline void handleScan() {
+  int16_t n = WiFi.scanComplete();
+  bool fresh = server.hasArg("fresh") && n != WIFI_SCAN_RUNNING;
+  g_setupSeenAt = millis();
+  if (g_join != JOIN_TRYING && (n == WIFI_SCAN_FAILED || fresh)) {
+    if (WiFi.status() != WL_CONNECTED) WiFi.disconnect(false);   // a pending join blocks scans
+    WiFi.scanDelete();
+    WiFi.scanNetworks(true);
+    n = WIFI_SCAN_RUNNING;
+  }
+  if (n == WIFI_SCAN_RUNNING) { server.send(200, "application/json", "{\"scanning\":true}"); return; }
+  int idx[20], cnt = 0;
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i).length() == 0) continue;
+    int dup = -1;
+    for (int k = 0; k < cnt; k++) if (WiFi.SSID(idx[k]) == WiFi.SSID(i)) dup = k;
+    if (dup >= 0) { if (WiFi.RSSI(i) > WiFi.RSSI(idx[dup])) idx[dup] = i; continue; }
+    if (cnt < 20) idx[cnt++] = i;
+  }
+  for (int a = 1; a < cnt; a++)            // strongest first
+    for (int b = a; b > 0 && WiFi.RSSI(idx[b]) > WiFi.RSSI(idx[b - 1]); b--) { int t = idx[b]; idx[b] = idx[b - 1]; idx[b - 1] = t; }
+  String j = "{\"nets\":[";
+  for (int k = 0; k < cnt; k++) {
+    int i = idx[k];
+    if (k) j += ',';
+    j += "{\"s\":" + jsonStr(WiFi.SSID(i)) + ",\"r\":" + String(WiFi.RSSI(i)) +
+         ",\"l\":" + (WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "0" : "1") + "}";
+  }
+  j += "],\"saved\":" + jsonStr(g_ssid) + "}";
+  server.send(200, "application/json", j);
+}
+
+// POST /wifi/try ssid, pass — start a test join (result via /wifi/status)
+inline void handleTry() {
   String ssid = server.arg("ssid");
-  String pass = server.arg("pass");
-  if (ssid.length() == 0) { server.send(400, "text/plain", "ssid required"); return; }
-  wifiPrefs.begin(NVS_NAMESPACE, false);
-  wifiPrefs.putString("ssid", ssid);
-  wifiPrefs.putString("pass", pass);
-  wifiPrefs.end();
-  server.send(200, "text/html",
-    "<meta charset=utf-8><body style='background:#0b0f14;color:#e6edf3;"
-    "font:15px system-ui;padding:20px'>Saved. Rebooting&hellip;</body>");
-  delay(600);
-  ESP.restart();
+  if (ssid.length() == 0 || ssid.length() > 32 || server.arg("pass").length() > 63) {
+    server.send(400, "application/json", "{\"ok\":false}"); return;
+  }
+  g_joinSsid = ssid; g_joinPass = server.arg("pass");
+  g_join = JOIN_TRYING; g_joinAt = g_setupSeenAt = millis(); g_joinWhy = ""; g_joinIp = "";
+  g_lastReason = 0; g_authFails = 0;
+  WiFi.scanDelete();
+  WiFi.disconnect(false);                  // drop any background retry of the saved network
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  WiFi.begin(g_joinSsid.c_str(), g_joinPass.c_str());
+  ctlSay(("joining " + ssid).substring(0, 48).c_str());
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// /wifi/status — {"state":"idle|trying|ok|fail","ssid","ip","why","host","ap","fw"}
+inline void handleWifiStatus() {
+  static const char* ST[] = { "idle", "trying", "ok", "fail" };
+  String j = "{\"state\":\"" + String(ST[g_join]) + "\",\"ssid\":" + jsonStr(g_joinSsid) +
+             ",\"ip\":\"" + g_joinIp + "\",\"why\":" + jsonStr(g_joinWhy) +
+             ",\"host\":\"" MDNS_HOSTNAME ".local\",\"ap\":\"" + String(WIFI_AP_BASE) + "-" + chipSuffix() +
+             "\",\"fw\":\"" FIRMWARE_VERSION "\"}";
+  server.send(200, "application/json", j);
+}
+
+// Reason codes are esp_wifi's wifi_err_reason_t
+inline bool reasonIsAuth(uint8_t r)     { return r == 2 || r == 15 || r == 202 || r == 204; }
+inline bool reasonIsNotFound(uint8_t r) { return r == 201 || (r >= 210 && r <= 212); }
+
+inline void joinFail(const char* why) {
+  g_join = JOIN_FAIL; g_joinWhy = why;
+  WiFi.disconnect(false);
+  ctlSay("wifi didn't take");
+  Serial.printf("[setup] join '%s' failed: %s (reason %d)\n", g_joinSsid.c_str(), why, g_lastReason);
+}
+
+// Called every loop while a test join runs
+inline void joinPoll() {
+  unsigned long t = millis() - g_joinAt;
+  if (WiFi.status() == WL_CONNECTED) {
+    g_join = JOIN_OK; g_joinIp = WiFi.localIP().toString();
+    wifiPrefs.begin(NVS_NAMESPACE, false);
+    wifiPrefs.putString("ssid", g_joinSsid);
+    wifiPrefs.putString("pass", g_joinPass);
+    wifiPrefs.end();
+    g_rebootAt = millis() + JOIN_REBOOT_MS;
+    ctlSay("got it!");
+    Serial.printf("[setup] joined '%s' as %s, saved; restarting\n", g_joinSsid.c_str(), g_joinIp.c_str());
+  } else if (g_authFails >= 2 || WiFi.status() == WL_CONNECT_FAILED) {
+    joinFail("Wrong password");
+  } else if (t > STA_CONNECT_TIMEOUT_MS) {
+    joinFail(reasonIsAuth(g_lastReason)     ? "Wrong password" :
+             reasonIsNotFound(g_lastReason) ? "He can't see that network from here" :
+                                              "Timed out joining it");
+  }
 }
 
 inline void handleExpression() { ctlSetExpression(argU8("v", EXPR_NEUTRAL)); server.send(200, "text/plain", "ok"); }
@@ -253,7 +304,9 @@ inline void handleNotFound() {
 
 inline void registerRoutes() {
   server.on("/", handleRoot);
-  server.on("/wifi/save", HTTP_POST, handleWifiSave);
+  server.on("/wifi/scan", handleScan);
+  server.on("/wifi/try", HTTP_POST, handleTry);
+  server.on("/wifi/status", handleWifiStatus);
   server.on("/bot/expression", handleExpression);
   server.on("/bot/say", handleSay);
   server.on("/bot/info", handleInfo);
@@ -289,7 +342,10 @@ inline void wifiEventLog(WiFiEvent_t ev, WiFiEventInfo_t info) {
   switch (ev) {
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:    Serial.printf("[wifi] %lu ms associated ch %d\n", millis(), info.wifi_sta_connected.channel); break;
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:       Serial.printf("[wifi] %lu ms got ip\n", millis()); break;
-    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: Serial.printf("[wifi] %lu ms disconnected reason %d rssi %d\n", millis(),
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      g_lastReason = info.wifi_sta_disconnected.reason;
+      if (g_join == JOIN_TRYING && reasonIsAuth(g_lastReason)) g_authFails++;
+      Serial.printf("[wifi] %lu ms disconnected reason %d rssi %d\n", millis(),
                                                 info.wifi_sta_disconnected.reason, info.wifi_sta_disconnected.rssi); break;
     default: break;
   }
@@ -306,7 +362,6 @@ inline void wifiEventLog(WiFiEvent_t ev, WiFiEventInfo_t info) {
 // straight back. vizbot's wifi_provisioning.h uses the same settings.
 inline bool tryStation(void (*onWait)(unsigned long ms)) {
   if (!loadCreds()) return false;
-  WiFi.onEvent(wifiEventLog);
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
@@ -328,9 +383,11 @@ inline bool tryStation(void (*onWait)(unsigned long ms)) {
 inline void startAccessPoint() {
   g_apMode = true;
   String apName = String(WIFI_AP_BASE) + "-" + chipSuffix();
-  // If we have saved creds, run AP+STA so we can keep trying to join the real
-  // network in the background while still serving the setup/control page.
-  WiFi.mode(g_ssid.length() > 0 ? WIFI_AP_STA : WIFI_AP);
+  // AP+STA always: the STA side scans for the setup page, test-joins a network
+  // from it, and (with saved creds) keeps trying the real network in the
+  // background while the setup page is served.
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(g_apIP, g_apIP, IPAddress(255, 255, 255, 0));
   WiFi.softAP(apName.c_str());
   dnsServer.start(53, "*", g_apIP);  // captive portal
@@ -339,6 +396,8 @@ inline void startAccessPoint() {
     WiFi.setAutoReconnect(true);
     WiFi.begin(g_ssid.c_str(), g_pass.c_str());
     g_lastStaTry = millis();
+  } else {
+    WiFi.scanNetworks(true);         // so the setup page has a list straight away
   }
 }
 
@@ -356,6 +415,7 @@ inline void promoteToStation() {
 // Returns the address the user can reach the bot at.
 inline String webBegin(void (*onWait)(unsigned long ms) = nullptr) {
   String where;
+  WiFi.onEvent(wifiEventLog);
   if (tryStation(onWait)) {
     g_apMode = false;
     if (MDNS.begin(MDNS_HOSTNAME)) MDNS.addService("http", "tcp", 80);
@@ -372,7 +432,11 @@ inline String webBegin(void (*onWait)(unsigned long ms) = nullptr) {
 inline void webLoop() {
   if (g_apMode) {
     dnsServer.processNextRequest();
-    if (g_ssid.length() > 0) {                 // background reconnect attempts
+    if (g_join == JOIN_TRYING) joinPoll();     // setup page test join
+    if (g_rebootAt && (long)(millis() - g_rebootAt) >= 0) ESP.restart();
+    bool setupBusy = g_join == JOIN_TRYING || g_join == JOIN_OK ||
+                     (g_setupSeenAt && millis() - g_setupSeenAt < SETUP_QUIET_MS);
+    if (g_ssid.length() > 0 && !setupBusy) {   // background reconnect attempts
       if (WiFi.status() == WL_CONNECTED) {
         promoteToStation();                    // network came back — leave AP
       } else if (millis() - g_lastStaTry > STA_RETRY_MS) {
