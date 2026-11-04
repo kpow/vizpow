@@ -234,6 +234,14 @@ inline void handleUpdateDone() {
   if (ok) { delay(400); ESP.restart(); }
 }
 
+// /debug/leds?id=runs|path[&s=seconds] — wiring check (see StripLeds::identify)
+inline void handleLedId() {
+  bool path = server.arg("id") == "path";
+  uint32_t secs = server.hasArg("s") ? constrain(server.arg("s").toInt(), 1, 120) : 20;
+  leds.identify(path, secs * 1000UL);
+  server.send(200, "text/plain", path ? "path" : "runs");
+}
+
 inline void handleNotFound() {
   if (g_apMode) {  // captive-portal: bounce everything back to setup
     server.sendHeader("Location", String("http://") + g_apIP.toString(), true);
@@ -259,6 +267,7 @@ inline void registerRoutes() {
   server.on("/state", handleState);
   server.on("/debug/screen", handleScreen);
   server.on("/debug/intro", handleIntroFrame);
+  server.on("/debug/leds", handleLedId);
   server.on("/update", HTTP_GET, handleUpdatePage);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.onNotFound(handleNotFound);

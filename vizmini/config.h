@@ -18,23 +18,23 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.7.10.3"
+#define FIRMWARE_VERSION "0.7.11.6"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
 // hardwired to GPIO8, so we keep the OLED off GPIO8 and drive the NeoPixel
 // there. I2C SDA moved to GPIO10 (adjacent to SCL on GPIO9) — re-plug that one
 // DuPont wire from the GPIO8 header to GPIO10. GPIO9 is BOOT; idling high is fine.
-#define TOUCH_PIN   7      // TTP223 digital output (HIGH while touched)
+#define TOUCH_PIN   3      // pushbutton to GND (was GPIO7)
 #define OLED_SDA    10     // I2C data  (moved off GPIO8 to free the NeoPixel)
 #define OLED_SCL    9      // I2C clock
 
-// Input on GPIO7 is now a momentary pushbutton wired GPIO7 -> button -> GND,
+// Input on GPIO3 is a momentary pushbutton wired GPIO3 -> button -> GND,
 // using the internal pull-up: idle reads HIGH, pressed reads LOW (active-LOW).
 // (Was 1 for the active-HIGH TTP223 capacitive pad, which false-triggered.)
 #define TOUCH_ACTIVE_HIGH 0
 
-// Set to 1 to log raw GPIO7 state + gesture events over serial (debugging).
+// Set to 1 to log raw button pin state + gesture events over serial (debugging).
 #define TOUCH_DEBUG 0
 
 // Set to 1 to log WiFi RSSI to serial every 3s (antenna testing). The rssi
@@ -104,10 +104,17 @@
 #define SNOW_DEFAULT_ON        1        // little falling-snow ambiance by default
 
 // ---- Inside lights (strip_leds.h) ------------------------------------------
-// 8x WS2812B strip glowing through the translucent body. The onboard WS2812
-// (hardwired to GPIO8) is left dark: the strip needs both RMT channels.
+// 12x WS2812B glowing through the translucent body, in three runs of 4 wired
+// in this order: right side, left side, bottom by the pants (right and left
+// as you face him). The onboard WS2812 (hardwired to GPIO8) is left dark: the
+// strip needs both RMT channels.
 #define LED_STRIP_PIN        4         // strip DIN (free, not a strapping pin)
-#define LED_STRIP_COUNT      8
+#define LED_RUN              4         // LEDs per run
+#define LED_STRIP_COUNT      (3 * LED_RUN)
+// Which end of each run is wired first (check with /debug/leds?id=runs)
+#define LED_RIGHT_TOP_FIRST  0         // 1 = the right run starts at the top
+#define LED_LEFT_TOP_FIRST   1         // 1 = the left run starts at the top
+#define LED_BOTTOM_LEFT_FIRST 1        // 1 = the bottom run starts at your left
 #define LED_MAX_MA           450       // FastLED power cap so USB never browns out
 #define LED_DEFAULT_BRI      160       // 0-255, saved per bot in NVS once changed
 #define LED_FRAME_MS         20        // 50 Hz light updates
@@ -129,6 +136,11 @@
 #define WEATHER_UNIT_F  1           // 1 = Fahrenheit, 0 = Celsius
 #define WEATHER_REFRESH_MS  600000  // re-fetch at most every 10 min
 #define INK_WINDY_MPH       15      // Ink Time shows "wind" at or above this (no WMO code for it)
+// Clock + weather are pulled toward the middle so the bezel can't hide the edges
+#define INK_CLOCK_INSET     0.76f   // clock scale toward the middle
+#define INK_CLOCK_CY        28.0f   // ...about this line (the date line sits below)
+#define INK_WEATHER_INSET   0.80f   // weather scale toward the middle
+#define INK_WEATHER_CY      26.0f   // ...about this line (two text lines below)
 #define INK_ENTER_MS        1400    // face -> ink: eyes shut, the black contracts into the drop, it splits out
 #define INK_EXIT_MS         1400    // ink -> face: gather into the drop, swell over the screen, eyes open
 #define INK_FLIP_MS         1200    // clock <-> weather through the drop

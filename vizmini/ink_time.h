@@ -258,6 +258,24 @@ private:
   // Build one scene's capsules into P (n)
   void buildScene(uint8_t sc, unsigned long now, const Weather &w) {
     if (sc == SC_CLOCK) buildClock(now); else buildWeather(now, w);
+    insetPrims(sc);
+  }
+
+  // ---- the border: the panel sits deep in the body and its edges are hard
+  // to see, so each scene is laid out full screen and then pulled toward the
+  // middle (INK_*_INSET). The text stays full size and is placed to match;
+  // the sky's pixel effects go through ix() / iy() --------------------------
+  static float ix(float x) { return 64 + (x - 64) * INK_WEATHER_INSET; }                         // weather only
+  static float iy(float y) { return INK_WEATHER_CY + (y - INK_WEATHER_CY) * INK_WEATHER_INSET; }
+  void insetPrims(uint8_t sc) {
+    const float k = sc == SC_CLOCK ? INK_CLOCK_INSET : INK_WEATHER_INSET;
+    const float cy = sc == SC_CLOCK ? INK_CLOCK_CY : INK_WEATHER_CY;
+    for (int i = 0; i < n; i++) {
+      InkPrim &q = P[i];
+      q.x1 = 64 + (q.x1 - 64) * k; q.x2 = 64 + (q.x2 - 64) * k; q.cx = 64 + (q.cx - 64) * k;
+      q.y1 = cy + (q.y1 - cy) * k; q.y2 = cy + (q.y2 - cy) * k; q.cy = cy + (q.cy - cy) * k;
+      q.r1 *= k; q.r2 *= k;
+    }
   }
   int buildInto(InkPrim *dst, uint8_t sc, unsigned long now, const Weather &w) {
     n = 0; buildScene(sc, now, w);
@@ -297,11 +315,12 @@ private:
     } else {
       strcpy(line, "SYNCING");
     }
-    inkStr(line, 64 + dx, 62 + dy, true);
+    inkStr(line, 64 + dx, 58 + dy, true);
   }
 
   // The temperature in liquid digits on the left, the drop acting out the sky
-  // on the right, the condition / high-low / rain chance in bold underneath
+  // on the right, the condition / high-low / rain chance centred underneath.
+  // The sky keeps above design y ~40 so it clears the two text lines
   void buildWeather(unsigned long now, const Weather &w) {
     struct tm ti; time_t tn = time(nullptr); localtime_r(&tn, &ti);
     driftFor(ti);
@@ -323,10 +342,10 @@ private:
       if (forced || !w.valid) strcpy(l1, name[sky]);
       else { strncpy(l1, w.condition, 16); l1[16] = 0; for (char *c = l1; *c; c++) *c = toupper(*c); }
       snprintf(l2, sizeof(l2), "H%d L%d  %d%%", w.valid ? w.hi : 79, w.valid ? w.lo : 58, w.valid ? w.pop : 40);
-      inkStr(l1, 4 + dx, 51 + dy);
-      inkStr(l2, 4 + dx, 62 + dy);
+      inkStr(l1, 64 + dx, 49 + dy, true);
+      inkStr(l2, 64 + dx, 58 + dy, true);
     } else {
-      inkStr(WiFi.status() == WL_CONNECTED ? "No weather" : "No network", 4, 51);
+      inkStr(WiFi.status() == WL_CONNECTED ? "No weather" : "No network", 64, 49, true);
     }
     if (!fx) return;
     if (sky == SKY_WIND) shear(buf, t);
@@ -473,13 +492,13 @@ private:
 
   // ---- weather pieces --------------------------------------------------------
   bool flash = false;
-  static constexpr float SX = 95, SY = 26;   // where the sky drop lives
+  static constexpr float SX = 95, SY = 22;   // where the sky drop lives
 
   void tempPrims(int temp, float t) {
     char ts[6]; snprintf(ts, sizeof(ts), "%d", temp);
     int len = strlen(ts);
     // Skeletons 14 px apart (closer and the two digits merged into one blob)
-    float w = len > 2 ? 9 : 12, h = 25, r = len > 2 ? 2.8f : 3.4f, gap = len > 2 ? 19 : 26, x = 5 + dx, y = 7 + dy;
+    float w = len > 2 ? 9 : 12, h = 25, r = len > 2 ? 2.8f : 3.4f, gap = len > 2 ? 19 : 26, x = 17 + dx, y = 7 + dy;
     for (int i = 0; i < len && i < 3; i++) {
       const char *segs = digitSegs(ts[i]);
       float xi = x + i * gap - (ts[i] == '1' ? w / 2 : 0);
@@ -521,14 +540,14 @@ private:
       case SKY_CLOUDY: cloud(22, 1.15f, t); break;
       case SKY_RAIN: {
         cloud(12, 0.85f, t);
-        add({ 76, 61, 115, 61, 2, 2, 0, 0, 0xFF });          // the puddle
+        add({ 80, 39, 111, 39, 2, 2, 0, 0, 0xFF });          // the puddle
         for (int i = 0; i < 4; i++) {
           float u = fmodf(t / 1.5f + i * .27f + i * 0.07f, 1.0f), x = 86 + i * 7;
           if (u < .3f) { float rr = .8f + 1.6f * u / .3f; add({ x, 20 + u / .3f * 2, x, 20 + u / .3f * 2, rr, rr, 0, 0, 0xFF }); }
           else {
-            float v = (u - .3f) / .7f, y = 23 + 36 * v * v;
+            float v = (u - .3f) / .7f, y = 23 + 14 * v * v;
             if (v < .9f) add({ x, y - 4 * v, x, y, 1.5f, 2.2f, 0, 0, 0xFF });
-            else { float rr = 3.4f * (1 - (v - .9f) / .1f); add({ x, 59.5f, x, 59.5f, rr, rr, 0, 0, 0xFF }); }   // splash into the puddle
+            else { float rr = 3.4f * (1 - (v - .9f) / .1f); add({ x, 37.5f, x, 37.5f, rr, rr, 0, 0, 0xFF }); }   // splash into the puddle
           }
         }
         break;
@@ -536,7 +555,7 @@ private:
       case SKY_SNOW: {
         cloud(12, 0.85f, t);
         float pile = 1.4f + 1.6f * ((now % 16000UL) / 16000.0f);   // the drift builds, then resets
-        add({ 78, 61.5f, 112, 61.5f, pile, pile, 0, 0, 0xFF });
+        add({ 81, 39.5f, 109, 39.5f, pile, pile, 0, 0, 0xFF });
         break;
       }
       case SKY_STORM: {
@@ -547,7 +566,7 @@ private:
         }
         unsigned long ph = now % 2600UL;
         if (ph < 170) {                                      // a lightning tendril
-          static const float z[5][2] = { { 97, 24 }, { 90, 35 }, { 99, 39 }, { 90, 51 }, { 95, 60 } };
+          static const float z[5][2] = { { 97, 24 }, { 90, 29 }, { 99, 32 }, { 90, 36 }, { 95, 40 } };
           for (int i = 0; i < 4; i++) add({ z[i][0], z[i][1], z[i + 1][0], z[i + 1][1], 1.4f, 1.4f, 0, 0, 0xFF });
           flash = ph < 70;
         }
@@ -578,21 +597,21 @@ private:
     if (sky == SKY_CLEAR) {
       float bob = 1.2f * sinf(t * 2.1f);
       if (!day) {                                            // a bite out of the drop: the moon
-        float mx = SX + 6, my = SY + bob - 4;
-        for (int y = -10; y <= 10; y++) for (int x = -10; x <= 10; x++) if (x * x + y * y <= 90) setPx(buf, (int)mx + x, (int)my + y, true);
+        float mx = ix(SX + 6), my = iy(SY + bob - 4), r2 = 90 * INK_WEATHER_INSET * INK_WEATHER_INSET;
+        for (int y = -10; y <= 10; y++) for (int x = -10; x <= 10; x++) if (x * x + y * y <= r2) setPx(buf, (int)mx + x, (int)my + y, true);
       } else {                                               // the glint at 10:30
         for (int a = 205; a <= 245; a += 3) {
           float rr = (a > 218 && a < 232) ? 7 : 7.4f, c = cosf(a * DEG_TO_RAD), s = sinf(a * DEG_TO_RAD);
-          setPx(buf, (int)(SX + c * rr), (int)(SY + bob + s * rr), true);
-          if (a > 218 && a < 232) setPx(buf, (int)(SX + c * 7.8f), (int)(SY + bob + s * 7.8f), true);
+          setPx(buf, (int)ix(SX + c * rr), (int)iy(SY + bob + s * rr), true);
+          if (a > 218 && a < 232) setPx(buf, (int)ix(SX + c * 7.8f), (int)iy(SY + bob + s * 7.8f), true);
         }
       }
     }
     if (sky == SKY_SNOW) {                                   // filings drift down onto the pile
       for (int i = 0; i < 9; i++) {
         float u = fmodf(t / 4.2f + i * .113f + i * .03f, 1.0f);
-        int y = (int)(21 + u * 36), x = (int)(78 + i * 4 + 3 * sinf(t * 2 + i));
-        setPx(buf, x, y, false); if (y > 52) setPx(buf, x + 1, y, false); else setPx(buf, x, y + 1, false);
+        int y = (int)iy(21 + u * 16), x = (int)ix(81 + i * 3.5f + 3 * sinf(t * 2 + i));
+        setPx(buf, x, y, false); if (y > (int)iy(33)) setPx(buf, x + 1, y, false); else setPx(buf, x, y + 1, false);
       }
     }
     if (sky == SKY_FOG && fx) {                              // white bands drift through everything

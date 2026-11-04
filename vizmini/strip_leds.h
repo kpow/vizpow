@@ -8,19 +8,26 @@
 #include "bot_faces.h"   // EXPR_* ids
 
 // ============================================================================
-// Inside lights — 8× WS2812B strip on GPIO4
+// Inside lights — 12× WS2812B on GPIO4: a run of 4 down each side, 4 along the bottom
 // ============================================================================
 // Only the strip is driven. The C3 has two RMT TX channels and FastLED gives
 // each strip two memory blocks there (FastLED #1846: one block flickers when
 // WiFi interrupts delay the refill), so one strip uses up the RMT. The
 // onboard NeoPixel on GPIO8 stays dark; the strip replaces it.
 // The body is translucent, so these are a primary feature, not a status LED.
+//
+// Layout: the runs are wired right side, left side, bottom (as you face him),
+// but every pattern draws along one path shaped like a U: down his left side
+// (your left), across the pants, up the right side. Path slot u = 0..11; the
+// LED_*_FIRST flags in config.h map it onto the wiring. Height (top 0 .. bottom
+// row LED_RUN) and distance from the bottom centre let waves rise up both
+// sides and ripples mirror left to right.
 // Modes (web-switchable, saved in NVS):
 //   LEDS_MOOD    — colour + motion follow the face's expression; blinks dim it.
 //                  vizMini rarely changes face on his own, so every
 //                  LED_MOOD_CYCLE_MS the mood swaps to a companion motion and
 //                  its hue drifts, keeping the mood's colours but never still
-//   LEDS_AMBIENT — independent light show: 8 patterns x 16 palettes (+ a
+//   LEDS_AMBIENT — independent light show: 10 patterns x 16 palettes (+ a
 //                  custom one from three picked colours). Pattern and palette
 //                  each either cycle on their own clocks (pace: chill / normal /
 //                  fast) or stay locked on one; palettes cross-fade; speed 1-10
@@ -79,12 +86,12 @@ static const LedMood ledMoods[BOT_NUM_EXPRESSIONS] = {
 
 static const char *const ledModeNames[LEDS_NUM_MODES] = { "mood", "ambient", "off", "solid" };
 
-#define LED_PATTERNS   8
+#define LED_PATTERNS   10
 #define LED_PALETTES   17              // 16 built in + custom (c1..c3)
 #define LED_PAL_CUSTOM 16
 #define LED_AUTO       255             // pattern / palette selection: cycle
 static const char *const ledPatternNames[LED_PATTERNS] = {
-  "drift", "comet", "twinkle", "swell", "bounce", "mirror", "lava", "confetti"
+  "drift", "comet", "twinkle", "swell", "bounce", "mirror", "lava", "confetti", "rise", "sides"
 };
 static const char *const ledPaletteNames[LED_PALETTES] = {
   "rainbow", "lava", "ocean", "forest", "party", "heat", "sunset", "neon",
@@ -131,6 +138,24 @@ public:
   void setMood(uint8_t expr) { if (expr < BOT_NUM_EXPRESSIONS && expr != moodExpr) { moodExpr = expr; moodStart = millis(); } }
   void setBlink(float b) { blinkAmt = b; }
   void spark() { sparkStart = millis(); sparking = true; }
+  // A single click: the ambient show jumps to a new pattern and palette now.
+  // A locked choice moves to the new one for this session; the saved lock stays
+  void shuffle() {
+    uint8_t p = random8(LED_PATTERNS);
+    ambPat = p == ambPat ? (p + 1) % LED_PATTERNS : p;
+    uint8_t q = random8(LED_PALETTES - 2);                   // like auto: skips custom and mono
+    palIdx = q == palIdx ? (q + 1) % (LED_PALETTES - 2) : q;
+    palTarget = paletteN(palIdx);
+    if (patSel != LED_AUTO) patSel = ambPat;
+    if (palSel != LED_AUTO) palSel = palIdx;
+    unsigned long now = millis();
+    nextPat = now + patternMs();
+    nextPal = now + paletteMs();
+  }
+  // Wiring check for a few seconds: "runs" lights each run's first LED white,
+  // the rest red (right), green (left), blue (bottom); "path" walks one dot
+  // along the U, down your left side, across the bottom, up the right
+  void identify(bool path, uint32_t ms) { idPath = path; idUntil = millis() + ms; }
 
   uint8_t getMode() const { return mode; }
   uint8_t getBrightness() const { return bri; }
@@ -179,9 +204,11 @@ public:
     else                           fill_solid(target, LED_STRIP_COUNT, CRGB::Black);
 
     if (sparking) renderSpark(target, now);
+    if ((long)(idUntil - now) > 0) { renderIdentify(now); FastLED.show(); return; }
 
-    // Ease toward the target: ~120 ms cross-fade, fast enough to keep strobes crisp
-    for (uint8_t i = 0; i < LED_STRIP_COUNT; i++) nblend(strip[i], target[i], 96);
+    // Ease toward the target: ~120 ms cross-fade, fast enough to keep strobes crisp.
+    // target is in path order; the strip is in wiring order
+    for (uint8_t u = 0; u < LED_STRIP_COUNT; u++) nblend(strip[physOf(u)], target[u], 96);
     FastLED.show();
   }
 
@@ -192,8 +219,33 @@ private:
   uint8_t patSel = LED_AUTO, palSel = LED_AUTO, speed = 3, pace = 1;
   CRGB c[3];
   float blinkAmt = 0;
-  bool sparking = false;
-  unsigned long lastTick = 0, moodStart = 0, sparkStart = 0, ambientStart = 0;
+  bool sparking = false, idPath = false;
+  unsigned long lastTick = 0, moodStart = 0, sparkStart = 0, ambientStart = 0, idUntil = 0;
+
+  // ---- Layout: path slot u -> wiring index, and the U's geometry ----
+  static uint8_t physOf(uint8_t u) {
+    const uint8_t R = LED_RUN;
+    if (u < R) return R + (LED_LEFT_TOP_FIRST ? u : R - 1 - u);                        // left, top -> bottom
+    if (u < 2 * R) { uint8_t k = u - R; return 2 * R + (LED_BOTTOM_LEFT_FIRST ? k : R - 1 - k); }   // bottom, left -> right
+    uint8_t k = u - 2 * R;                                                               // right, bottom -> top
+    return LED_RIGHT_TOP_FIRST ? R - 1 - k : k;
+  }
+  // 0 at the top of a side .. LED_RUN for the bottom row
+  static uint8_t height(uint8_t u) { return u < LED_RUN ? u : u < 2 * LED_RUN ? LED_RUN : 3 * LED_RUN - 1 - u; }
+  // Steps from the bottom centre along the U: 0 for the middle two .. 5 at the tops
+  static uint8_t fromMid(uint8_t u) { return abs(2 * (int)u - (LED_STRIP_COUNT - 1)) / 2; }
+
+  void renderIdentify(unsigned long now) {
+    if (idPath) {
+      uint8_t pos = (now / 400) % LED_STRIP_COUNT;
+      for (uint8_t u = 0; u < LED_STRIP_COUNT; u++)
+        strip[physOf(u)] = u == pos ? CRGB::White : u < pos ? CRGB(0, 0, 24) : CRGB::Black;
+      return;
+    }
+    static const CRGB runCol[3] = { CRGB(90, 0, 0), CRGB(0, 90, 0), CRGB(0, 0, 90) };
+    for (uint8_t i = 0; i < LED_STRIP_COUNT; i++)
+      strip[i] = i % LED_RUN == 0 ? CRGB::White : runCol[i / LED_RUN];
+  }
 
   void save() {
     Preferences p;
@@ -255,29 +307,30 @@ private:
         fill_solid(out, N, CHSV(m.hue, m.sat, v));
         break;
       }
-      case LM_PULSE: {   // sharp attack, slow decay
-        uint8_t d = 255 - ph;
-        uint8_t v = scale8(m.val, 50 + scale8(scale8(d, d), 205));
-        fill_solid(out, N, CHSV(m.hue, m.sat, v));
-        break;
-      }
-      case LM_HEART: {   // lub-dub, rest
-        uint8_t a = (ph < 40) ? sin8(ph * 3 + 192) : (ph >= 60 && ph < 100) ? sin8((ph - 60) * 3 + 192) : 0;
-        uint8_t v = scale8(m.val, 50 + scale8(a, 205));
-        fill_solid(out, N, CHSV(m.hue, m.sat, v));
-        break;
-      }
-      case LM_WAVE:
+      case LM_PULSE:     // sharp attack, slow decay, rippling out from the bottom centre
         for (uint8_t i = 0; i < N; i++) {
-          uint8_t s = sin8(ph + i * (256 / N));
+          uint8_t d = 255 - (uint8_t)(ph - fromMid(i) * 6);
+          out[i] = CHSV(m.hue, m.sat, scale8(m.val, 50 + scale8(scale8(d, d), 205)));
+        }
+        break;
+      case LM_HEART:     // lub-dub, rest; each beat climbs from the pants up both sides
+        for (uint8_t i = 0; i < N; i++) {
+          uint8_t p = ph - (LED_RUN - height(i)) * 5;
+          uint8_t a = (p < 40) ? sin8(p * 3 + 192) : (p >= 60 && p < 100) ? sin8((p - 60) * 3 + 192) : 0;
+          out[i] = CHSV(m.hue, m.sat, scale8(m.val, 50 + scale8(a, 205)));
+        }
+        break;
+      case LM_WAVE:      // swells roll up both sides from the bottom
+        for (uint8_t i = 0; i < N; i++) {
+          uint8_t s = sin8(ph - fromMid(i) * 40);
           out[i] = CHSV(m.hue + scale8(s, 16), m.sat, scale8(m.val, 80 + scale8(s, 175)));
         }
         break;
-      case LM_CHASE: {   // a bright head runs the strip with a fading tail
+      case LM_CHASE: {   // a bright head runs round the U with a fading tail
         uint16_t pos = ((uint16_t)ph * N) >> 8;
         for (uint8_t i = 0; i < N; i++) {
           uint8_t dist = (pos - i + N) % N;
-          uint8_t v = dist == 0 ? 255 : dist == 1 ? 120 : dist == 2 ? 50 : 18;
+          uint8_t v = dist == 0 ? 255 : dist == 1 ? 140 : dist == 2 ? 70 : dist == 3 ? 30 : 12;
           out[i] = CHSV(dist == 0 ? m.hue2 : m.hue, m.sat, scale8(m.val, v));
         }
         break;
@@ -306,7 +359,7 @@ private:
                           : CRGB(CHSV(m.hue, m.sat, scale8(m.val, 160)));
         }
         break;
-      case LM_DUAL:      // two colours swap sides
+      case LM_DUAL:      // two colours swap sides; the bottom splits down the middle
         for (uint8_t i = 0; i < N; i++) {
           bool first = (i < N / 2) ^ (ph >= 128);
           out[i] = CHSV(first ? m.hue : m.hue2, m.sat, m.val);
@@ -364,14 +417,14 @@ private:
     unsigned long t = now - ambientStart;
     uint8_t ph = phase(t, speed);
     switch (ambPat) {
-      case 0:   // drift: the palette slides along the strip
-        for (uint8_t i = 0; i < N; i++) out[i] = ColorFromPalette(pal, ph * 2 + i * 22, 230);
+      case 0:   // drift: the palette slides round the U
+        for (uint8_t i = 0; i < N; i++) out[i] = ColorFromPalette(pal, ph * 2 + i * (256 / N), 230);
         break;
-      case 1: { // comet: a bright head with a palette tail
+      case 1: { // comet: a bright head with a palette tail, round the U
         uint16_t pos = ((uint16_t)(ph * 2) * N) >> 8;
         for (uint8_t i = 0; i < N; i++) {
           uint8_t d = (pos - i + N) % N;
-          out[i] = ColorFromPalette(pal, ph + d * 18, d == 0 ? 255 : d == 1 ? 140 : d == 2 ? 60 : 12);
+          out[i] = ColorFromPalette(pal, ph + d * 18, d == 0 ? 255 : d == 1 ? 150 : d == 2 ? 80 : d == 3 ? 30 : 8);
         }
         break;
       }
@@ -384,41 +437,63 @@ private:
         }
         break;
       }
-      case 3: { // swell: the whole body breathes through the palette
-        uint8_t v = 50 + scale8(sin8(ph * 3), 205);
-        fill_solid(out, N, ColorFromPalette(pal, ph, v));
+      case 3:   // swell: the body breathes through the palette, filling from the pants up
+        for (uint8_t i = 0; i < N; i++)
+          out[i] = ColorFromPalette(pal, ph, 50 + scale8(sin8(ph * 3 - (LED_RUN - height(i)) * 14), 205));
         break;
-      }
-      case 4: { // bounce: a ping-pong dot with a short trail
+      case 4: { // bounce: a ping-pong dot from top left, round the bottom, to top right
         uint8_t tri = triwave8(ph * 3);
-        uint8_t pos = scale8(tri, N - 1);
+        uint8_t pos = ((uint16_t)tri * N) >> 8;
         for (uint8_t i = 0; i < N; i++) {
           uint8_t d = abs((int)i - (int)pos);
           out[i] = ColorFromPalette(pal, ph * 2 + i * 10, d == 0 ? 255 : d == 1 ? 90 : 10);
         }
         break;
       }
-      case 5: { // mirror: waves ripple out from the middle
+      case 5: { // mirror: ripples run out from the bottom centre and up both sides
         for (uint8_t i = 0; i < N; i++) {
-          uint8_t d = i < N / 2 ? N / 2 - 1 - i : i - N / 2;
-          uint8_t sw = sin8(ph * 4 - d * 48);
-          out[i] = ColorFromPalette(pal, ph + d * 30, 40 + scale8(sw, 215));
+          uint8_t d = fromMid(i);
+          uint8_t sw = sin8(ph * 4 - d * 40);
+          out[i] = ColorFromPalette(pal, ph + d * 24, 40 + scale8(sw, 215));
         }
         break;
       }
-      case 6: { // lava: two slow blobs
+      case 6: { // lava: slow blobs that rise up the sides
         for (uint8_t i = 0; i < N; i++) {
-          uint8_t a = sin8(ph * 2 + i * 40), b = sin8(ph * 3 - i * 25);
+          uint8_t a = sin8(ph * 2 + height(i) * 50), b = sin8(ph * 3 - i * 25);
           out[i] = ColorFromPalette(pal, qadd8(a / 2, b / 2), 60 + scale8(qadd8(a / 2, b / 2), 195));
         }
         break;
       }
-      default: { // confetti: fast palette sparks
+      case 7: { // confetti: fast palette sparks
         static CRGB c[LED_STRIP_COUNT];
         for (uint8_t i = 0; i < N; i++) {
           c[i].fadeToBlackBy(40);
           if (random8() < 40) c[i] = ColorFromPalette(pal, random8(), 255);
           out[i] = c[i];
+        }
+        break;
+      }
+      case 8: { // rise: a flickering glow burns in the pants and climbs, fading, up both sides
+        static uint8_t heat[LED_STRIP_COUNT];
+        for (uint8_t i = 0; i < N; i++) {
+          uint8_t h = height(i);
+          uint8_t want = qsub8(255 - (LED_RUN - h) * 52, random8(70));
+          heat[i] = want > heat[i] ? qadd8(heat[i], 40) : qsub8(heat[i], 12);
+          out[i] = ColorFromPalette(pal, ph / 2 + (LED_RUN - h) * 28, max<uint8_t>(heat[i], 14));
+        }
+        break;
+      }
+      default: { // sides: the two sides trade brightness while a dot carries it across the bottom
+        uint8_t s = sin8(ph * 3);                                   // 255 = left side bright
+        uint8_t dot = ((uint16_t)(255 - s) * LED_RUN) >> 8;        // bottom slot nearest the bright side
+        for (uint8_t i = 0; i < N; i++) {
+          if (i < LED_RUN)          out[i] = ColorFromPalette(pal, ph, 20 + scale8(s, 235));
+          else if (i >= 2 * LED_RUN) out[i] = ColorFromPalette(pal, ph + 128, 20 + scale8(255 - s, 235));
+          else {
+            uint8_t d = abs((int)(i - LED_RUN) - (int)dot);
+            out[i] = ColorFromPalette(pal, ph + scale8(255 - s, 128), d == 0 ? 255 : d == 1 ? 70 : 10);
+          }
         }
         break;
       }
@@ -431,7 +506,7 @@ private:
     uint8_t env = el < 200 ? el * 255 / 200 : (LED_SPARK_MS - el) * 255 / (LED_SPARK_MS - 200);
     uint8_t ph = (uint8_t)(el / 4);
     for (uint8_t i = 0; i < LED_STRIP_COUNT; i++)
-      nblend(out[i], CRGB(CHSV(ph + i * 32, 255, 255)), env);
+      nblend(out[i], CRGB(CHSV(ph + i * (256 / LED_STRIP_COUNT), 255, 255)), env);
   }
 };
 
