@@ -12,7 +12,7 @@ Kevin's calls (2026-11-03):
   reactions, a constant slow drift, upside-down flip gags.
 - Eyes: adapt as much of the eye lab work (25-face parametric eye model,
   `vizbot/bot_eye_model.h` + `bot_eye_params.h`) as the 128×64 mono OLED allows.
-- No button on these builds (GPIO7 floats high on its pull-up = never pressed).
+- No button on these builds (GPIO3 floats high on its pull-up = never pressed).
 
 ## Wiring
 

@@ -22,7 +22,7 @@ on a one-color 128×64 screen. The v2 plan and status live in `PLAN-v2.md`.
 - **Inside lights** (`strip_leds.h`) — mood (colour + motion per expression,
   dims with blinks), ambient show, or off; a Spark button lays a rainbow
   burst over either. Brightness and mode are saved per bot.
-- **Button** (optional; GPIO7 → GND, internal pull-up, active-LOW, debounced):
+- **Button** (optional; GPIO3 → GND, internal pull-up, active-LOW, debounced):
   - **Press** → cycle to the next expression
   - **Long-press or double-press** → enter **Time / Weather** mode
   - **In info mode:** press → flip Time ↔ Weather · long-press → back to the face
@@ -44,7 +44,7 @@ Not included: cloud/personality sync, sound.
 | Signal | C3 Super Mini pin | Notes |
 |--------|-------------------|-------|
 | LED strip DIN | **GPIO4** | 8× WS2812B; power from 5V / GND, capped at `LED_MAX_MA` |
-| Button (optional) | GPIO7 ↔ GND | momentary pushbutton; internal pull-up, active-LOW (no VCC) |
+| Button (optional) | GPIO3 ↔ GND | momentary pushbutton; internal pull-up, active-LOW (no VCC) |
 | Onboard NeoPixel | GPIO8 | left dark: the strip needs both C3 RMT channels |
 | OLED SCL | GPIO9 | BOOT strapping pin — don't hold low at boot |
 | OLED SDA | **GPIO10** | kept off GPIO8 (the onboard NeoPixel) |
