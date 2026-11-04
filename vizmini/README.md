@@ -23,7 +23,7 @@ on a one-color 128×64 screen. The v2 plan and status live in `PLAN-v2.md`.
   dims with blinks), ambient show, or off; a Spark button lays a rainbow
   burst over either. Brightness and mode are saved per bot.
 - **Button** (optional; GPIO3 → GND, internal pull-up, active-LOW, debounced):
-  - **Press** → cycle to the next expression
+  - **Press** → cycle to the next expression; the ambient light show jumps to a new pattern and palette
   - **Long-press or double-press** → enter **Time / Weather** mode
   - **In info mode:** press → flip Time ↔ Weather · long-press → back to the face
 - **Time + Weather** — NTP clock and Open-Meteo weather (free, no API key) as

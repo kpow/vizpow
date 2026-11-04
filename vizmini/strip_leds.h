@@ -138,6 +138,20 @@ public:
   void setMood(uint8_t expr) { if (expr < BOT_NUM_EXPRESSIONS && expr != moodExpr) { moodExpr = expr; moodStart = millis(); } }
   void setBlink(float b) { blinkAmt = b; }
   void spark() { sparkStart = millis(); sparking = true; }
+  // A single click: the ambient show jumps to a new pattern and palette now.
+  // A locked choice moves to the new one for this session; the saved lock stays
+  void shuffle() {
+    uint8_t p = random8(LED_PATTERNS);
+    ambPat = p == ambPat ? (p + 1) % LED_PATTERNS : p;
+    uint8_t q = random8(LED_PALETTES - 2);                   // like auto: skips custom and mono
+    palIdx = q == palIdx ? (q + 1) % (LED_PALETTES - 2) : q;
+    palTarget = paletteN(palIdx);
+    if (patSel != LED_AUTO) patSel = ambPat;
+    if (palSel != LED_AUTO) palSel = palIdx;
+    unsigned long now = millis();
+    nextPat = now + patternMs();
+    nextPal = now + paletteMs();
+  }
   // Wiring check for a few seconds: "runs" lights each run's first LED white,
   // the rest red (right), green (left), blue (bottom); "path" walks one dot
   // along the U, down your left side, across the bottom, up the right

@@ -537,7 +537,10 @@ void loop() {
       enterInfo();                                    // hold -> time/weather
     } else if (ev == TOUCH_PRESS) {
       if (isDouble) enterInfo();                      // double-tap -> time/weather
-      else applyExpression((g_expr + 1) % BOT_NUM_EXPRESSIONS); // single -> cycle mood
+      else {                                          // single -> cycle mood, new light show
+        applyExpression((g_expr + 1) % BOT_NUM_EXPRESSIONS);
+        leds.shuffle();
+      }
     }
   }
 
