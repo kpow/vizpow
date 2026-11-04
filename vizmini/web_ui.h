@@ -15,6 +15,7 @@
 extern void   ctlSetExpression(uint8_t v);
 extern void   ctlSay(const char* text);
 extern void   ctlSetInfo(bool on);
+extern void   ctlInfoSky(const String &v);
 extern void   ctlSetContrast(uint8_t c);
 extern void   ctlSetSnow(bool on);
 extern void   ctlSpark();
@@ -138,7 +139,12 @@ inline void handleWifiSave() {
 
 inline void handleExpression() { ctlSetExpression(argU8("v", EXPR_NEUTRAL)); server.send(200, "text/plain", "ok"); }
 inline void handleSay()        { ctlSay(server.arg("text").c_str());        server.send(200, "text/plain", "ok"); }
-inline void handleInfo()       { ctlSetInfo(argU8("v", 1) != 0);            server.send(200, "text/plain", "ok"); }
+// /bot/info?v=1|0 (time/weather on, or flip / off)  &  ?sky=<condition>|real (test the ink weather)
+inline void handleInfo() {
+  if (server.hasArg("v")) ctlSetInfo(argU8("v", 1) != 0);
+  if (server.hasArg("sky")) ctlInfoSky(server.arg("sky"));
+  server.send(200, "text/plain", "ok");
+}
 inline void handleContrast()   { ctlSetContrast(argU8("v", DEFAULT_CONTRAST)); server.send(200, "text/plain", "ok"); }
 inline void handleSnow()       { ctlSetSnow(argU8("v", 1) != 0);            server.send(200, "text/plain", "ok"); }
 inline void handleSpark()      { ctlSpark();                                server.send(200, "text/plain", "ok"); }

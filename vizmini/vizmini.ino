@@ -26,6 +26,7 @@ uint8_t    botBackgroundStyle = 0;                 // 0 = no ambient stroke
 #include "touch_input.h"
 #include "strip_leds.h"
 #include "weather.h"
+#include "ink_time.h"          // Ink Time: the clock and weather as ferrofluid
 #include "web_ui.h"
 #include <time.h>
 
@@ -111,86 +112,17 @@ void startle() {
 }
 
 // ---- Time + Weather (info) mode -------------------------------------------
-// View 1: full-screen clock
-void drawTimeView() {
-  struct tm ti;
-  bool haveTime = getLocalTime(&ti, 5);
-
-  u8g2.clearBuffer();
-  u8g2.setDrawColor(1);
-
-  char hhmm[8];
-  if (haveTime) strftime(hhmm, sizeof(hhmm), CLOCK_24H ? "%H:%M" : "%I:%M", &ti);
-  else          strcpy(hhmm, "--:--");
-  if (!CLOCK_24H && hhmm[0] == '0') memmove(hhmm, hhmm + 1, strlen(hhmm)); // strip leading 0
-
-  u8g2.setFont(u8g2_font_logisoso32_tn);                 // big clock
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(hhmm)) / 2, 40, hhmm);
-
-  if (haveTime && !CLOCK_24H) {                          // AM/PM tag
-    u8g2.setFont(u8g2_font_5x8_tf);
-    u8g2.drawStr(OLED_WIDTH - 14, 10, ti.tm_hour < 12 ? "AM" : "PM");
-  }
-
-  char date[20];
-  if (haveTime) strftime(date, sizeof(date), "%a %b %d", &ti);
-  else          strcpy(date, webIsAP() ? "no network" : "syncing...");
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(date)) / 2, 60, date);
-
-  u8g2.sendBuffer();
-}
-
-// View 2: full-screen weather
-void drawWeatherView() {
-  u8g2.clearBuffer();
-  u8g2.setDrawColor(1);
-
-  if (!weather.valid) {
-    u8g2.setFont(u8g2_font_6x12_tf);
-    const char* msg = (WiFi.status() == WL_CONNECTED) ? "weather n/a" : "no network";
-    u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(msg)) / 2, 36, msg);
-    u8g2.sendBuffer();
-    return;
-  }
-
-  // Big temperature on the left
-  char temp[8];
-  snprintf(temp, sizeof(temp), "%d", weather.tempF);
-  u8g2.setFont(u8g2_font_logisoso24_tn);
-  int tx = 6;
-  u8g2.drawStr(tx, 34, temp);
-  int tw = u8g2.getStrWidth(temp);
-  u8g2.drawCircle(tx + tw + 5, 14, 2);                   // degree mark
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(tx + tw + 9, 22, WEATHER_UNIT_F ? "F" : "C");
-
-  // Icon top-right
-  drawWeatherIcon(106, 16, weather.code);
-
-  // Condition centered
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(weather.condition)) / 2, 50, weather.condition);
-
-  // Hi / Lo
-  u8g2.setFont(u8g2_font_6x10_tf);
-  char hilo[20];
-  snprintf(hilo, sizeof(hilo), "H %d   L %d", weather.hi, weather.lo);
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(hilo)) / 2, 62, hilo);
-
-  u8g2.sendBuffer();
-}
-
+// Ink Time: the clock and the weather as ferrofluid on a white lightbox
 void renderInfo() {
-  if (g_infoView == VIEW_WEATHER) drawWeatherView();
-  else                            drawTimeView();
+  if (g_infoView == VIEW_WEATHER) ink.renderWeather(u8g2.getBufferPtr(), millis(), weatherNow());
+  else                            ink.renderClock(u8g2.getBufferPtr(), millis());
+  u8g2.sendBuffer();
 }
 
 // Flip Time <-> Weather and restart the auto-switch timer.
 void toggleInfoView() {
   g_infoView = (g_infoView == VIEW_TIME) ? VIEW_WEATHER : VIEW_TIME;
   g_viewSwitchMs = millis();
-  if (g_infoView == VIEW_WEATHER) refreshWeatherIfStale();
 }
 
 void enterInfo() {
@@ -198,12 +130,6 @@ void enterInfo() {
   g_infoView = VIEW_TIME;                // open on the clock
   g_viewSwitchMs = millis();
   g_lastInputMs = millis();
-  // quick "loading" frame, then fetch if the cached data is stale
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth("loading...")) / 2, 36, "loading...");
-  u8g2.sendBuffer();
-  refreshWeatherIfStale();
 }
 
 void exitInfo() {
@@ -237,6 +163,8 @@ uint8_t g_panelContrast = DEFAULT_CONTRAST;   // what the panel is set to right 
 
 // Brightness follows the morph: lerp(face, ferro, P) (art direction §6.1)
 uint8_t panelContrastTarget() {
+  if (g_mode == MODE_INFO)                              // the ink screens' white lightbox
+    return (uint8_t)constrain(g_contrast * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
   if (g_mode != MODE_FERRO) return g_contrast;
   float ferroC = constrain(g_contrast * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
   return (uint8_t)lroundf(g_contrast + (ferroC - g_contrast) * ferro.brightP());
@@ -339,6 +267,18 @@ void ctlSetInfo(bool on) {
     else enterInfo();
   } else if (g_mode == MODE_INFO) exitInfo();
 }
+// Test switch: show the ink weather as one sky (clear, cloudy, rain, snow,
+// storm, fog, wind) instead of the real one; "real" or anything else clears it
+void ctlInfoSky(const String &v) {
+  static const char *const names[SKY_NUM] = { "clear", "cloudy", "rain", "snow", "storm", "fog", "wind" };
+  ink.forceSky = 0xFF;
+  for (uint8_t i = 0; i < SKY_NUM; i++) if (v == names[i]) ink.forceSky = i;
+  if (ink.forceSky != 0xFF) {
+    if (g_mode != MODE_INFO) enterInfo();
+    g_infoView = VIEW_WEATHER;
+    g_viewSwitchMs = millis();
+  }
+}
 void ctlSetSnow(bool on)         { g_lastInputMs = millis(); g_snow = on; }
 void ctlSpark()                  { g_lastInputMs = millis(); leds.spark(); }
 void ctlMotion(int level, int move) {
@@ -401,6 +341,14 @@ String ctlStateJson() {
   s += "\"move\":\"" + String(motion.moveName()) + "\",";
   s += "\"angle\":" + String(motion.angle(), 1) + ",";
   s += "\"faceUs\":" + String(g_faceUs) + ",";
+  s += "\"inkUs\":" + String(ink.lastUs) + ",\"inkMaxUs\":" + String(ink.maxUs) + ",";
+  {
+    Weather w = weatherNow();
+    s += "\"wx\":{\"ok\":" + String(w.valid ? "true" : "false") + ",\"t\":" + String(w.tempF) + ",\"cond\":\"" + String(w.condition) +
+         "\",\"code\":" + String(w.code) + ",\"sky\":" + String(inkSky(w)) + ",\"hi\":" + String(w.hi) + ",\"lo\":" + String(w.lo) +
+         ",\"pop\":" + String(w.pop) + ",\"wind\":" + String(w.windMph) + ",\"day\":" + String(w.isDay ? "true" : "false") + "},";
+  }
+  ink.maxUs = 0;
   s += "\"sendUs\":" + String(g_sendUs) + ",";
   s += "\"frameMs\":" + String(g_frameMs);
   s += "}";
@@ -485,6 +433,7 @@ void setup() {
   if (!webIsAP()) {                  // start NTP clock sync once on a network
     configTzTime(TZ_POSIX, NTP_SERVER_1, NTP_SERVER_2);
   }
+  weatherBegin();                    // background fetches (waits for WiFi itself)
 #else
   WiFi.mode(WIFI_OFF);               // TEMP: radio fully off for the noise test
   where = "wifi-off-test";
@@ -549,11 +498,11 @@ void loop() {
 
   // ---- info (time + weather) mode: render and skip the face ----
   if (g_mode == MODE_INFO) {
-    if (millis() - g_lastFrame < 250) return;   // a clock only needs ~4 FPS
+    if (millis() - g_lastFrame < FRAME_INTERVAL_MS) return;   // full rate: the ink moves
     g_lastFrame = millis();
     if (INFO_AUTO_SWITCH_MS && millis() - g_viewSwitchMs >= INFO_AUTO_SWITCH_MS)
       toggleInfoView();                                       // auto-flip every 30s
-    if (g_infoView == VIEW_WEATHER) refreshWeatherIfStale();  // refresh while shown
+    stepPanelContrast();
     renderInfo();
     return;
   }
