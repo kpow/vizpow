@@ -198,6 +198,14 @@ inline void handleLeds() {
   server.send(200, "text/plain", "ok");
 }
 inline void handleState()      { server.send(200, "application/json", ctlStateJson()); }
+// Render one moment of the boot intro and return that frame (for review):
+// ?t=<ms> the opening/joining, or ?k=<ms>&ap=0|1 the result and swell
+extern void ctlIntroFrame(long t, long k, bool ap);
+inline void handleIntroFrame() {
+  ctlIntroFrame(server.hasArg("t") ? server.arg("t").toInt() : -1, server.hasArg("k") ? server.arg("k").toInt() : -1,
+                server.arg("ap") == "1");
+  server.send_P(200, "application/octet-stream", (PGM_P)u8g2.getBufferPtr(), OLED_WIDTH * OLED_HEIGHT / 8);
+}
 // Raw U8g2 frame buffer (1024 bytes: 8 pages of 128 columns, LSB = top pixel)
 inline void handleScreen() {
   server.send_P(200, "application/octet-stream", (PGM_P)u8g2.getBufferPtr(), 8 * u8g2.getBufferTileWidth() * u8g2.getBufferTileHeight() * 8 / 8);
@@ -250,6 +258,7 @@ inline void registerRoutes() {
   server.on("/contrast", handleContrast);
   server.on("/state", handleState);
   server.on("/debug/screen", handleScreen);
+  server.on("/debug/intro", handleIntroFrame);
   server.on("/update", HTTP_GET, handleUpdatePage);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.onNotFound(handleNotFound);

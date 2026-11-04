@@ -397,33 +397,44 @@ void drawSayText() {
 }
 
 // ============================================================================
-// Boot — he sleeps while the WiFi joins, then wakes up and says where he is
+// Boot — the Ink Time intro (ink_time.h), timed to the real WiFi join
 // ============================================================================
-// Interim intro: the face with shut eyes and a "joining <ssid>..." bubble,
-// animated while tryStation() waits. On a join the eyes open and the bubble
-// shows his address; on the hotspot fallback it shows the hotspot name. The
-// stylised intro from the clock/weather concepts replaces the drawing here.
-void bootStatus(const char *text) {
-  strncpy(g_sayText, text, sizeof(g_sayText) - 1);
-  g_sayText[sizeof(g_sayText) - 1] = 0;
-}
+// The white opens like an iris, a drip splashes into the drop, a compass spike
+// sweeps while tryStation() waits (bootFrame), then the result plays (address
+// or hotspot name) and the drop swells into the face, whose eyes open.
+unsigned long g_bootAt = 0;            // when the intro started
 
-void bootFrame(unsigned long ms) {
+void bootFrame(unsigned long) {
   static unsigned long last = 0;
   if (millis() - last < FRAME_INTERVAL_MS) return;
   last = millis();
-  char t[40];
-  int dots = (ms / 400) % 4;
-  snprintf(t, sizeof(t), "joining %s%.*s", webSsid().c_str(), dots, "...");
-  bootStatus(t);
-  tweenManager.update();
-  face.update();
-  botEyes.step(millis());
+  if (!g_bootAt) g_bootAt = millis();
+  ink.introJoin(u8g2.getBufferPtr(), millis() - g_bootAt, webSsid().c_str());
   leds.update();
-  u8g2.clearBuffer();
-  renderMiniFace();
-  drawSayText();
   u8g2.sendBuffer();
+}
+
+void ctlIntroFrame(long t, long k, bool ap) {
+  if (t >= 0) ink.introJoin(u8g2.getBufferPtr(), t, webSsid().c_str());
+  else if (k >= 0) ink.introResult(u8g2.getBufferPtr(), k, !ap, ap ? "vizMini-8DCC" : "10.0.0.227",
+                                   ap ? "192.168.4.1" : MDNS_HOSTNAME ".local");
+}
+
+// After webBegin(): finish the opening if the join beat it, then the result
+// and the swell. The web server already answers between frames.
+void bootOutro(bool online, const String &where) {
+  while (!g_bootAt || millis() - g_bootAt < InkTime::INTRO_JOIN_AT) { bootFrame(0); delay(5); }
+  String small = online ? String(MDNS_HOSTNAME) + ".local" : String("192.168.4.1");
+  unsigned long rs = millis();
+  for (;;) {
+    unsigned long now = millis();
+    if (!ink.introResult(u8g2.getBufferPtr(), now - rs, online, where.c_str(), small.c_str())) break;
+    leds.update();
+    u8g2.sendBuffer();
+    webLoop();
+    while (millis() - now < FRAME_INTERVAL_MS) delay(2);
+  }
+  u8g2.sendBuffer();                   // all black: the face opens its eyes on it
 }
 
 // ============================================================================
@@ -434,6 +445,8 @@ void setup() {
   randomSeed(esp_random());
 
   gfxDev.begin();
+  gfxDev.setContrast((uint8_t)constrain(DEFAULT_CONTRAST * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX));   // the intro is a white lightbox
+  g_panelContrast = (uint8_t)constrain(DEFAULT_CONTRAST * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
 
   touch.begin();
   face.init();
@@ -466,10 +479,15 @@ void setup() {
   where = "wifi-off-test";
 #endif
   Serial.printf("[vizMini] %s  ->  %s\n", webIsAP() ? "AP" : "STA", where.c_str());
-  // Wake up and say where to find him (the bubble stays longer on the hotspot)
+#if WIFI_ENABLED
+  bootOutro(!webIsAP(), where);
+#endif
+  // Wake up on the black the drop left; on the hotspot keep its name in a bubble
   botEyes.sleeping = false;
-  bootStatus(webIsAP() ? (String("wifi: ") + where).c_str() : where.c_str());
-  g_sayUntil = millis() + (webIsAP() ? BOOT_AP_NOTE_MS : BOOT_IP_NOTE_MS);
+  if (webIsAP()) {
+    snprintf(g_sayText, sizeof(g_sayText), "wifi: %s", where.c_str());
+    g_sayUntil = millis() + BOOT_AP_NOTE_MS;
+  }
 
   g_lastInputMs = millis();
   if (g_ferroSet == FERRO_SET_ON) enterFerro();

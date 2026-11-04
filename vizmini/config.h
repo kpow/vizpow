@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.7.9.2"
+#define FIRMWARE_VERSION "0.7.10.3"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
@@ -138,8 +138,9 @@
 // ---- WiFi / web ------------------------------------------------------------
 #define WIFI_AP_BASE     "vizMini"      // AP SSID becomes vizMini-XXXX
 #define MDNS_HOSTNAME    "vizmini"      // reachable at http://vizmini.local
-#define BOOT_IP_NOTE_MS  5000           // how long the boot bubble shows his address
-#define BOOT_AP_NOTE_MS  30000          // ... or the hotspot name
+#define BOOT_AP_NOTE_MS  30000          // after the intro, the hotspot name stays in a bubble this long
+#define INTRO_IP_HOLD_MS 2600           // intro: how long his address shows before he swells into the face
+#define INTRO_AP_HOLD_MS 8000           // ... or the hotspot name (people have to read it)
 #define STA_CONNECT_TIMEOUT_MS  20000   // give up joining a network after 20 s (a join takes ~5-8 s)
 #define NVS_NAMESPACE    "vizmini"      // Preferences namespace for creds
 

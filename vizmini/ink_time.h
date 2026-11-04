@@ -127,12 +127,115 @@ public:
 
   // ---- text: Helvetica bold in black. A doubled 3x5 font smeared ("TUE NOV"
   // read "THE HOV", "%" read "Z"), so the ink screens use U8g2's helvB08 ----
-  static void inkStr(const char *s, int x, int baseline, bool centre = false) {
-    u8g2.setFont(u8g2_font_helvB08_tr);
+  // colour: 0 black, 1 white
+  static void inkStr(const char *s, int x, int baseline, bool centre = false, uint8_t colour = 0,
+                     const uint8_t *font = u8g2_font_helvB08_tr) {
+    u8g2.setFont(font);
     if (centre) x -= u8g2.getStrWidth(s) / 2;
-    u8g2.setDrawColor(0);
+    u8g2.setFontMode(1);
+    u8g2.setDrawColor(colour);
     u8g2.drawStr(x, baseline, s);
     u8g2.setDrawColor(1);
+  }
+
+  // ---- boot intro ------------------------------------------------------------
+  // t: ms since the intro started. The white opens like an iris on the black,
+  // a drip falls in and splashes into the drop, then a compass spike sweeps
+  // round it while the WiFi joins.
+  static constexpr unsigned long INTRO_JOIN_AT = 1400;   // the joining loop starts here
+
+  void introJoin(uint8_t *buf, unsigned long t, const char *ssid) {
+    uint32_t t0 = micros();
+    n = 0;
+    if (t < 450) {                                         // the iris opens
+      memset(buf, 0, OLED_WIDTH * OLED_HEIGHT / 8);
+      float R = 72 * ease(t / 450.0f), R2 = R * R;
+      for (int y = 0; y < OLED_HEIGHT; y++) for (int x = 0; x < OLED_WIDTH; x++) {
+        float dxp = x + .5f - 64, dyp = y + .5f - 32;
+        if (dxp * dxp + dyp * dyp < R2) setPx(buf, x, y, true);
+      }
+      cost(t0);
+      return;
+    }
+    memset(buf, 0xFF, OLED_WIDTH * OLED_HEIGHT / 8);
+    const float cx = 64, cy = 22;
+    if (t < 1000) {                                        // a drip falls in
+      float v = (t - 450) / 550.0f, y = -4 + (cy + 4) * v * v;
+      add({ cx, y - 6 * v, cx, y, 2, 2.6f, cx, cy, 0xFF });
+    } else if (t < INTRO_JOIN_AT) {                        // and splashes into the drop
+      float k = t - 1000, R = 11 * (1 - expf(-k / 90) * cosf(k / 45));
+      add({ cx, cy, cx, cy, R, R, cx, cy, 0xFF });
+      static const float A3[3] = { -2.5f, -1.57f, -.64f };
+      float d = 19 * sinf(PI * constrain(k / 400, 0.0f, 1.0f));
+      for (float a : A3) add({ cx + cosf(a) * d, cy + sinf(a) * d * .8f, cx + cosf(a) * d, cy + sinf(a) * d * .8f, 2.3f, 2.3f, cx, cy, 0xFF });
+    } else {                                               // joining: a compass spike sweeps round
+      float R = 10.5f + .6f * sinf(t * .004f), a = (t - INTRO_JOIN_AT) * .0045f;
+      add({ cx, cy, cx, cy, R, R, cx, cy, 0xFF });
+      add({ cx + cosf(a) * 8, cy + sinf(a) * 8, cx + cosf(a) * 20, cy + sinf(a) * 16, 2.6f, .9f, cx, cy, 0xFF });
+      add({ cx - cosf(a) * 8, cy - sinf(a) * 8, cx - cosf(a) * 15, cy - sinf(a) * 12, 2.4f, .9f, cx, cy, 0xFF });
+    }
+    renderField(buf);
+    if (t >= INTRO_JOIN_AT) {
+      char l[40]; int dots = (t / 300) % 4;
+      snprintf(l, sizeof(l), "%s%.*s", ssid, dots, "...");
+      inkStr("Joining", 64, 50, true);
+      inkStr(l, 64, 61, true);
+    }
+    cost(t0);
+  }
+
+  // k: ms since the join finished (or failed). Online: a crown pops, an ink bar
+  // wipes across and reveals the address. Hotspot: he sags into a puddle and
+  // raises a feeler beside the hotspot name, held long enough to read. Then the
+  // drop swells over the screen. Returns false once the screen is all black
+  // (the face takes over and opens its eyes).
+  bool introResult(uint8_t *buf, unsigned long k, bool online, const char *big, const char *small) {
+    uint32_t t0 = micros();
+    unsigned long hold = online ? INTRO_IP_HOLD_MS : INTRO_AP_HOLD_MS;
+    if (k >= hold + 800) { memset(buf, 0, OLED_WIDTH * OLED_HEIGHT / 8); return false; }
+    memset(buf, 0xFF, OLED_WIDTH * OLED_HEIGHT / 8);
+    n = 0;
+    const float cx = 64;
+    float tms = (float)(millis() % 600000UL);
+    if (k >= hold) {                                       // swell into the face
+      float q = ease((k - hold) / 800.0f), yy = (online ? 13 : 12) + (32 - (online ? 13 : 12)) * q, R = (online ? 8 : 7) + (72 - (online ? 8 : 7)) * q;
+      add({ cx, yy, cx, yy, R, R, cx, yy, 0xFF });
+      for (int i = 0; i < 6; i++) {
+        float a = tms * .004f + i * 1.047f, x = cx + cosf(a) * R * .9f, y = yy + sinf(a) * R * .9f, rr = R * .22f + 1;
+        add({ x, y, x, y, rr, rr, cx, yy, 0xFF });
+      }
+      renderField(buf);
+      cost(t0);
+      return true;
+    }
+    float e = ease(k / 450.0f);
+    if (online) {
+      float cy = 22 + (13 - 22) * e, R = 10.5f + (8 - 10.5f) * e;
+      add({ cx, cy, cx, cy, R, R, cx, cy, 0xFF });
+      for (int i = 0; i < 5; i++) {                        // the crown pops
+        float a = -HALF_PI + (i - 2) * .63f, L = 3 + 7 * fmaxf(0, expf(-k / 260.0f) * cosf(k / 70.0f));
+        add({ cx + cosf(a) * 6, cy + sinf(a) * 6, cx + cosf(a) * (R + 2 + L), cy + sinf(a) * (R + 2 + L), 2.4f, .9f, cx, cy, 0xFF });
+      }
+    } else {
+      float cy = 22 + (12 - 22) * e, sw = sinf(tms * .004f);
+      add({ cx - 9 * e, cy, cx + 9 * e, cy, 10.5f + (6.5f - 10.5f) * e, 10.5f + (6.5f - 10.5f) * e, cx, cy, 0xFF });   // a puddle
+      float hx = cx + 13 + 2 * sw, hy = fmaxf(3.5f, cy - 10 * e + cosf(tms * .004f));
+      add({ cx + 8, cy - 2, hx, hy, 3, 1.8f, cx, cy, 0xFF });                                                       // a feeler
+      add({ hx, hy, hx, hy, 2.6f, 2.6f, cx, cy, 0xFF });
+    }
+    // The ink bar wipes across and stays: the address sits on it in white
+    // (draining it away cut through the letters mid-way)
+    float wv = 56 * ease(((long)k - 300) / 350.0f);
+    if (k > 300) add({ cx - wv, 44, cx + wv, 44, 7, 7, cx, 44, 0xFF });
+    renderField(buf);
+    if (k > 650) {
+      if (!online) inkStr("Hotspot", 64, 32, true);
+      inkStr(big, 64, 49, true, 1, u8g2_font_helvB10_tr);
+      long nch = ((long)k - 950) / 30;                    // (k is unsigned: subtract as signed)
+      if (nch > 0) { char sm[32]; snprintf(sm, sizeof(sm), "%.*s", nch, small); inkStr(sm, 64, 62, true); }   // typed in
+    }
+    cost(t0);
+    return true;
   }
   static inline void setPx(uint8_t *buf, int x, int y, bool white) {
     if ((unsigned)x >= OLED_WIDTH || (unsigned)y >= OLED_HEIGHT) return;
