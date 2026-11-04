@@ -26,6 +26,7 @@ uint8_t    botBackgroundStyle = 0;                 // 0 = no ambient stroke
 #include "touch_input.h"
 #include "strip_leds.h"
 #include "weather.h"
+#include "ink_time.h"          // Ink Time: the clock and weather as ferrofluid
 #include "web_ui.h"
 #include <time.h>
 
@@ -111,103 +112,53 @@ void startle() {
 }
 
 // ---- Time + Weather (info) mode -------------------------------------------
-// View 1: full-screen clock
-void drawTimeView() {
-  struct tm ti;
-  bool haveTime = getLocalTime(&ti, 5);
-
-  u8g2.clearBuffer();
-  u8g2.setDrawColor(1);
-
-  char hhmm[8];
-  if (haveTime) strftime(hhmm, sizeof(hhmm), CLOCK_24H ? "%H:%M" : "%I:%M", &ti);
-  else          strcpy(hhmm, "--:--");
-  if (!CLOCK_24H && hhmm[0] == '0') memmove(hhmm, hhmm + 1, strlen(hhmm)); // strip leading 0
-
-  u8g2.setFont(u8g2_font_logisoso32_tn);                 // big clock
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(hhmm)) / 2, 40, hhmm);
-
-  if (haveTime && !CLOCK_24H) {                          // AM/PM tag
-    u8g2.setFont(u8g2_font_5x8_tf);
-    u8g2.drawStr(OLED_WIDTH - 14, 10, ti.tm_hour < 12 ? "AM" : "PM");
-  }
-
-  char date[20];
-  if (haveTime) strftime(date, sizeof(date), "%a %b %d", &ti);
-  else          strcpy(date, webIsAP() ? "no network" : "syncing...");
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(date)) / 2, 60, date);
-
-  u8g2.sendBuffer();
-}
-
-// View 2: full-screen weather
-void drawWeatherView() {
-  u8g2.clearBuffer();
-  u8g2.setDrawColor(1);
-
-  if (!weather.valid) {
-    u8g2.setFont(u8g2_font_6x12_tf);
-    const char* msg = (WiFi.status() == WL_CONNECTED) ? "weather n/a" : "no network";
-    u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(msg)) / 2, 36, msg);
-    u8g2.sendBuffer();
-    return;
-  }
-
-  // Big temperature on the left
-  char temp[8];
-  snprintf(temp, sizeof(temp), "%d", weather.tempF);
-  u8g2.setFont(u8g2_font_logisoso24_tn);
-  int tx = 6;
-  u8g2.drawStr(tx, 34, temp);
-  int tw = u8g2.getStrWidth(temp);
-  u8g2.drawCircle(tx + tw + 5, 14, 2);                   // degree mark
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(tx + tw + 9, 22, WEATHER_UNIT_F ? "F" : "C");
-
-  // Icon top-right
-  drawWeatherIcon(106, 16, weather.code);
-
-  // Condition centered
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(weather.condition)) / 2, 50, weather.condition);
-
-  // Hi / Lo
-  u8g2.setFont(u8g2_font_6x10_tf);
-  char hilo[20];
-  snprintf(hilo, sizeof(hilo), "H %d   L %d", weather.hi, weather.lo);
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth(hilo)) / 2, 62, hilo);
-
-  u8g2.sendBuffer();
-}
-
+// Ink Time: the clock and the weather as ferrofluid on a white lightbox.
+// Entering, flipping and leaving all move through the drop (ink_time.h); while
+// his face shows over the drop it is drawn on top here.
 void renderInfo() {
-  if (g_infoView == VIEW_WEATHER) drawWeatherView();
-  else                            drawTimeView();
+  unsigned long now = millis();
+  ink.render(u8g2.getBufferPtr(), now, weatherNow());
+  bool shut;
+  if (ink.faceOver(now, shut)) {
+    tweenManager.update();
+    face.update();
+    botEyes.sleeping = shut;
+    botEyes.step(now);
+    renderMiniFace();
+  }
+  u8g2.sendBuffer();
+  if (ink.exitDone()) {                  // swelled back into the face
+    g_mode = MODE_FACE;
+    botEyes.sleeping = false;
+    applyExpression(g_expr);
+  }
 }
 
-// Flip Time <-> Weather and restart the auto-switch timer.
+// Flip Time <-> Weather through the drop and restart the auto-switch timer
 void toggleInfoView() {
   g_infoView = (g_infoView == VIEW_TIME) ? VIEW_WEATHER : VIEW_TIME;
   g_viewSwitchMs = millis();
-  if (g_infoView == VIEW_WEATHER) refreshWeatherIfStale();
+  ink.startFlip(g_infoView == VIEW_WEATHER ? InkTime::SC_WEATHER : InkTime::SC_CLOCK, millis());
 }
 
-void enterInfo() {
+void enterInfo(bool weather = false) {
   g_mode = MODE_INFO;
-  g_infoView = VIEW_TIME;                // open on the clock
+  g_infoView = weather ? VIEW_WEATHER : VIEW_TIME;   // the clock, unless asked for the weather
   g_viewSwitchMs = millis();
   g_lastInputMs = millis();
-  // quick "loading" frame, then fetch if the cached data is stale
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr((OLED_WIDTH - u8g2.getStrWidth("loading...")) / 2, 36, "loading...");
-  u8g2.sendBuffer();
-  refreshWeatherIfStale();
+  ink.startEnter(weather ? InkTime::SC_WEATHER : InkTime::SC_CLOCK, millis());
 }
 
+// Leave through the drop: the face takes over when it has swelled back
 void exitInfo() {
+  if (g_mode == MODE_INFO) ink.startExit(millis());
+}
+
+// Cut straight back (party mode and motion tests take the screen now)
+void exitInfoNow() {
+  if (g_mode != MODE_INFO) return;
   g_mode = MODE_FACE;
+  botEyes.sleeping = false;
   applyExpression(g_expr);
 }
 
@@ -237,6 +188,10 @@ uint8_t g_panelContrast = DEFAULT_CONTRAST;   // what the panel is set to right 
 
 // Brightness follows the morph: lerp(face, ferro, P) (art direction §6.1)
 uint8_t panelContrastTarget() {
+  if (g_mode == MODE_INFO) {                            // the ink screens' white lightbox
+    float inkC = constrain(g_contrast * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
+    return (uint8_t)lroundf(g_contrast + (inkC - g_contrast) * ink.brightP(millis()));
+  }
   if (g_mode != MODE_FERRO) return g_contrast;
   float ferroC = constrain(g_contrast * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
   return (uint8_t)lroundf(g_contrast + (ferroC - g_contrast) * ferro.brightP());
@@ -264,7 +219,7 @@ void scheduleVisit() {
 }
 
 void enterFerro(unsigned long stayMs = 0) {
-  if (g_mode == MODE_INFO) exitInfo();
+  if (g_mode == MODE_INFO) exitInfoNow();
   g_visitEndAt = stayMs ? millis() + stayMs : 0;
   if (g_mode == MODE_FERRO) return;
   g_mode = MODE_FERRO;
@@ -308,12 +263,27 @@ void ctlFerroSetting(const String &v) {
   for (uint8_t i = 0; i < 3; i++) if (v == ferroSetNames[i]) setFerroSetting(i);
 }
 void ctlFerroVisit() { g_lastInputMs = millis(); enterFerro(FERRO_VISIT_MS); }
+// Party patterns and tentacle moves, by vizMini name or the nearest vizBot
+// name (breath, crown, calm, feelers, long, big)
 void ctlFerroPlay(const String &pat, const String &tent) {
   g_lastInputMs = millis();
   if (g_mode != MODE_FERRO) enterFerro();
-  for (uint8_t i = 1; i < FP_NUM; i++) if (pat == ferroPatternNames[i]) ferro.startPattern(i, millis());
+  String p = pat, t = tent;
+  if (p == "breath") p = "breathe"; else if (p == "crown") p = "crown5"; else if (p == "calm") p = "crown3";
+  else if (p == "feelers") { p = ""; t = "feeler"; } else if (p == "long") { p = ""; t = "reach"; }
+  if (t == "big") t = "reach";
+  for (uint8_t i = 1; i < FP_NUM; i++) if (p == ferroPatternNames[i]) ferro.startPattern(i, millis());
   static const char *const kinds[4] = { "reach", "feeler", "flick", "arm" };
-  for (uint8_t i = 0; i < 4; i++) if (tent == kinds[i]) ferro.tentMove(i, millis());
+  for (uint8_t i = 0; i < 4; i++) if (t == kinds[i]) ferro.tentMove(i, millis());
+}
+void ctlPartyStack(const String &v) {
+  for (uint8_t i = 0; i < 3; i++) if (v == ferroStackNames[i]) {
+    ferro.stack = i;
+    Preferences p;
+    p.begin(NVS_NAMESPACE, false);
+    p.putUChar("pStack", i);
+    p.end();
+  }
 }
 void ctlSetExpression(uint8_t v) { g_lastInputMs = millis(); if (g_mode == MODE_INFO) exitInfo(); applyExpression(v); }
 void ctlSetInfo(bool on) {
@@ -324,13 +294,25 @@ void ctlSetInfo(bool on) {
     else enterInfo();
   } else if (g_mode == MODE_INFO) exitInfo();
 }
+// Test switch: show the ink weather as one sky (clear, cloudy, rain, snow,
+// storm, fog, wind) instead of the real one; "real" or anything else clears it
+void ctlInfoSky(const String &v) {
+  static const char *const names[SKY_NUM] = { "clear", "cloudy", "rain", "snow", "storm", "fog", "wind" };
+  ink.forceSky = 0xFF;
+  for (uint8_t i = 0; i < SKY_NUM; i++) if (v == names[i]) ink.forceSky = i;
+  if (ink.forceSky != 0xFF) {
+    if (g_mode != MODE_INFO) enterInfo(true);
+    else if (g_infoView != VIEW_WEATHER) toggleInfoView();
+    g_viewSwitchMs = millis();
+  }
+}
 void ctlSetSnow(bool on)         { g_lastInputMs = millis(); g_snow = on; }
 void ctlSpark()                  { g_lastInputMs = millis(); leds.spark(); }
 void ctlMotion(int level, int move) {
   g_lastInputMs = millis();
   if (level >= 0) motion.setLevel((uint8_t)level);
   if (move > 0) {
-    if (g_mode == MODE_INFO) exitInfo();
+    if (g_mode == MODE_INFO) exitInfoNow();
     if (g_mode == MODE_FERRO) exitFerroNow();   // stance moves for ferro are phase F3
     motion.start((uint8_t)move, /*force=*/true);
   }
@@ -359,12 +341,14 @@ String ctlStateJson() {
   s += "\"rssi\":" + String((WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0) + ",";
   s += "\"ap\":" + String(webIsAP() ? "true" : "false") + ",";
   s += "\"expr\":" + String(g_expr) + ",";
-  s += "\"mode\":\"" + String(g_mode == MODE_INFO ? "info" : g_mode == MODE_FERRO ? "ferro" : "face") + "\",";
-  s += "\"ferroUs\":" + String(ferro.cnt ? ferro.sumUs / ferro.cnt : 0) + ",";
-  s += "\"ferroMaxUs\":" + String(ferro.maxUs) + ",";
-  s += "\"ferroPat\":\"" + String(ferro.patternName()) + "\",";
+  s += "\"mode\":\"" + String(g_mode == MODE_INFO ? "info" : g_mode == MODE_FERRO ? "party" : "face") + "\",";
+  s += "\"info\":\"" + String(g_infoView == VIEW_WEATHER ? "weather" : "time") + "\",";
+  s += "\"partyUs\":" + String(ferro.cnt ? ferro.sumUs / ferro.cnt : 0) + ",";
+  s += "\"partyMaxUs\":" + String(ferro.maxUs) + ",";
+  s += "\"partyPat\":\"" + String(ferro.patternName()) + "\",";
+  s += "\"partyStack\":\"" + String(ferroStackNames[ferro.stack]) + "\",";
   s += "\"tents\":" + String(ferro.liveTents()) + ",";
-  s += "\"ferroSet\":\"" + String(ferroSetNames[g_ferroSet]) + "\",";
+  s += "\"partySet\":\"" + String(ferroSetNames[g_ferroSet]) + "\",";
   s += "\"nextVisitS\":" + String(g_ferroSet == FERRO_SET_AUTO && g_mode == MODE_FACE ? (long)(g_nextVisitAt - millis()) / 1000 : -1) + ",";
   s += "\"visitLeftS\":" + String(g_mode == MODE_FERRO && g_visitEndAt ? (long)(g_visitEndAt - millis()) / 1000 : -1) + ",";
   s += "\"panel\":" + String(g_panelContrast) + ",";
@@ -373,12 +357,25 @@ String ctlStateJson() {
   s += "\"contrast\":" + String(g_contrast) + ",";
   s += "\"leds\":\"" + String(leds.modeName()) + "\",";
   s += "\"ledBri\":" + String(leds.getBrightness()) + ",";
-  s += "\"ledPat\":" + String(leds.ambientPattern()) + ",";
-  s += "\"ledPal\":" + String(leds.ambientPalette()) + ",";
+  s += "\"ledPat\":\"" + String(leds.patternName()) + "\",";
+  s += "\"ledPal\":\"" + String(leds.paletteName()) + "\",";
+  s += "\"ledPatSel\":\"" + String(leds.patternSel()) + "\",";
+  s += "\"ledPalSel\":\"" + String(leds.paletteSel()) + "\",";
+  s += "\"ledSpeed\":" + String(leds.getSpeed()) + ",";
+  s += "\"ledPace\":\"" + String(leds.paceName()) + "\",";
+  for (int i = 0; i < 3; i++) s += "\"ledC" + String(i + 1) + "\":\"" + leds.colorHex(i) + "\",";
   s += "\"motion\":\"" + String(motion.levelName()) + "\",";
   s += "\"move\":\"" + String(motion.moveName()) + "\",";
   s += "\"angle\":" + String(motion.angle(), 1) + ",";
   s += "\"faceUs\":" + String(g_faceUs) + ",";
+  s += "\"inkUs\":" + String(ink.lastUs) + ",\"inkMaxUs\":" + String(ink.maxUs) + ",";
+  {
+    Weather w = weatherNow();
+    s += "\"wx\":{\"ok\":" + String(w.valid ? "true" : "false") + ",\"t\":" + String(w.tempF) + ",\"cond\":\"" + String(w.condition) +
+         "\",\"code\":" + String(w.code) + ",\"sky\":" + String(inkSky(w)) + ",\"hi\":" + String(w.hi) + ",\"lo\":" + String(w.lo) +
+         ",\"pop\":" + String(w.pop) + ",\"wind\":" + String(w.windMph) + ",\"day\":" + String(w.isDay ? "true" : "false") + "},";
+  }
+  ink.maxUs = 0;
   s += "\"sendUs\":" + String(g_sendUs) + ",";
   s += "\"frameMs\":" + String(g_frameMs);
   s += "}";
@@ -400,22 +397,44 @@ void drawSayText() {
 }
 
 // ============================================================================
-// Boot splash — show where to reach the bot
+// Boot — the Ink Time intro (ink_time.h), timed to the real WiFi join
 // ============================================================================
-void splash(const String& where) {
-  u8g2.clearBuffer();
-  u8g2.setDrawColor(1);
-  u8g2.setFont(u8g2_font_7x14B_tf);
-  u8g2.drawStr(28, 22, "vizMini");
-  u8g2.setFont(u8g2_font_5x8_tf);
-  if (webIsAP()) {
-    u8g2.drawStr(4, 40, "join wifi:");
-    u8g2.drawStr(4, 52, where.c_str());
-  } else {
-    u8g2.drawStr(4, 40, "http://");
-    u8g2.drawStr(4, 52, where.c_str());
-  }
+// The white opens like an iris, a drip splashes into the drop, a compass spike
+// sweeps while tryStation() waits (bootFrame), then the result plays (address
+// or hotspot name) and the drop swells into the face, whose eyes open.
+unsigned long g_bootAt = 0;            // when the intro started
+
+void bootFrame(unsigned long) {
+  static unsigned long last = 0;
+  if (millis() - last < FRAME_INTERVAL_MS) return;
+  last = millis();
+  if (!g_bootAt) g_bootAt = millis();
+  ink.introJoin(u8g2.getBufferPtr(), millis() - g_bootAt, webSsid().c_str());
+  leds.update();
   u8g2.sendBuffer();
+}
+
+void ctlIntroFrame(long t, long k, bool ap) {
+  if (t >= 0) ink.introJoin(u8g2.getBufferPtr(), t, webSsid().c_str());
+  else if (k >= 0) ink.introResult(u8g2.getBufferPtr(), k, !ap, ap ? "vizMini-8DCC" : "10.0.0.227",
+                                   ap ? "192.168.4.1" : MDNS_HOSTNAME ".local");
+}
+
+// After webBegin(): finish the opening if the join beat it, then the result
+// and the swell. The web server already answers between frames.
+void bootOutro(bool online, const String &where) {
+  while (!g_bootAt || millis() - g_bootAt < InkTime::INTRO_JOIN_AT) { bootFrame(0); delay(5); }
+  String small = online ? String(MDNS_HOSTNAME) + ".local" : String("192.168.4.1");
+  unsigned long rs = millis();
+  for (;;) {
+    unsigned long now = millis();
+    if (!ink.introResult(u8g2.getBufferPtr(), now - rs, online, where.c_str(), small.c_str())) break;
+    leds.update();
+    u8g2.sendBuffer();
+    webLoop();
+    while (millis() - now < FRAME_INTERVAL_MS) delay(2);
+  }
+  u8g2.sendBuffer();                   // all black: the face opens its eyes on it
 }
 
 // ============================================================================
@@ -426,14 +445,13 @@ void setup() {
   randomSeed(esp_random());
 
   gfxDev.begin();
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_7x14B_tf);
-  u8g2.drawStr(20, 36, "vizMini...");
-  u8g2.sendBuffer();
+  gfxDev.setContrast((uint8_t)constrain(DEFAULT_CONTRAST * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX));   // the intro is a white lightbox
+  g_panelContrast = (uint8_t)constrain(DEFAULT_CONTRAST * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
 
   touch.begin();
   face.init();
   botEyes.init(millis());
+  botEyes.sleeping = true;           // asleep until the WiFi joins
   motion.begin();                    // level from NVS (rare by default)
   motion.onDizzy = dizzyAfterSpin;
   ferro.begin();
@@ -441,6 +459,7 @@ void setup() {
     Preferences p;
     p.begin(NVS_NAMESPACE, true);
     g_ferroSet = p.getUChar("ferro", FERRO_SET_AUTO);
+    ferro.stack = min((int)p.getUChar("pStack", 1), 2);
     p.end();
     if (g_ferroSet > FERRO_SET_AUTO) g_ferroSet = FERRO_SET_AUTO;
   }
@@ -450,17 +469,25 @@ void setup() {
 
   String where;
 #if WIFI_ENABLED
-  where = webBegin();                // join wifi or start AP + captive portal
+  where = webBegin(bootFrame);       // join wifi (animating) or start AP + captive portal
   if (!webIsAP()) {                  // start NTP clock sync once on a network
     configTzTime(TZ_POSIX, NTP_SERVER_1, NTP_SERVER_2);
   }
+  weatherBegin();                    // background fetches (waits for WiFi itself)
 #else
   WiFi.mode(WIFI_OFF);               // TEMP: radio fully off for the noise test
   where = "wifi-off-test";
 #endif
-  splash(where);
   Serial.printf("[vizMini] %s  ->  %s\n", webIsAP() ? "AP" : "STA", where.c_str());
-  delay(2000);
+#if WIFI_ENABLED
+  bootOutro(!webIsAP(), where);
+#endif
+  // Wake up on the black the drop left; on the hotspot keep its name in a bubble
+  botEyes.sleeping = false;
+  if (webIsAP()) {
+    snprintf(g_sayText, sizeof(g_sayText), "wifi: %s", where.c_str());
+    g_sayUntil = millis() + BOOT_AP_NOTE_MS;
+  }
 
   g_lastInputMs = millis();
   if (g_ferroSet == FERRO_SET_ON) enterFerro();
@@ -516,11 +543,11 @@ void loop() {
 
   // ---- info (time + weather) mode: render and skip the face ----
   if (g_mode == MODE_INFO) {
-    if (millis() - g_lastFrame < 250) return;   // a clock only needs ~4 FPS
+    if (millis() - g_lastFrame < FRAME_INTERVAL_MS) return;   // full rate: the ink moves
     g_lastFrame = millis();
     if (INFO_AUTO_SWITCH_MS && millis() - g_viewSwitchMs >= INFO_AUTO_SWITCH_MS)
       toggleInfoView();                                       // auto-flip every 30s
-    if (g_infoView == VIEW_WEATHER) refreshWeatherIfStale();  // refresh while shown
+    stepPanelContrast();
     renderInfo();
     return;
   }

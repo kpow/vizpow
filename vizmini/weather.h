@@ -10,9 +10,10 @@
 // ============================================================================
 // Weather — Open-Meteo (free, no API key, plain HTTP)
 // ============================================================================
-// Same source/approach as the full vizbot (weather_data.h), trimmed for the C3:
-// fetched synchronously when the info screen opens (and at most every
-// WEATHER_REFRESH_MS). We only need current temp + condition + today's hi/lo.
+// Same source/approach as the full vizbot (weather_data.h), trimmed for the C3.
+// Fetched by a background FreeRTOS task (weatherBegin), so the screen never
+// freezes on the network: the info screens only read the cached result.
+// Current temp, condition, wind and day/night; today's hi/lo and rain chance.
 // ============================================================================
 
 enum WeatherIcon : uint8_t {
@@ -24,6 +25,9 @@ struct Weather {
   int    tempF = 0;
   int    hi = 0, lo = 0;
   uint8_t code = 0;          // WMO code
+  int    windMph = 0;        // current wind speed
+  int    pop = 0;            // today's max precipitation probability, %
+  bool   isDay = true;
   char   condition[16] = "";
   unsigned long lastFetchMs = 0;
 };
@@ -76,7 +80,9 @@ static bool jsonFirstInArray(const char* json, const char* key, float& out) {
   return true;
 }
 
-// ---- fetch (blocking, ~<1s) ------------------------------------------------
+// ---- fetch (blocking: runs only in the weather task) ------------------------
+static portMUX_TYPE weatherMux = portMUX_INITIALIZER_UNLOCKED;
+
 inline bool fetchWeather() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
@@ -87,12 +93,12 @@ inline bool fetchWeather() {
     return false;
   }
 
-  char req[256];
+  char req[384];   // the request line is ~270 chars; at 256 it was cut off (404)
   snprintf(req, sizeof(req),
     "GET /v1/forecast?latitude=%s&longitude=%s"
-    "&current=temperature_2m,weather_code"
-    "&daily=temperature_2m_max,temperature_2m_min"
-    "&temperature_unit=%s&forecast_days=1&timezone=auto HTTP/1.1",
+    "&current=temperature_2m,weather_code,wind_speed_10m,is_day"
+    "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+    "&temperature_unit=%s&wind_speed_unit=mph&forecast_days=1&timezone=auto HTTP/1.0",   // 1.0: no chunked body
     WEATHER_LAT, WEATHER_LON, WEATHER_UNIT_F ? "fahrenheit" : "celsius");
   client.println(req);
   client.println("Host: api.open-meteo.com");
@@ -105,44 +111,87 @@ inline bool fetchWeather() {
     delay(10);
   }
 
-  static char resp[1100];
+  // Read until the server closes (Connection: close). Stopping at the first
+  // moment nothing was waiting only got the first packet once the reply grew
+  // past it, and every field parsed as 0.
+  static char resp[1600];
   int n = 0;
-  while (client.available() && n < (int)sizeof(resp) - 1) resp[n++] = client.read();
+  t0 = millis();
+  while ((client.connected() || client.available()) && n < (int)sizeof(resp) - 1 && millis() - t0 < 5000) {
+    if (client.available()) resp[n++] = client.read();
+    else delay(5);
+  }
   resp[n] = '\0';
   client.stop();
 
   const char* body = strstr(resp, "\r\n\r\n");
   body = body ? body + 4 : resp;
 
+  // Parse into a copy, then swap it in under the lock so the renderer never
+  // reads half an update
+  Weather w = weather;
   const char* cur = strstr(body, "\"current\"");
   float f;
-  if (cur && jsonFloat(cur, "\"temperature_2m\"", f)) weather.tempF = (int)lroundf(f);
-  if (cur && jsonFloat(cur, "\"weather_code\"", f)) {
-    weather.code = (uint8_t)(f + 0.5f);
-    strncpy(weather.condition, wmoText(weather.code), sizeof(weather.condition) - 1);
-    weather.condition[sizeof(weather.condition) - 1] = '\0';
+  if (!cur || !jsonFloat(cur, "\"temperature_2m\"", f)) {
+    Serial.printf("[weather] no current block in %d bytes: %.160s\n", n, resp);
+    return false;
   }
+  w.tempF = (int)lroundf(f);
+  if (cur && jsonFloat(cur, "\"weather_code\"", f)) {
+    w.code = (uint8_t)(f + 0.5f);
+    strncpy(w.condition, wmoText(w.code), sizeof(w.condition) - 1);
+    w.condition[sizeof(w.condition) - 1] = '\0';
+  }
+  if (cur && jsonFloat(cur, "\"wind_speed_10m\"", f)) w.windMph = (int)lroundf(f);
+  if (cur && jsonFloat(cur, "\"is_day\"", f)) w.isDay = f > 0.5f;
   const char* daily = strstr(body, "\"daily\"");
-  if (daily && jsonFirstInArray(daily, "\"temperature_2m_max\"", f)) weather.hi = (int)lroundf(f);
-  if (daily && jsonFirstInArray(daily, "\"temperature_2m_min\"", f)) weather.lo = (int)lroundf(f);
-
-  weather.lastFetchMs = millis();
-  weather.valid = true;
-  Serial.printf("[weather] %d%c %s  H%d L%d\n",
-                weather.tempF, WEATHER_UNIT_F ? 'F' : 'C', weather.condition,
-                weather.hi, weather.lo);
+  if (daily && jsonFirstInArray(daily, "\"temperature_2m_max\"", f)) w.hi = (int)lroundf(f);
+  if (daily && jsonFirstInArray(daily, "\"temperature_2m_min\"", f)) w.lo = (int)lroundf(f);
+  if (daily && jsonFirstInArray(daily, "\"precipitation_probability_max\"", f)) w.pop = (int)lroundf(f);
+  w.lastFetchMs = millis();
+  w.valid = true;
+  portENTER_CRITICAL(&weatherMux);
+  weather = w;
+  portEXIT_CRITICAL(&weatherMux);
+  Serial.printf("[weather] %d%c %s  H%d L%d  wind %d  pop %d%%  %s\n",
+                w.tempF, WEATHER_UNIT_F ? 'F' : 'C', w.condition, w.hi, w.lo,
+                w.windMph, w.pop, w.isDay ? "day" : "night");
   return true;
 }
 
-// Fetch only when due. While we have no valid data, retry every 30s (so a
-// transient failure recovers) instead of hammering — fetchWeather() can block
-// for several seconds, so we must not call it every frame. Once valid, refresh
-// at WEATHER_REFRESH_MS.
-inline void refreshWeatherIfStale() {
-  static unsigned long lastAttempt = 0;
-  bool due = weather.valid ? (millis() - weather.lastFetchMs) > WEATHER_REFRESH_MS
-                           : (lastAttempt == 0 || millis() - lastAttempt > 30000);
-  if (due) { lastAttempt = millis(); fetchWeather(); }
+// A copy of the latest weather, safe to read from the render loop
+inline Weather weatherNow() {
+  portENTER_CRITICAL(&weatherMux);
+  Weather w = weather;
+  portEXIT_CRITICAL(&weatherMux);
+  return w;
+}
+
+// Background task: fetch at boot, then every WEATHER_REFRESH_MS; while there
+// is no valid data, retry every 30 s so a transient failure recovers
+static void weatherTask(void *) {
+  unsigned long lastAttempt = 0;
+  for (;;) {
+    bool due = weather.valid ? (millis() - weather.lastFetchMs) > WEATHER_REFRESH_MS
+                             : (lastAttempt == 0 || millis() - lastAttempt > 30000);
+    if (due && WiFi.status() == WL_CONNECTED) { lastAttempt = millis(); fetchWeather(); }
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
+inline void weatherBegin() { xTaskCreate(weatherTask, "weather", 6144, nullptr, 1, nullptr); }
+
+// The ink weather scenes (ink_time.h): one of 7 behaviours of the drop
+enum InkSky : uint8_t { SKY_CLEAR = 0, SKY_CLOUDY, SKY_RAIN, SKY_SNOW, SKY_STORM, SKY_FOG, SKY_WIND, SKY_NUM };
+inline uint8_t inkSky(const Weather &w) {
+  WeatherIcon ic = wmoIcon(w.code);
+  if (ic == WX_THUNDER) return SKY_STORM;
+  if (ic == WX_RAIN || ic == WX_DRIZZLE) return SKY_RAIN;
+  if (ic == WX_SNOW) return SKY_SNOW;
+  if (ic == WX_FOG) return SKY_FOG;
+  if (w.windMph >= INK_WINDY_MPH) return SKY_WIND;     // WMO codes have no wind
+  if (ic == WX_CLEAR) return SKY_CLEAR;
+  return SKY_CLOUDY;
 }
 
 // ============================================================================

@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.7.3.2"
+#define FIRMWARE_VERSION "0.7.10.3"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
@@ -111,10 +111,6 @@
 #define LED_MAX_MA           450       // FastLED power cap so USB never browns out
 #define LED_DEFAULT_BRI      160       // 0-255, saved per bot in NVS once changed
 #define LED_FRAME_MS         20        // 50 Hz light updates
-#define LED_PATTERN_MS       9000      // ambient: a new pattern every 9-12 s
-#define LED_PALETTE_MS       6000      // ambient: a new palette every 6-8 s (own clock)
-#define LED_AMBIENT_PATTERNS 8
-#define LED_AMBIENT_PALETTES 8
 #define LED_MOOD_CYCLE_MS    10000     // mood: swap to a companion motion every 10 s
 #define LED_SPARK_MS         3000      // rainbow burst laid over any mode
 
@@ -132,13 +128,20 @@
 #define WEATHER_LON     "-77.43"    // <-- your longitude
 #define WEATHER_UNIT_F  1           // 1 = Fahrenheit, 0 = Celsius
 #define WEATHER_REFRESH_MS  600000  // re-fetch at most every 10 min
+#define INK_WINDY_MPH       15      // Ink Time shows "wind" at or above this (no WMO code for it)
+#define INK_ENTER_MS        1400    // face -> ink: eyes shut, the black contracts into the drop, it splits out
+#define INK_EXIT_MS         1400    // ink -> face: gather into the drop, swell over the screen, eyes open
+#define INK_FLIP_MS         1200    // clock <-> weather through the drop
 #define CLOCK_24H       0           // 1 = 24-hour clock, 0 = 12-hour
 #define INFO_AUTO_SWITCH_MS 30000   // auto-flip time<->weather in info mode (0 = off)
 
 // ---- WiFi / web ------------------------------------------------------------
 #define WIFI_AP_BASE     "vizMini"      // AP SSID becomes vizMini-XXXX
 #define MDNS_HOSTNAME    "vizmini"      // reachable at http://vizmini.local
-#define STA_CONNECT_TIMEOUT_MS  10000   // give up joining a network after 10s
+#define BOOT_AP_NOTE_MS  30000          // after the intro, the hotspot name stays in a bubble this long
+#define INTRO_IP_HOLD_MS 2600           // intro: how long his address shows before he swells into the face
+#define INTRO_AP_HOLD_MS 8000           // ... or the hotspot name (people have to read it)
+#define STA_CONNECT_TIMEOUT_MS  20000   // give up joining a network after 20 s (a join takes ~5-8 s)
 #define NVS_NAMESPACE    "vizmini"      // Preferences namespace for creds
 
 #endif // CONFIG_H
