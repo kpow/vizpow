@@ -2486,6 +2486,62 @@ void handleDebugTouch() {
 }
 #endif
 
+#ifdef TARGET_CORES3
+// GET /debug/power — the AXP2101's own view of charging, plus why the chip last
+// reset. Read-only. The stackchan base's servo rail boosts straight off the
+// battery this PMIC charges, so "on USB but still draining" starts here.
+void handleDebugPower() {
+  static const uint8_t regs[] = {
+    0x00, 0x01,   // status 1 (VBUS good, battery present), status 2 (charge state)
+    0x16, 0x18,   // VBUS input current limit, charger enable
+    0x20, 0x21,   // power-on source, power-off source
+    0x23,         // DCDC under/over-voltage power-off
+    0x50,         // TS pin (bit 4 set = charger ignores it)
+    0x61, 0x62, 0x64,   // precharge current, charge current, charge voltage
+  };
+  JsonDocument d;
+  d["resetReason"] = (int)esp_reset_reason();   // 9 = brownout, 4 = panic, 6/7 = watchdog
+  if (!i2cAcquire(200)) { server.send(503, "text/plain", "I2C busy"); return; }
+  // ?ext=0|1 switches the CoreS3 5V bus (BUS_OUT_EN + boost) before reading, to
+  // test whether output mode is what keeps USB from reaching the AXP2101.
+  if (server.hasArg("ext")) {
+    M5.Power.setExtOutput(server.arg("ext") == "1");
+    delay(500);
+    d["ext"] = server.arg("ext") == "1";
+  }
+  d["charging"] = M5.Power.isCharging() == m5::Power_Class::is_charging;
+  d["batteryMv"] = M5.Power.getBatteryVoltage();
+  d["batteryPct"] = M5.Power.getBatteryLevel();
+  d["vbusMv"] = (int)(M5.Power.Axp2101.getVBUSVoltage() * 1000);
+  // Raw ADC, which getVBUSVoltage() skips while "VBUS good" is clear: tells
+  // "nothing arriving" from "arriving but too low to count".
+  d["vbusRawMv"] = ((M5.Power.Axp2101.readRegister8(0x38) & 0x3F) << 8) | M5.Power.Axp2101.readRegister8(0x39);
+  d["vsysRawMv"] = ((M5.Power.Axp2101.readRegister8(0x3A) & 0x3F) << 8) | M5.Power.Axp2101.readRegister8(0x3B);
+  JsonObject r = d["reg"].to<JsonObject>();
+  for (uint8_t reg : regs) {
+    char key[5];
+    snprintf(key, sizeof(key), "0x%02X", reg);
+    char val[5];
+    snprintf(val, sizeof(val), "0x%02X", M5.Power.Axp2101.readRegister8(reg));
+    r[key] = val;
+  }
+  // AW9523 port 0 drives the CoreS3's 5V load switches: bit 1 BUS_OUT_EN, bit 5
+  // USB_OTG_EN. USB reaches the AXP2101 only while USB_OTG_EN is low.
+  JsonObject aw = d["aw9523"].to<JsonObject>();
+  for (uint8_t reg = 0x02; reg <= 0x05; reg++) {   // outputs P0/P1, direction P0/P1
+    char key[5];
+    snprintf(key, sizeof(key), "0x%02X", reg);
+    char val[5];
+    snprintf(val, sizeof(val), "0x%02X", M5.In_I2C.readRegister8(0x58, reg, 400000));
+    aw[key] = val;
+  }
+  i2cRelease();
+  String out;
+  serializeJson(d, out);
+  server.send(200, "application/json", out);
+}
+#endif
+
 #ifdef VOICE_ENABLED
 // ---- vizbrain voice endpoints (see voice_client.h) ----
 void handleBrainStatus() {
@@ -2713,6 +2769,9 @@ void setupWebServer() {
   #endif
   server.on("/brightness", handleBrightness);
   server.on("/debug/wifidrop", handleDebugWifiDrop);
+  #ifdef TARGET_CORES3
+  server.on("/debug/power", handleDebugPower);
+  #endif
 
   // Bot mode endpoints
   server.on("/bot/expression", handleBotExpression);

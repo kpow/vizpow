@@ -413,6 +413,13 @@ void setup() {
   cfg.internal_spk = false;
   cfg.internal_mic = false;
   #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  // Leave the CoreS3's 5V output (BUS_OUT_EN + boost) off. With it on, USB never
+  // reaches the AXP2101 on the stackchan base, so the battery never charges and
+  // drains ~0.5 A until the bot crash-loops. The base doesn't use that 5V: its
+  // chips run on 3V3 and the servo rail boosts off the battery.
+  cfg.output_power = false;
+  #endif
   M5.begin(cfg);
   #ifdef BOARD_HAS_FACES_BASE
   M5.Speaker.end();
