@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include "esp_http_client.h"
+#include <mbedtls/platform.h>
 #include "config.h"
 #include "system_status.h"
 #include "content_cache.h"
@@ -795,7 +796,18 @@ void pollScheduledCommands() {
 // Cloud Init (called from boot, before task starts)
 // ============================================================================
 
+// mbedTLS is built to allocate in internal RAM (CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC),
+// so each sync's handshake took ~30 KB of it and left WiFi, lwIP and the web
+// server ~3 KB to share (seen on /debug/tasks, 2026-11-06). Prefer PSRAM, as
+// IDF's CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC would; boards without it fall back.
+static void* cloudTlsCalloc(size_t n, size_t size) {
+  void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p ? p : heap_caps_calloc(n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
 void initCloudClient() {
+  mbedtls_platform_set_calloc_free(cloudTlsCalloc, heap_caps_free);
+
   // Load from NVS first (survives reflash)
   loadCloudNVS();
 
@@ -861,8 +873,10 @@ void pollCloudSync() {
   if (now - lastSyncAttempt >= interval * 1000) {
     lastSyncAttempt = now;
 
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    // TLS buffers live in PSRAM when there is some (cloudTlsCalloc), so that's the heap to check
+    uint32_t tlsCaps = psramFound() ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL;
+    size_t largest = heap_caps_get_largest_free_block(tlsCaps);
+    size_t freeHeap = heap_caps_get_free_size(tlsCaps);
     DBG("Cloud: sync, largest block=");
     DBG(largest);
     DBG(" free=");
@@ -873,9 +887,14 @@ void pollCloudSync() {
 
     // Heap guard: TLS needs ~24KB contiguous (16.7KB in_buf + 4.4KB out_buf + 1.5KB HTTP + 2KB overhead)
     // With reduced HTTP buffers (1024+512 vs 2048+1024), threshold lowered from 32768.
-    if (largest < 28672) {
+    // Sockets, pbufs and the HTTP buffers still come from internal RAM (they're
+    // under the 4 KB always-internal limit), so with TLS in PSRAM keep ~8 KB there too.
+    size_t internalBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    if (largest < 28672 || internalBlock < 8192) {
       DBG("Cloud: skip — heap too fragmented (need 28672, have ");
       DBG(largest);
+      DBG("; internal ");
+      DBG(internalBlock);
       DBGLN(")");
       cloudNextPollMs = now + 10000;  // retry in 10s
       return;
