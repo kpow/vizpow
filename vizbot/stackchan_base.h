@@ -263,21 +263,22 @@ inline int scReadServoPos(uint8_t id) {
   return -1;
 }
 
-// Power-cycle the servo rail and re-home. Kept as a manual escape hatch behind
-// POST /bot/servo/reinit; with BSP owning the bus it should never be needed.
+// Power-cycle the servo rail and re-home. Called by the freeze watchdog below
+// and by POST /bot/servo/reinit.
+inline bool scServoAnswers(uint8_t id);   // servo freeze watchdog, below
+
 inline bool scRecoverServos() {
-  // Capture the pose BEFORE cutting power (reads still answer during a stall,
-  // per a day of observation) so the head can glide back to where it was
-  // instead of sagging and then snapping to home — the old goHome(500) here
-  // made every scheduled reinit a visible jump.
+  // Capture the pose BEFORE cutting power so the head can glide back to where
+  // it was instead of snapping to home. During a freeze the servos don't answer,
+  // so this is BSP's animation value (its fallback for a failed read): where the
+  // head was last told to be, which is close enough to glide back from.
   int yaw   = scChan.Motion.getCurrentYawAngle();
   int pitch = scChan.Motion.getCurrentPitchAngle();
 
   // Dip to the pitch floor BEFORE cutting power. When the rail drops, pitch
-  // torque vanishes and the head free-falls to its sag point — that clunk is
-  // the harshest part of the cycle and nothing after power-up can soften it.
-  // Parked at the floor there is nowhere left to fall, so the whole reinit
-  // reads as a slow bow down and back up rather than a collapse.
+  // torque vanishes and the head free-falls to its sag point. Parked at the
+  // floor there is nowhere left to fall. (A frozen servo ignores this, so a
+  // recovery from a real freeze still drops the head once.)
   scMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
   delay(1300);
 
@@ -292,21 +293,15 @@ inline bool scRecoverServos() {
   }
   delay(500);
 
-  // Do NOT command a move until the bus actually answers reads again. BSP
-  // teleports its spring animation to getCurrentAngle() (a real ReadPos) at
-  // the start of every move; while the servo is still booting that read fails
-  // and clamps to the angle floor (-1280 yaw / 0 pitch), so a "gentle glide"
-  // springs across the entire range at full torque — hard enough to walk the
-  // whole robot across a desk. Poll until reads are sane, and if they never
-  // are, command nothing: a still head beats a slamming one, and the next
-  // idle-drift move will re-sync via the same teleport once reads recover.
+  // Do NOT command a move until both servos answer again: moves sent while
+  // they're still booting are lost, and a still head beats a half-done glide.
+  // Ping rather than read angles: BSP's getCurrentAngle() falls back to the
+  // animation value when a read fails, so angles look fine on a dead bus.
   bool live = false;
   uint32_t started = millis();
   while (millis() - started < 2500) {
     delay(100);
-    int y = scChan.Motion.getCurrentYawAngle();
-    int p = scChan.Motion.getCurrentPitchAngle();
-    if (y > -1270 && p > 5) { live = true; break; }
+    if (scServoAnswers(SC_SERVO_X_ID) && scServoAnswers(SC_SERVO_Y_ID)) { live = true; break; }
   }
   if (!live) {
     DBGLN("  reinit: bus not answering after power-up — skipping repositioning");
@@ -323,41 +318,96 @@ inline bool scRecoverServos() {
 }
 
 // ============================================================================
-// Scheduled servo reinit — blind rail cycle every 5 minutes
+// Servo freeze watchdog
 // ============================================================================
-// After a day of observation: the head stalls after hours of running, the bus
-// still ANSWERS ReadPos during a stall (the angle-floor watchdog below in git
-// history never fired), and a manual /bot/servo/reinit recovers it 100% of the
-// time at a cost of ~1s. So the failure is not the bus going deaf — the motion
-// layer stops producing movement — and detection by reads is a dead end.
+// What a head stall really is: both servos stop answering on the bus at once,
+// and stop obeying moves too, and stay that way until the servo rail is cycled.
+// Bench tests on 2026-11-05 pinned it to the hardware: it happens only while the
+// servo motors are driven, with M5's own BSP and stock idle motion as much as
+// with ours, at full or half torque, on battery or USB, with or without a
+// battery sag. A head that only holds still, or is turned by hand with torque
+// off, never locks up. Firmware can't stop it, so detect it fast and recover.
 //
-// Until the trigger is found, just cycle the rail on a schedule. Worst-case
-// dead time drops from "until someone notices" (30+ min) to 5 minutes, and the
-// ~1s hiccup + re-home is invisible next to idle drift's constant motion.
-//
-// Best lead for the real cause if anyone picks this up: stalls did not occur
-// during chill mode, which is exactly when idle drift's constant retargeting
-// of BSP's spring animation is suspended — and that retargeting is the one
-// thing vizbot does that M5's never-stalling demo doesn't. Soak with idle
-// drift disabled to confirm.
-#ifndef SC_SERVO_CYCLE_MS
-#define SC_SERVO_CYCLE_MS 300000UL   // 5 minutes (0 disables)
-#endif
+// Ping both servos every second; after 3 checks in a row where a ready servo
+// never answers, cycle the rail. The pings go through a second handle on the
+// same UART (BSP keeps its bus object private) but hold BSP's own Motion mutex
+// while they do, so they never collide with the motion task's traffic.
+#include <drivers/FTServo_Arduino/src/SCSCL.h>
+#include <esp_heap_caps.h>
+#include <new>
 
-static uint32_t scNextServoCycleMs = SC_SERVO_CYCLE_MS;
+#define SC_SERVO_CHECK_MS     1000
+#define SC_SERVO_DEAD_CHECKS  3
+#define SC_SERVO_BACKOFF_MS   15000   // after a recovery, before checking again
+#define SC_SERVO_BACKOFF_MAX  300000  // doubles while recoveries don't help (servo missing?)
+
 static uint16_t scServoReboots     = 0;   // exposed in /state
+static uint32_t scNextServoCheckMs = 0;
+static uint8_t  scServoDeadChecks  = 0;
+static uint32_t scServoBackoffMs   = SC_SERVO_BACKOFF_MS;
+
+// Motion::_mutex is private, and every Motion call (including the 50 Hz update
+// task) holds it for its bus I/O. An explicit template instantiation may name a
+// private member, so this hands back a pointer-to-member for it without
+// patching BSP. Hold scBusLock around any direct bus access.
+template <typename Tag, typename Tag::type M>
+struct ScPrivateMember { friend typename Tag::type scGet(Tag) { return M; } };
+struct ScMotionMutexTag {
+  typedef std::mutex stackchan::motion::Motion::*type;
+  friend type scGet(ScMotionMutexTag);
+};
+template struct ScPrivateMember<ScMotionMutexTag, &stackchan::motion::Motion::_mutex>;
+
+struct ScBusLock {
+  std::lock_guard<std::mutex> g;
+  ScBusLock() : g(scChan.Motion.*scGet(ScMotionMutexTag())) {}
+};
+
+// The second bus handle. SCSCL carries 2 KB of angle-limit tables, and as a
+// static it sat in internal RAM, where the camera needs one contiguous 30 KB
+// DMA block at boot: those 2 KB left the largest free block 12 bytes short and
+// the camera failed to start. Build it in PSRAM on first use instead.
+inline SCSCL& scProbe() {
+  static SCSCL* bus = nullptr;
+  if (!bus) {
+    void* mem = heap_caps_malloc(sizeof(SCSCL), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    bus = mem ? new (mem) SCSCL() : new SCSCL();
+    bus->uart_num  = UART_NUM_1;   // BSP installed the driver; share it
+    bus->IOTimeOut = 10;
+  }
+  return *bus;
+}
+
+inline bool scServoAnswers(uint8_t id) {
+  ScBusLock lock;
+  for (int i = 0; i < 3; i++) {
+    if (scProbe().Ping(id) == id) return true;
+    delay(2);
+  }
+  return false;
+}
 
 // Call once per loop.
 inline void scServoWatchdogTick() {
-  if (SC_SERVO_CYCLE_MS == 0) return;
+  if (!sysStatus.scServoXReady && !sysStatus.scServoYReady) return;
   uint32_t now = millis();
-  if ((int32_t)(now - scNextServoCycleMs) < 0) return;
-  scNextServoCycleMs = now + SC_SERVO_CYCLE_MS;
+  if ((int32_t)(now - scNextServoCheckMs) < 0) return;
+  scNextServoCheckMs = now + SC_SERVO_CHECK_MS;
 
-  DBGLN("Scheduled servo reinit (5min)");
+  bool deaf = (sysStatus.scServoXReady && !scServoAnswers(SC_SERVO_X_ID)) ||
+              (sysStatus.scServoYReady && !scServoAnswers(SC_SERVO_Y_ID));
+  if (!deaf) { scServoDeadChecks = 0; return; }
+  if (++scServoDeadChecks < SC_SERVO_DEAD_CHECKS) return;
+
+  DBGLN("Servos stopped answering — cycling the rail");
+  scServoDeadChecks = 0;
   scServoReboots++;
   scMarkHeadBusy(5000);   // the rail cycle bows and lifts the head
-  scRecoverServos();
+  // A servo that's missing or broken never comes back: don't stall the loop and
+  // cycle the rail every 18 s forever, back off up to 5 min instead.
+  if (scRecoverServos()) scServoBackoffMs = SC_SERVO_BACKOFF_MS;
+  else scServoBackoffMs = min(scServoBackoffMs * 2, (uint32_t)SC_SERVO_BACKOFF_MAX);
+  scNextServoCheckMs = millis() + scServoBackoffMs;
 }
 
 // ============================================================================

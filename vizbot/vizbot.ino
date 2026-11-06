@@ -623,15 +623,11 @@ void loop() {
   #else
   const bool voiceTurn = false;
   #endif
-  // BSP's Motion task owns the bus and manages torque, so there is no health
-  // poll or torque tick here. The periodic rail cycle below is a workaround for
-  // the head still intermittently going stiff — see stackchan_base.h.
-  // Skip the scheduled rail cycle during chill: chill doubles as the
-  // idle-drift-off soak experiment, and a blind reinit every 5 min would
-  // silently mask any stall, ruining the result.
-  // Both are held off during a voice turn: servo noise would keep the
-  // end-of-speech detector open, and a rail cycle mid-reply is jarring.
-  if (!scTouch_state.chillMode && !voiceTurn) scServoWatchdogTick();
+  // BSP's Motion task owns the bus and manages torque. The watchdog only pings
+  // the servos and cycles the rail when they stop answering (stackchan_base.h).
+  // Held off during a voice turn: servo noise would keep the end-of-speech
+  // detector open, and a rail cycle mid-reply is jarring.
+  if (!voiceTurn) scServoWatchdogTick();
 
   // Idle head drift — suppressed during chill mode and voice turns
   if (!scTouch_state.chillMode && !voiceTurn && !partyBlob.code) {   // code mode moves the head itself
