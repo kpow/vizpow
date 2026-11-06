@@ -145,7 +145,7 @@ bool loadCloudSequences(JsonDocument& doc) {
 // Parse cloud sequences JSON into runtime MidiSequenceDef/MidiEvent arrays
 // (defined in bot_sounds.h: cloudSeqEvents, cloudSequences, cloudSequenceCount)
 #ifdef MIDI_SYNTH_ENABLED
-extern MidiEvent  cloudSeqEvents[][SEQ_MAX_EVENTS];
+extern MidiEvent  (*cloudSeqEvents)[SEQ_MAX_EVENTS];
 extern MidiSequenceDef cloudSequences[];
 extern uint8_t cloudSequenceCount;
 
@@ -161,6 +161,17 @@ void applyCloudSequences() {
     DBGLN("Cache: cloud sequences array empty");
     cloudSequenceCount = 0;
     return;
+  }
+
+  if (!cloudSeqEvents) {
+    cloudSeqEvents = (MidiEvent (*)[SEQ_MAX_EVENTS])heap_caps_calloc(
+        MAX_CLOUD_SEQUENCES, sizeof(*cloudSeqEvents), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!cloudSeqEvents) cloudSeqEvents = (MidiEvent (*)[SEQ_MAX_EVENTS])calloc(MAX_CLOUD_SEQUENCES, sizeof(*cloudSeqEvents));
+    if (!cloudSeqEvents) {
+      DBGLN("Cache: no memory for cloud sequences");
+      cloudSequenceCount = 0;
+      return;
+    }
   }
 
   uint8_t count = 0;

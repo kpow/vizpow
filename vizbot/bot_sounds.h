@@ -731,7 +731,9 @@ static const MidiSequenceDef builtinSequences[] = {
 
 #define MAX_CLOUD_SEQUENCES 20
 
-MidiEvent  cloudSeqEvents[MAX_CLOUD_SEQUENCES][SEQ_MAX_EVENTS];
+// 20 KB, so it lives in PSRAM (allocated by applyCloudSequences): as a static it
+// sat in internal RAM, where the camera needs a free 30 KB block for every photo.
+MidiEvent  (*cloudSeqEvents)[SEQ_MAX_EVENTS] = nullptr;
 MidiSequenceDef cloudSequences[MAX_CLOUD_SEQUENCES];
 uint8_t cloudSequenceCount = 0;
 
