@@ -485,6 +485,7 @@ void wifiServerTask(void* param) {
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP
     }
+    ramLowTick();                        // /debug/tasks: what was busy at each RAM low
     // NOTE: cloud sync (blocking TLS, up to CLOUD_CONNECT_TIMEOUT) runs in its
     // own task (cloudTask) so a slow/failing handshake never freezes HTTP and
     // backs up control-page requests. See startCloudTask().

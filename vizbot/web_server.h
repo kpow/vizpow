@@ -2486,6 +2486,134 @@ void handleDebugTouch() {
 }
 #endif
 
+// Each time internal RAM's low-water mark drops, what was busy right then.
+// Ticked from wifi_srv's 2 ms loop, so a dip shorter than that is still caught
+// (the mark keeps it) and is tagged with whatever is running just after.
+struct RamLow { uint32_t sec; uint32_t minFree; uint32_t freeNow; char busy[40]; };
+static RamLow ramLows[6];   // oldest first
+static uint8_t ramLowCount = 0;
+static size_t ramLowLast = SIZE_MAX;
+
+void ramLowTick() {
+  size_t m = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  if (m >= ramLowLast) return;
+  ramLowLast = m;
+  if (ramLowCount == 6) { memmove(ramLows, ramLows + 1, 5 * sizeof(RamLow)); ramLowCount = 5; }
+  RamLow& r = ramLows[ramLowCount++];
+  r.sec = millis() / 1000;
+  r.minFree = m;
+  r.freeNow = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  char* p = r.busy;
+  char* end = r.busy + sizeof(r.busy);
+  #ifdef VOICE_ENABLED
+  if (voice.busy()) p += snprintf(p, end - p, "voice ");
+  #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  if (scCamRunning) p += snprintf(p, end - p, "camera ");
+  #endif
+  #ifdef CLOUD_ENABLED
+  if (cloudState == CLOUD_SYNCING || cloudState == CLOUD_REGISTERING) p += snprintf(p, end - p, "cloud ");
+  #endif
+  if (wledData.sendState != WLED_IDLE) p += snprintf(p, end - p, "wled ");
+  if (p == r.busy) snprintf(p, end - p, "-");
+}
+
+// GET /debug/tasks — the least free stack each task has ever had (bytes), and
+// the least free internal RAM since boot. For the wifi_srv crash of 2026-11-05
+// (lwIP accept found its socket's queue gone): a stack or heap running near
+// empty points at memory corruption. Task names come from the coredump.
+// ?reset=1 restarts heapMinFree from now: the boot camera probe holds a 30 KB
+// DMA block for a moment and would otherwise set the minimum for good.
+void handleDebugTasks() {
+  if (server.arg("reset") == "1") {
+    heap_caps_monitor_local_minimum_free_size_stop();
+    heap_caps_monitor_local_minimum_free_size_start();
+    ramLowCount = 0;
+    ramLowLast = SIZE_MAX;
+  }
+  static const char* const names[] = {
+    "wifi_srv", "cloud", "voice", "mic_task", "loopTask", "motion_task",
+    "tiT", "async_udp", "arduino_events", "sys_evt", "esp_timer", "Tmr Svc",
+  };
+  JsonDocument d;
+  d["upSec"] = millis() / 1000;
+  JsonObject s = d["stackFree"].to<JsonObject>();
+  for (const char* n : names) {
+    TaskHandle_t h = xTaskGetHandle(n);
+    if (h) s[n] = uxTaskGetStackHighWaterMark(h);
+  }
+  d["heapFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  d["heapMinFree"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  d["heapMaxBlock"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+  JsonArray lows = d["ramLows"].to<JsonArray>();
+  for (uint8_t i = 0; i < ramLowCount; i++) {
+    JsonObject o = lows.add<JsonObject>();
+    o["sec"] = ramLows[i].sec;
+    o["minFree"] = ramLows[i].minFree;
+    o["freeNow"] = ramLows[i].freeNow;
+    o["busy"] = ramLows[i].busy;
+  }
+  String out;
+  serializeJson(d, out);
+  server.send(200, "application/json", out);
+}
+
+#ifdef BOARD_HAS_STACKCHAN_BASE
+// GET /debug/servo — each head servo's own registers, to tell a servo that shut
+// itself off (overload/overheat flag, torque dropped) from one that stopped
+// answering. Read-only. Uses the watchdog's second bus handle (stackchan_base.h)
+// under BSP's Motion lock, so reads never collide with the motion task.
+
+static int scProbeWord(uint8_t id, uint8_t reg) {
+  for (int i = 0; i < 3; i++) { int v = scProbe().readWord(id, reg); if (v >= 0) return v; delay(2); }
+  return -1;
+}
+static int scProbeByte(uint8_t id, uint8_t reg) {
+  for (int i = 0; i < 3; i++) { int v = scProbe().readByte(id, reg); if (v >= 0) return v; delay(2); }
+  return -1;
+}
+
+void handleDebugServo() {
+  JsonDocument d;
+  d["upSec"] = millis() / 1000;
+  d["reboots"] = scServoReboots;
+  const uint8_t ids[] = { SC_SERVO_X_ID, SC_SERVO_Y_ID };
+  const char* keys[] = { "zero_pos_1", "zero_pos_2" };
+  nvs_handle_t h;
+  bool nvsOk = nvs_open("servo", NVS_READONLY, &h) == ESP_OK;
+  for (int i = 0; i < 2; i++) {
+    uint8_t id = ids[i];
+    JsonObject o = d[id == SC_SERVO_X_ID ? "yaw" : "pitch"].to<JsonObject>();
+    int32_t zero = -1;
+    if (nvsOk) nvs_get_i32(h, keys[i], &zero);
+    o["zero"] = zero;
+    o["animAngle"] = scReadServoPos(id);          // what BSP thinks (tenths of a degree)
+    ScBusLock lock;                               // after scReadServoPos: it takes the same lock
+    int ping = scProbe().Ping(id);
+    o["ping"] = ping;
+    o["err"] = scProbe().getLastError();         // comm error: 1 no reply, 2 CRC, 3 wrong id, 4 length
+    if (ping != id) continue;                    // a deaf servo would hold Motion's lock ~0.5 s for nothing
+    o["status"] = scProbe().getState();          // servo's own status: 0x01 volt, 0x02 angle, 0x04 heat, 0x20 overload
+    o["torque"] = scProbeByte(id, SCSCL_TORQUE_ENABLE);
+    o["goal"] = scProbeWord(id, SCSCL_GOAL_POSITION_L);
+    o["pos"] = scProbeWord(id, SCSCL_PRESENT_POSITION_L);
+    o["load"] = scProbeWord(id, SCSCL_PRESENT_LOAD_L);     // bit 10 = direction
+    o["current"] = scProbeWord(id, SCSCL_PRESENT_CURRENT_L);
+    o["voltage"] = scProbeByte(id, SCSCL_PRESENT_VOLTAGE); // tenths of a volt
+    o["temp"] = scProbeByte(id, SCSCL_PRESENT_TEMPERATURE);
+    o["moving"] = scProbeByte(id, SCSCL_MOVING);
+    o["minLimit"] = scProbeWord(id, SCSCL_MIN_ANGLE_LIMIT_L);
+    o["maxLimit"] = scProbeWord(id, SCSCL_MAX_ANGLE_LIMIT_L);
+    o["maxTorque"] = scProbeWord(id, 16);
+    o["protect"] = scProbeByte(id, 19);           // unload conditions (which faults cut torque)
+  }
+  if (nvsOk) nvs_close(h);
+  String out;
+  serializeJson(d, out);
+  server.send(200, "application/json", out);
+}
+#endif
+
 #ifdef TARGET_CORES3
 // GET /debug/power — the AXP2101's own view of charging, plus why the chip last
 // reset. Read-only. The stackchan base's servo rail boosts straight off the
@@ -2499,6 +2627,8 @@ void handleDebugPower() {
     0x50,         // TS pin (bit 4 set = charger ignores it)
     0x61, 0x62, 0x64,   // precharge current, charge current, charge voltage
   };
+  extern bool i2cAcquire(uint32_t timeoutMs);   // task_manager.h
+  extern void i2cRelease();
   JsonDocument d;
   d["resetReason"] = (int)esp_reset_reason();   // 9 = brownout, 4 = panic, 6/7 = watchdog
   if (!i2cAcquire(200)) { server.send(503, "text/plain", "I2C busy"); return; }
@@ -2769,8 +2899,12 @@ void setupWebServer() {
   #endif
   server.on("/brightness", handleBrightness);
   server.on("/debug/wifidrop", handleDebugWifiDrop);
+  server.on("/debug/tasks", handleDebugTasks);
   #ifdef TARGET_CORES3
   server.on("/debug/power", handleDebugPower);
+  #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  server.on("/debug/servo", handleDebugServo);
   #endif
 
   // Bot mode endpoints
