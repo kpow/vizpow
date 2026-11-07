@@ -54,6 +54,7 @@ static void handleArtUpload() {
     if (!artBuf) artBuf = (uint8_t*)heap_caps_malloc(ART_MAX_BYTES, MALLOC_CAP_SPIRAM);
     if (!artBuf) artTooBig = true;
   } else if (up.status == UPLOAD_FILE_WRITE) {
+    hangBeatWifiMs = millis();           // the whole upload runs inside one handleClient()
     if (artTooBig) return;
     if (artLen + up.currentSize > ART_MAX_BYTES) { artTooBig = true; return; }
     memcpy(artBuf + artLen, up.buf, up.currentSize);

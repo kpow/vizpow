@@ -66,4 +66,10 @@ String loopStatsJson() {
   return json;
 }
 
+// Hang watchdog check-ins (task_manager.h checks them on the Stackchan). A
+// handler that runs a long time inside one handleClient() call, like an
+// upload, checks in too.
+volatile uint32_t hangBeatWifiMs = 0;
+volatile uint32_t hangBeatLoopMs = 0;
+
 #endif // LOOP_STATS_H

@@ -58,6 +58,7 @@ static void handleOTAUpload() {
     }
 
   } else if (upload.status == UPLOAD_FILE_WRITE) {
+    hangBeatWifiMs = millis();           // the whole upload runs inside one handleClient()
     if (otaUploadError) return;
 
     // Check magic byte on first chunk

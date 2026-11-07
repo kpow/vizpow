@@ -514,6 +514,7 @@ void setup() {
 void loop() {
   uint32_t loopStartMs = millis();
   loopStatsBegin();
+  hangBeatLoopMs = loopStartMs;
 
   // Only read IMU if it initialized successfully
   if (sysStatus.imuReady) {
