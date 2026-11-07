@@ -17,6 +17,17 @@ extern WebServer server;
 static bool otaUploadError = false;
 static bool otaUploadSuccess = false;
 
+// Set while a firmware upload runs; the cloud task holds its syncs until it
+// clears. Update.end() hashes the whole 2 MB image without yielding, and a TLS
+// handshake does its signature math on the same core at the same priority, so
+// together they starved IDLE0 past the 5 s task watchdog. The 2-minute limit
+// releases the hold if a client vanishes mid-upload without an abort.
+volatile uint32_t otaUploadStartMs = 0;
+
+inline bool otaUploadActive() {
+  return otaUploadStartMs && millis() - otaUploadStartMs < 120000;
+}
+
 static void handleOTAUpload() {
   HTTPUpload& upload = server.upload();
 
@@ -55,6 +66,8 @@ static void handleOTAUpload() {
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
       DBGLN("OTA: Update.begin failed");
       otaUploadError = true;
+    } else {
+      otaUploadStartMs = millis();
     }
 
   } else if (upload.status == UPLOAD_FILE_WRITE) {
@@ -78,12 +91,14 @@ static void handleOTAUpload() {
   } else if (upload.status == UPLOAD_FILE_END) {
     if (otaUploadError) {
       Update.abort();
+      otaUploadStartMs = 0;
       return;
     }
 
     if (!Update.end(true)) {
       DBGLN("OTA: Finalize failed");
       otaUploadError = true;
+      otaUploadStartMs = 0;
       return;
     }
 
@@ -93,6 +108,7 @@ static void handleOTAUpload() {
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     Update.abort();
     otaUploadError = true;
+    otaUploadStartMs = 0;
   }
 }
 

@@ -507,7 +507,7 @@ TaskHandle_t cloudTaskHandle = nullptr;
 
 void cloudTask(void* param) {
   for (;;) {
-    if (wifiEnabled) {
+    if (wifiEnabled && !otaUploadActive()) {   // ota_update.h: no TLS during a firmware upload
       pollCloudSync();                   // Cloud registration + sync (TLS)
       pollScheduledCommands();           // Execute scheduled commands at their target time
     }
