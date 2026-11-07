@@ -296,7 +296,7 @@
   #define SC_BASE_LED_COUNT     12    // WS2812C ring (driven via IO expander IO14)
   #define SC_SERVO_X_ID         1     // SCS0009 yaw servo
   #define SC_SERVO_Y_ID         2     // SCS0009 pitch servo
-  #define SC_SERVO_Y_MIN_DEG    25    // Pitch safety floor (prevents head hitting base)
+  #define SC_SERVO_Y_MIN_DEG    40    // Pitch safety floor: ~16° clear of the end stop (raw ~572); driving near the stop stalls the servos
   #define SC_SERVO_Y_MAX_DEG    85    // Pitch safety ceiling (hardware limit)
   #define SC_SERVO_Y_HOME_DEG   48    // Resting pitch (desk-friendly, looking up at user)
 
