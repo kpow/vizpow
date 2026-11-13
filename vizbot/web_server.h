@@ -275,6 +275,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
             <button onclick="setDeviceName()" id="deviceNameBtn">Set</button>
           </div>
           <div id="deviceNameStatus" class="hint"></div>
+          <div id="cloudRow" style="display:none;margin-top:8px">
+            <span class="lbl">Cloud Server</span>
+            <div class="row" style="margin-top:4px">
+              <input type="text" id="cloudServerInput" placeholder="Built-in (leave empty)" class="inp flex1" maxlength="95" autocapitalize="off" autocorrect="off" spellcheck="false">
+              <button onclick="setCloudServer()" id="cloudServerBtn">Set</button>
+            </div>
+            <div id="cloudServerStatus" class="hint"></div>
+          </div>
           <div id="wifiStatus" style="margin-top:8px"></div>
           <button onclick="wifiDoScan()" id="scanBtn" class="btn-full" style="margin-top:8px">Scan Networks</button>
           <div id="wifiNetworks" style="margin-top:8px"></div>
@@ -393,6 +401,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
   </div>
 
   <div class="status" id="statusBar">Connected to VizBot</div>
+  <div class="status" id="cloudBar" style="display:none;border-top:0;padding-top:0"></div>
 
   <script>
     function tgl(id) {
@@ -787,6 +796,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         if (state.deviceName) {
           document.getElementById('deviceNameInput').value = state.deviceName;
         }
+        if (state.cloud) cloudShow(state.cloud);
         if (state.wledEmoji) {
           emojiQueue = state.wledEmoji.queue || [];
           emojiActive = state.wledEmoji.active || false;
@@ -816,6 +826,43 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       document.getElementById('deviceNameBtn').disabled = false;
       document.getElementById('deviceNameStatus').textContent =
         (r && r.ok) ? 'Saved \u2014 restart device to apply.' : 'Error saving name.';
+    }
+
+    // Cloud: which server, where approval stands, when it last synced
+    function cloudShow(c) {
+      if (!c || !c.server) return;
+      document.getElementById('cloudRow').style.display = '';
+      const inp = document.getElementById('cloudServerInput');
+      if (document.activeElement !== inp) inp.value = c.customServer || '';
+      let st = c.approval === 'pending' ? 'waiting for approval'
+             : c.approval === 'disabled' ? 'paused in the admin'
+             : c.approval === 'approved' ? 'approved'
+             : c.lastSyncSec >= 0 ? 'connected' : 'connecting';
+      if (c.state === 'auth_error') st = 'pairing again in ' + Math.ceil((c.retrySec || 0) / 60) + ' min';
+      const ago = c.lastSyncSec < 0 ? 'no sync yet'
+                : c.lastSyncSec < 90 ? 'synced ' + c.lastSyncSec + 's ago'
+                : 'synced ' + Math.round(c.lastSyncSec / 60) + ' min ago';
+      const txt = 'Cloud: ' + c.server.replace(/^https?:\/\//, '') + ' \u00B7 ' + st + ' \u00B7 ' + ago;
+      const bar = document.getElementById('cloudBar');
+      bar.style.display = '';
+      bar.textContent = txt;
+      document.getElementById('cloudServerStatus').textContent = (c.customServer ? 'Test server' : 'Built-in server') + ' \u00B7 ' + st + ' \u00B7 ' + ago;
+    }
+    async function cloudRefresh() {
+      try {
+        const r = await fetch('/cloud/status');
+        if (r.ok) cloudShow(await r.json());
+      } catch(e) {}
+    }
+    setInterval(cloudRefresh, 15000);
+    async function setCloudServer() {
+      const url = document.getElementById('cloudServerInput').value.trim();
+      document.getElementById('cloudServerBtn').disabled = true;
+      const r = await api('/cloud/server?url=' + encodeURIComponent(url));
+      document.getElementById('cloudServerBtn').disabled = false;
+      document.getElementById('cloudServerStatus').textContent =
+        (r && r.ok) ? 'Saved \u2014 connecting...' : (r ? await r.text() : 'Error saving server.');
+      if (r && r.ok) setTimeout(cloudRefresh, 4000);
     }
 
     function rssiIcon(rssi) {
@@ -1253,6 +1300,7 @@ extern void applyTimezone();  // defined in settings.h (included after this head
 // Cloud status accessors (defined in cloud_client.h when CLOUD_ENABLED)
 #ifdef CLOUD_ENABLED
 extern const char* getCloudStateStr();
+extern String getCloudStatusExtraJson();
 extern CloudMeta cloudMeta;
 #endif
 
@@ -1305,7 +1353,7 @@ void handleState() {
                 ",\"timezone\":\"" + String(timezoneTZ) + "\"" +
                 ",\"device\":\"" + String(apSSID) + "\"" +
                 ",\"hostname\":\"" + String(mdnsHostname) + ".local\"" +
-                ",\"deviceName\":\"" + String(apSSID) + "\"" +
+                ",\"deviceName\":\"" + String(deviceName) + "\"" +   // stored name; device/hostname above follow it on the next boot
                 ",\"firmwareVersion\":\"" FIRMWARE_VERSION "\"" +
                 ",\"boardType\":\"" BOARD_TYPE "\"" +
 #ifdef TARGET_CORES3
@@ -1382,6 +1430,7 @@ void handleState() {
                   ",\"groups\":" + String(cloudMeta.groupCount) +
                   ",\"fleetTotal\":" + String(cloudMeta.fleetTotal) +
                   ",\"fleetOnline\":" + String(cloudMeta.fleetOnline) +
+                  getCloudStatusExtraJson() +
                 "}" +
 #endif
                 "}";
@@ -1957,8 +2006,27 @@ void handleCloudStatus() {
                 ",\"pollInterval\":" + String(cloudMeta.pollIntervalSec) +
                 ",\"registered\":" + (sysStatus.cloudRegistered ? "true" : "false") +
                 ",\"littlefs\":" + (sysStatus.littlefsReady ? "true" : "false") +
+                getCloudStatusExtraJson() +
                 "}";
   server.send(200, "application/json", json);
+}
+
+// GET /cloud/server?url=  — "Cloud server" setting. Empty = the built-in server.
+extern bool cloudSetServer(const char* url);
+
+void handleCloudServer() {
+  if (!server.hasArg("url")) {
+    server.send(400, "text/plain", "Missing url");
+    return;
+  }
+  String url = server.arg("url");
+  url.trim();
+  while (url.endsWith("/")) url.remove(url.length() - 1);
+  if (!cloudSetServer(url.c_str())) {
+    server.send(400, "text/plain", "Use https://host, or http:// for a 10.x, 172.16-31.x, 192.168.x or .local host");
+    return;
+  }
+  server.send(200, "text/plain", "Saved");
 }
 
 void handleCloudSync() {
@@ -2970,6 +3038,7 @@ void setupWebServer() {
   // Cloud endpoints
   #ifdef CLOUD_ENABLED
   server.on("/cloud/status", handleCloudStatus);
+  server.on("/cloud/server", handleCloudServer);
   server.on("/cloud/sync", handleCloudSync);
   #endif
 

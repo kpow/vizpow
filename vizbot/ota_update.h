@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <Update.h>
 #include <WebServer.h>
+#include <Preferences.h>
 #include "esp_ota_ops.h"
 #include "config.h"
 #include "system_status.h"
@@ -26,6 +27,98 @@ volatile uint32_t otaUploadStartMs = 0;
 
 inline bool otaUploadActive() {
   return otaUploadStartMs && millis() - otaUploadStartMs < 120000;
+}
+
+// ============================================================================
+// Boot Confirmation
+// ============================================================================
+// A firmware upload from the web panel is trusted the moment it boots, as
+// before. An update vizCloud sent (cloud_client.h) is on trial instead: it has
+// to complete one sync within CLOUD_OTA_CONFIRM_MS or the bot goes back to the
+// firmware it ran before. A crash or power cut during the trial goes back too;
+// that part is the bootloader's doing (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE).
+//
+// NVS, in CLOUD_NVS_NAMESPACE:
+//   otaPend  build id on trial          otaSlot  label of the slot it went to
+//   otaDone  last build id confirmed    otaErr   failure to report on next sync
+
+#ifdef CLOUD_OTA_ENABLED
+// Arduino's startup marks a just-updated app valid before setup() runs, which
+// leaves nothing to roll back to. Returning true hands the decision to
+// otaMarkBootValid() below, which setup() calls first thing.
+extern "C" bool verifyRollbackLater() { return true; }
+
+volatile bool otaTrialPending = false;   // running a cloud update that has not synced yet
+
+// The update proved itself with a sync, or the owner is flashing by hand.
+static void otaConfirmTrial() {
+  if (!otaTrialPending) return;
+  otaTrialPending = false;
+  esp_ota_mark_app_valid_cancel_rollback();
+  Preferences prefs;
+  if (prefs.begin(CLOUD_NVS_NAMESPACE, false)) {
+    prefs.putString("otaDone", prefs.getString("otaPend", ""));
+    prefs.remove("otaPend");
+    prefs.remove("otaSlot");
+    prefs.end();
+  }
+  DBGLN("OTA: cloud update confirmed");
+}
+
+// Called from the cloud task. Firmware that cannot reach the cloud is no use on
+// a bot nobody will plug into a computer, so it is undone.
+static void otaRollbackIfUnconfirmed() {
+  if (!otaTrialPending || millis() < CLOUD_OTA_CONFIRM_MS || otaUploadActive()) return;
+  DBGLN("OTA: no sync since the update, rolling back");
+  Preferences prefs;
+  if (prefs.begin(CLOUD_NVS_NAMESPACE, false)) {
+    prefs.putString("otaErr", "no sync within 10 min of update, rolled back");
+    prefs.remove("otaPend");
+    prefs.remove("otaSlot");
+    prefs.end();
+  }
+  esp_ota_mark_app_invalid_rollback_and_reboot();   // returns only when there is nothing to go back to
+  otaTrialPending = false;
+  esp_ota_mark_app_valid_cancel_rollback();
+}
+#endif
+
+static void otaMarkBootValid() {
+#ifdef CLOUD_OTA_ENABLED
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state;
+  bool unverified = esp_ota_get_state_partition(running, &state) == ESP_OK &&
+                    state == ESP_OTA_IMG_PENDING_VERIFY;
+  bool onTrial = false;
+  Preferences prefs;
+  if (prefs.begin(CLOUD_NVS_NAMESPACE, false)) {
+    String pend = prefs.getString("otaPend", "");
+    if (pend.length() > 0) {
+      if (unverified) {
+        onTrial = true;
+      } else {
+        // Not on trial, so the trial is over one way or the other: this is the
+        // old firmware again (rolled back), or a bootloader without rollback
+        // booted the new one and there is nothing to confirm.
+        if (prefs.getString("otaSlot", "") == running->label) {
+          prefs.putString("otaDone", pend);
+        } else {
+          prefs.putString("otaErr", "update did not boot or confirm, rolled back");
+        }
+        prefs.remove("otaPend");
+        prefs.remove("otaSlot");
+      }
+    }
+    prefs.end();
+  }
+  if (onTrial) {
+    otaTrialPending = true;
+    DBGLN("OTA: cloud update on trial until its first sync");
+    return;
+  }
+#endif
+  esp_ota_mark_app_valid_cancel_rollback();
+  DBGLN("OTA: Boot confirmed valid");
 }
 
 static void handleOTAUpload() {
@@ -62,6 +155,10 @@ static void handleOTAUpload() {
       otaUploadError = true;
       return;
     }
+
+#ifdef CLOUD_OTA_ENABLED
+    otaConfirmTrial();   // this upload overwrites the slot a cloud update on trial would roll back to
+#endif
 
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
       DBGLN("OTA: Update.begin failed");
@@ -259,15 +356,6 @@ h2{font-size:13px;color:#000;text-transform:uppercase;letter-spacing:0.08em;marg
 
 static void handleOTAPage() {
   server.send_P(200, "text/html; charset=utf-8", otaPageHTML);
-}
-
-// ============================================================================
-// Boot Confirmation
-// ============================================================================
-
-static void otaMarkBootValid() {
-  esp_ota_mark_app_valid_cancel_rollback();
-  DBGLN("OTA: Boot confirmed valid");
 }
 
 #endif // OTA_UPDATE_H

@@ -505,12 +505,31 @@ static StackType_t cloudTaskStack[8192];   // 8KB in BSS (mbedTLS handshake stac
 static StaticTask_t cloudTaskTCB;
 TaskHandle_t cloudTaskHandle = nullptr;
 
+#ifdef CLOUD_OTA_ENABLED
+// cloud_client.h asks this before a firmware update: not on a nearly flat battery.
+bool cloudOtaPowerOk() {
+  #ifdef BAT_ADC_PIN
+  if (batteryAdc.volts > 0 && !batteryAdc.usb && batteryAdc.percent < 20) return false;
+  #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  if (sysStatus.scBatteryMonReady) {
+    float volts = scGetBatteryVoltage();
+    if (volts > 1.0f && volts < 3.5f) return false;   // around 0 V means no cell fitted
+  }
+  #endif
+  return true;
+}
+#endif
+
 void cloudTask(void* param) {
   for (;;) {
     if (wifiEnabled && !otaUploadActive()) {   // ota_update.h: no TLS during a firmware upload
       pollCloudSync();                   // Cloud registration + sync (TLS)
       pollScheduledCommands();           // Execute scheduled commands at their target time
     }
+    #ifdef CLOUD_OTA_ENABLED
+    otaRollbackIfUnconfirmed();          // ota_update.h: a cloud update that never synced goes back
+    #endif
     vTaskDelay(pdMS_TO_TICKS(200));      // cloud is not latency-sensitive
   }
 }
