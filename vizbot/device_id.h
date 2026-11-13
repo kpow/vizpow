@@ -25,6 +25,11 @@
 char apSSID[DEVICE_NAME_MAX];        // SSID as broadcast (original casing)
 char mdnsHostname[DEVICE_NAME_MAX];  // mDNS label (lowercase, spaces→hyphens)
 
+// The bot's name as stored: what the web panel shows and edits, and the `name`
+// vizCloud is told. Same as apSSID until a rename, then the new name straight
+// away, while the SSID and mDNS hostname keep the old one until the next boot.
+char deviceName[DEVICE_NAME_MAX];
+
 // Save a user-defined device name to NVS.
 // Takes effect on next reboot (initDeviceID reads it at startup).
 // Pass empty string to clear and revert to MAC-suffix fallback.
@@ -33,6 +38,11 @@ void saveDeviceName(const char* name) {
   prefs.begin("vizbot", false);
   prefs.putString("devName", name);
   prefs.end();
+  if (name[0]) {
+    strncpy(deviceName, name, sizeof(deviceName) - 1);
+  } else {
+    snprintf(deviceName, sizeof(deviceName), "%s-%04X", WIFI_SSID_BASE, (uint16_t)(ESP.getEfuseMac() & 0xFFFF));
+  }
   DBG("Device name saved: ");
   DBGLN(name[0] ? name : "(cleared — MAC suffix on next boot)");
 }
@@ -65,6 +75,8 @@ void initDeviceID() {
     snprintf(apSSID,       sizeof(apSSID),       "%s-%04X", WIFI_SSID_BASE,     suffix);
     snprintf(mdnsHostname, sizeof(mdnsHostname),  "%s-%04x", MDNS_HOSTNAME_BASE, suffix);
   }
+
+  strncpy(deviceName, apSSID, sizeof(deviceName) - 1);
 
   DBG("Device ID: ");
   DBG(apSSID);
