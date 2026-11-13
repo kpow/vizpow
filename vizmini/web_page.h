@@ -130,7 +130,16 @@ input[type=color]::-webkit-color-swatch-wrapper{padding:0}input[type=color]::-we
 
 <div class=card><h2 class=shdr onclick="tg('sY')">System <span class=chv>&#9662;</span></h2><div class=sbody id=sY>
 <div id=sy></div>
+<span class=lbl>Name</span>
+<form class=row onsubmit="nm();return false"><input id=nn class="inp f1" maxlength=23 autocomplete=off><button class=send>Save</button></form>
+<div class=hint id=nh>His hotspot name, his .local address and his name in VizCloud. Empty = the default.</div>
 <div class=row style="margin-top:14px"><a class=btn href=/update>&#8593; Firmware update</a><a class=btn href=/state style="background:#fff">State JSON</a></div></div></div>
+
+<div class=card><h2 class=shdr onclick="tg('sC')">Cloud <span class=chv>&#9662;</span></h2><div class=sbody id=sC>
+<div id=cs></div>
+<span class=lbl>Cloud server</span>
+<form class=row onsubmit="csv();return false"><input id=cu class="inp f1" maxlength=95 placeholder="built-in VizCloud" autocomplete=off><button class=send>Save</button></form>
+<div class=hint id=ch2>Empty = the built-in VizCloud. A test server: http://192.168.x.x:3000 (plain http only on your own network). Saving a test server registers him there afresh.</div></div></div>
 </div></div>
 <div class=status id=st>Connecting to vizMini&hellip;</div>
 
@@ -179,6 +188,13 @@ function cp(id,k){var e=$(id),t=0,K='led'+k.toUpperCase(),h=function(){return e.
 cp('k0','c1');cp('k1','c1');cp('k2','c2');cp('k3','c3');
 function hx(c){return/^[0-9a-f]{6}$/i.test(c||'')?c.toLowerCase():'000000'}
 
+function post(u,b,h){var e=$(h);fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b}).then(function(r){return r.json()})
+ .then(function(j){e.textContent=j.ok?'Saved.':j.why}).catch(function(){e.textContent='He didn\'t answer.'}).then(function(){soon(400)})}
+function nm(){D.nn=0;post('/device/name','v='+encodeURIComponent($('nn').value.trim()),'nh')}
+function csv(){D.cu=0;post('/cloud/server','url='+encodeURIComponent($('cu').value.trim()),'ch2')}
+['nn','cu'].forEach(function(i){$(i).oninput=function(){D[i]=1}});
+function ago(n){return n<0?'never':n<90?n+' s ago':n<5400?Math.round(n/60)+' min ago':Math.round(n/3600)+' h ago'}
+var CST={approved:'Approved',pending:'Waiting for approval in the admin',disabled:'Switched off in the admin',new:'Registering…',auth:'Key refused · re-pairing in up to an hour',error:'Can\'t reach the server',offline:'Not on WiFi',off:'Not in this build'};
 function say(){var e=$('t'),v=e.value.trim();if(!v)return;g('/bot/say?text='+encodeURIComponent(v));$('sh').textContent='Said: “'+v+'”';e.value=''}
 function snow(){set('snow',!S.snow);g('/bot/snow?v='+(S.snow?1:0))}
 function tg(id){var b=$(id),sh=b.classList.toggle('shut');b.previousElementSibling.classList.toggle('shut',sh);
@@ -214,10 +230,17 @@ function up(){var s=S;if(!T0)return;
  $('mh').textContent={off:'Face stays still.',rare:'A move every 2–6 min.',often:'Moves a lot.'}[s.motion]+(s.move&&s.move!='none'?' Now: '+s.move+' ('+Math.round(s.angle)+'°)':'');
  $('shh').textContent=s.mode=='info'?'Tap Time / Wx again to flip between time and weather.':'Time and weather flip every 30 s.';
  var n=sig(s.rssi);[].forEach.call($('sb').children,function(b,i){b.classList.toggle('on',i<n)});
- $('hv').textContent='v'+s.fw;
+ $('hv').textContent=(s.name?s.name+' · ':'')+'v'+s.fw;
  $('pf').innerHTML=kv('Frame',s.frameMs+' ms')+kv('Face render',s.faceUs+' µs')+kv('Party avg / max',s.partyUs+' / '+s.partyMaxUs+' µs')+
   kv('Panel send',s.sendUs+' µs')+kv('Party pattern',s.mode=='party'?s.partyPat+' · '+s.tents+' tentacles · stack '+s.partyStack:'—')+kv('Panel',s.panel);
- $('sy').innerHTML=kv('Firmware','v'+s.fw)+kv('Address',s.ip)+kv('Network',s.ap?'Setup hotspot':'WiFi')+kv('Signal',s.rssi?s.rssi+' dBm ('+['','weak','ok','good','strong'][n]+')':'—');
+ $('sy').innerHTML=kv('Firmware','v'+s.fw)+kv('Address',s.ip)+kv('Network',s.ap?'Setup hotspot':'WiFi')+kv('Signal',s.rssi?s.rssi+' dBm ('+['','weak','ok','good','strong'][n]+')':'—')+
+  kv('Name',s.name||'—')+kv('Local address',s.host||'—')+kv('Memory free / lowest',((s.heap/1024)|0)+' / '+((s.minHeap/1024)|0)+' KB');
+ if(!D.nn&&document.activeElement!==$('nn'))$('nn').value=s.name||'';
+ var c=s.cloud||{st:'off'};
+ $('cs').innerHTML=kv('Status',CST[c.st]||c.st)+(c.st=='off'?'':kv('Server',c.server)+kv('Bot id',c.id||'—')+
+  kv('Last sync',ago(c.lastS))+kv('Next call',c.nextS?'in '+c.nextS+' s':'now')+(c.err?kv('Last problem',c.err+(c.code?' ('+c.code+')':'')):'')+
+  (c.ota?kv('Firmware',c.ota):'')+kv('Sync every',c.poll+' s')+kv('Cloud task stack left',c.stack+' B'));
+ if(!D.cu&&document.activeElement!==$('cu'))$('cu').value=c.url||'';
  tick();net()}
 function net(){var ok=fails<2&&T0;$('cd').className='dot '+(ok?'on':fails>1?'err':'');
  $('cl').textContent=ok?(S.ap?'Hotspot':'Online'):fails>1?'Offline':'Connecting';

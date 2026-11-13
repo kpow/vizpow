@@ -10,6 +10,10 @@
 #include <Update.h>
 #include "config.h"
 #include "bot_faces.h"   // for EXPR_* names / BOT_NUM_EXPRESSIONS
+#include "device_name.h" // hotspot SSID, mDNS name
+#include "weather.h"     // the network lock (an upload waits out a cloud call)
+#include "cloud_client.h"
+#include "esp_app_format.h"
 
 // ---- Control hooks implemented in vizmini.ino ------------------------------
 extern void   ctlSetExpression(uint8_t v);
@@ -40,12 +44,6 @@ static String     g_ssid, g_pass;             // saved creds (loaded once)
 static unsigned long g_lastStaTry = 0;        // last background reconnect attempt
 static const unsigned long STA_RETRY_MS = 20000;
 
-inline String chipSuffix() {
-  uint32_t id = (uint32_t)(ESP.getEfuseMac() & 0xFFFF);
-  char buf[5];
-  snprintf(buf, sizeof(buf), "%04X", id);
-  return String(buf);
-}
 
 // ============================================================================
 // HTML — control page (STA mode), setup page (AP mode), firmware update page
@@ -151,8 +149,8 @@ inline void handleWifiStatus() {
   static const char* ST[] = { "idle", "trying", "ok", "fail" };
   String j = "{\"state\":\"" + String(ST[g_join]) + "\",\"ssid\":" + jsonStr(g_joinSsid) +
              ",\"ip\":\"" + g_joinIp + "\",\"why\":" + jsonStr(g_joinWhy) +
-             ",\"host\":\"" MDNS_HOSTNAME ".local\",\"ap\":\"" + String(WIFI_AP_BASE) + "-" + chipSuffix() +
-             "\",\"fw\":\"" FIRMWARE_VERSION "\"}";
+             ",\"host\":\"" + String(g_devHost) + ".local\",\"ap\":" + jsonStr(g_devName) +
+             ",\"fw\":\"" FIRMWARE_VERSION "\"}";
   server.send(200, "application/json", j);
 }
 
@@ -265,24 +263,74 @@ inline void handleScreen() {
 // ---- OTA firmware update (writes to the spare app slot, then reboots) ------
 inline void handleUpdatePage() { server.send_P(200, "text/html", UPDATE_HTML); }
 
+// Checks before anything is written: the file name carries BOARD_TYPE (the
+// builds/ name, vizmini-c3-v<version>.bin), the first byte is the ESP image
+// magic 0xE9 and the header names the ESP32-C3. The upload also takes the
+// network: no weather fetch or cloud call starts, and one already running is
+// waited out (the WebServer blocks the loop for the whole upload anyway).
+static const char *g_upErr = nullptr;    // why this upload was refused, nullptr = fine so far
+static bool        g_upBegun = false;
+
 inline void handleUpdateUpload() {
   HTTPUpload& up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
     Serial.printf("[ota] start: %s\n", up.filename.c_str());
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+    g_upErr = nullptr; g_upBegun = false;
+    if (up.filename.indexOf(BOARD_TYPE) < 0) g_upErr = "Wrong board type: the file name must contain " BOARD_TYPE;
+    else if (cloudOtaRunning()) g_upErr = "A cloud firmware update is running. Try again in a few minutes";
+    else if (!netHoldForUpload(12000)) g_upErr = "Busy with a cloud call. Try again in a few seconds";
   } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (g_upErr) return;
+    netUploadTouch();
+    if (!g_upBegun) {                    // first chunk: the image header
+      const esp_image_header_t *h = (const esp_image_header_t *)up.buf;
+      if (up.currentSize < sizeof(esp_image_header_t) || up.buf[0] != ESP_IMAGE_HEADER_MAGIC) { g_upErr = "Not an ESP32 firmware image (bad magic byte)"; return; }
+      if (h->chip_id != ESP_CHIP_ID_ESP32C3) { g_upErr = "That firmware is for another chip, not the ESP32-C3"; return; }
+      cloudAcceptRunningImage();         // the owner's own upload ends a cloud update's probation
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { Update.printError(Serial); g_upErr = Update.errorString(); return; }
+      g_upBegun = true;
+    }
     if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_END) {
-    if (Update.end(true)) Serial.printf("[ota] ok: %u bytes\n", (unsigned)up.totalSize);
+    if (g_upErr) { Serial.printf("[ota] refused: %s\n", g_upErr); }
+    else if (!g_upBegun) g_upErr = "Empty file";
+    else if (Update.end(true)) Serial.printf("[ota] ok: %u bytes\n", (unsigned)up.totalSize);
     else Update.printError(Serial);
+    netUploadDone();
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    if (g_upBegun) Update.abort();
+    g_upBegun = false;
+    g_upErr = "Upload aborted";
+    netUploadDone();
   }
 }
 
 inline void handleUpdateDone() {
-  bool ok = !Update.hasError();
+  bool ok = !g_upErr && g_upBegun && !Update.hasError();
+  netUploadDone();
   server.sendHeader("Connection", "close");
-  server.send(200, "text/plain", ok ? "OK rebooting" : (String("FAIL ") + Update.errorString()));
+  server.send(200, "text/plain", ok ? "OK rebooting" : (String("FAIL ") + (g_upErr ? g_upErr : Update.errorString())));
   if (ok) { delay(400); ESP.restart(); }
+}
+
+// ---- device name and cloud server (System and Cloud cards) ----------------
+// POST /device/name v=<name> ("" = back to the MAC default)
+// -> {"ok":true,"name":..,"host":..} or 400 {"ok":false,"why":..}
+inline void handleDeviceName() {
+  String v = server.arg("v");
+  v.trim();
+  if (!deviceNameSet(v.c_str())) {
+    server.send(400, "application/json", "{\"ok\":false,\"why\":\"1 to 23 plain characters, no quotes or backslashes\"}");
+    return;
+  }
+  webApplyName();
+  server.send(200, "application/json", "{\"ok\":true,\"name\":" + jsonStr(g_devName) + ",\"host\":\"" + String(g_devHost) + "\"}");
+}
+// POST /cloud/server url=<http(s)://host[:port]> ("" = the built-in server)
+inline void handleCloudServer() {
+  const char *why = cloudSetServer(server.arg("url"));
+  if (why) { server.send(400, "application/json", "{\"ok\":false,\"why\":" + jsonStr(why) + "}"); return; }
+  server.send(200, "application/json", "{\"ok\":true}");
 }
 
 // /debug/leds?id=runs|path[&s=seconds] — wiring check (see StripLeds::identify)
@@ -323,6 +371,8 @@ inline void registerRoutes() {
   server.on("/debug/leds", handleLedId);
   server.on("/update", HTTP_GET, handleUpdatePage);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
+  server.on("/device/name", HTTP_POST, handleDeviceName);
+  server.on("/cloud/server", HTTP_POST, handleCloudServer);
   server.onNotFound(handleNotFound);
 }
 
@@ -363,6 +413,7 @@ inline void wifiEventLog(WiFiEvent_t ev, WiFiEventInfo_t info) {
 inline bool tryStation(void (*onWait)(unsigned long ms)) {
   if (!loadCreds()) return false;
   WiFi.persistent(false);
+  WiFi.setHostname(g_devHost);       // the router's client list shows his name
   WiFi.mode(WIFI_STA);
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
@@ -382,7 +433,7 @@ inline bool tryStation(void (*onWait)(unsigned long ms)) {
 
 inline void startAccessPoint() {
   g_apMode = true;
-  String apName = String(WIFI_AP_BASE) + "-" + chipSuffix();
+  String apName = g_devName;          // his device name (device_name.h)
   // AP+STA always: the STA side scans for the setup page, test-joins a network
   // from it, and (with saved creds) keeps trying the real network in the
   // background while the setup page is served.
@@ -407,7 +458,7 @@ inline void promoteToStation() {
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   g_apMode = false;
-  if (MDNS.begin(MDNS_HOSTNAME)) MDNS.addService("http", "tcp", 80);
+  if (MDNS.begin(g_devHost)) MDNS.addService("http", "tcp", 80);
   configTzTime(TZ_POSIX, NTP_SERVER_1, NTP_SERVER_2);
   Serial.printf("[vizMini] reconnected STA -> %s\n", WiFi.localIP().toString().c_str());
 }
@@ -418,11 +469,11 @@ inline String webBegin(void (*onWait)(unsigned long ms) = nullptr) {
   WiFi.onEvent(wifiEventLog);
   if (tryStation(onWait)) {
     g_apMode = false;
-    if (MDNS.begin(MDNS_HOSTNAME)) MDNS.addService("http", "tcp", 80);
+    if (MDNS.begin(g_devHost)) MDNS.addService("http", "tcp", 80);
     where = WiFi.localIP().toString();
   } else {
     startAccessPoint();
-    where = String(WIFI_AP_BASE) + "-" + chipSuffix();
+    where = g_devName;
   }
   registerRoutes();
   server.begin();
@@ -449,6 +500,13 @@ inline void webLoop() {
 }
 
 inline bool webIsAP()     { return g_apMode; }
+// A new device name: the .local address follows at once. The hotspot keeps
+// its old name until it next starts, so a phone on it is not thrown off.
+inline void webApplyName() {
+  if (g_apMode) return;
+  MDNS.end();
+  if (MDNS.begin(g_devHost)) MDNS.addService("http", "tcp", 80);
+}
 inline const String &webSsid() { return g_ssid; }
 inline String webIP()     { return g_apMode ? g_apIP.toString() : WiFi.localIP().toString(); }
 

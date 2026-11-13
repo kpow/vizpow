@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.7.11.8"
+#define FIRMWARE_VERSION "0.8.0.1"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is
@@ -148,12 +148,41 @@
 #define INFO_AUTO_SWITCH_MS 30000   // auto-flip time<->weather in info mode (0 = off)
 
 // ---- WiFi / web ------------------------------------------------------------
-#define WIFI_AP_BASE     "vizMini"      // AP SSID becomes vizMini-XXXX
-#define MDNS_HOSTNAME    "vizmini"      // reachable at http://vizmini.local
+// Each vizMini has a device name (device_name.h): his hotspot SSID, his mDNS
+// address (lowercased, <name>.local) and the name VizCloud shows. Until one is
+// set on the web page it is this base plus four hex digits of the MAC.
+#define DEVICE_NAME_BASE "vizMini"      // default name vizMini-XXXX -> vizmini-xxxx.local
+#define BOARD_TYPE       "vizmini-c3"   // a firmware file must carry this in its name (builds/vizmini-c3-v<version>.bin)
 #define BOOT_AP_NOTE_MS  30000          // after the intro, the hotspot name stays in a bubble this long
 #define INTRO_IP_HOLD_MS 2600           // intro: how long his address shows before he swells into the face
 #define INTRO_AP_HOLD_MS 8000           // ... or the hotspot name (people have to read it)
 #define STA_CONNECT_TIMEOUT_MS  20000   // give up joining a network after 20 s (a join takes ~5-8 s)
 #define NVS_NAMESPACE    "vizmini"      // Preferences namespace for creds
+
+// ---- VizCloud (cloud_client.h) ---------------------------------------------
+// Bot protocol v2 (vizCloud docs/rebuild/BOT-API-V2.md). 0 = no cloud code at all.
+#define CLOUD_ENABLED          1
+#define CLOUD_SERVER_URL       "https://vizcloud-raxo5.ondigitalocean.app"   // the web page can point him at a test server instead
+#define CLOUD_HARDWARE_TYPE    "vizmini_c3_oled"
+// NOT a credential. This is the old v1 shared value, printed in public docs and
+// in every vizbot build. A v2 server ignores it; it is sent only while he has
+// no token of his own, so that he also registers against a v1 server.
+#define CLOUD_LEGACY_SECRET    "349baac1c179460b0ea78ca572bcc7a1187bcab891b71b47c28dce5dae5c5103"
+#define CLOUD_POLL_DEFAULT_S   60       // seconds between syncs until the server says otherwise
+#define CLOUD_POLL_MIN_S       20       // floor: every sync is a full TLS handshake (~3 s of C3 CPU)
+#define CLOUD_POLL_MAX_S       300
+#define CLOUD_DISABLED_POLL_S  300      // a bot switched off in the cloud only checks back this often
+#define CLOUD_BOOT_DELAY_MS    20000    // first call after the intro, NTP and the first weather fetch
+#define CLOUD_TIMEOUT_MS       10000    // per socket operation
+#define CLOUD_AUTH_BACKOFF_S   3600     // 401: wait an hour, then register again
+#define CLOUD_BACKOFF_MAX_S    300      // other failures: 30 s doubling up to this
+#define CLOUD_RESPONSE_MAX     2048     // bytes of a reply he reads (the server keeps vizMini replies under 2 KB)
+#define CLOUD_TASK_STACK       10240    // bytes; mbedTLS's ECDSA P-384 chain check is the deep part. /state reports what is left
+#define CLOUD_TLS_MIN_FREE     60000    // skip a call unless this much heap is free ...
+#define CLOUD_TLS_MIN_BLOCK    20000    // ... with one block this large (TLS takes two 16.7 KB buffers)
+#define CLOUD_OTA_COOLDOWN_MS  3600000UL  // at most one cloud firmware update attempt an hour
+#define CLOUD_OTA_MIN_FREE     80000    // a cloud firmware download starts only with this much heap free
+#define CLOUD_OTA_CONFIRM_MS   600000UL   // new cloud firmware that has not synced in 10 min rolls itself back
+#define CLOUD_OTA_MAX_MS       300000UL   // a download slower than this is abandoned
 
 #endif // CONFIG_H
