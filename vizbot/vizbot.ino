@@ -421,6 +421,9 @@ void setup() {
   cfg.output_power = false;
   #endif
   M5.begin(cfg);
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  plogCaptureBoot();   // why it last switched off, before anything else touches the power chip
+  #endif
   #ifdef BOARD_HAS_FACES_BASE
   M5.Speaker.end();
   #endif
@@ -629,6 +632,7 @@ void loop() {
   // Held off during a voice turn: servo noise would keep the end-of-speech
   // detector open, and a rail cycle mid-reply is jarring.
   if (!voiceTurn) scServoWatchdogTick();
+  plogTick();   // power log: battery lows and a row every 15 s (power_log.h)
 
   // Idle head drift — suppressed during chill mode and voice turns
   if (!scTouch_state.chillMode && !voiceTurn && !partyBlob.code) {   // code mode moves the head itself

@@ -44,6 +44,9 @@ extern SystemStatus sysStatus;
 bool i2cAcquire(uint32_t timeoutMs);
 void i2cRelease();
 
+// power_log.h (included after this header): one row in the power log.
+void plogRow(const char* event, const char* note = "");
+
 struct ScI2cLock {
   bool held;
   explicit ScI2cLock(uint32_t timeoutMs = 50) : held(i2cAcquire(timeoutMs)) {}
@@ -282,6 +285,7 @@ inline bool scRecoverServos() {
   scMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
   delay(1300);
 
+  plogRow("RAIL_CYCLE");   // written before the cut: if the unit dies here, this is its last row
   {
     ScI2cLock lock;
     scChan.setServoPowerEnabled(false);
@@ -305,8 +309,10 @@ inline bool scRecoverServos() {
   }
   if (!live) {
     DBGLN("  reinit: bus not answering after power-up — skipping repositioning");
+    plogRow("RAIL_FAIL");
     return false;
   }
+  plogRow("RAIL_OK");
 
   // Glide back to the pre-cut pose. Floor values mean that read failed too —
   // fall back to a slow re-home.

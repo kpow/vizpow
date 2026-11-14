@@ -29,6 +29,7 @@ extern CRGBPalette16 currentPalette;
 #include "stackchan_base.h"
 #include "stackchan_leds.h"
 #include "stackchan_touch.h"
+#include "power_log.h"
 #endif
 #if defined(BOARD_HAS_FACES_BASE) || defined(BOARD_HAS_RING_LEDS)
 #include "stackchan_leds.h"   // pulls in faces_base.h / ring_leds.h
@@ -2740,6 +2741,42 @@ void handleDebugPower() {
 }
 #endif
 
+#ifdef BOARD_HAS_STACKCHAN_BASE
+// GET /debug/powerlog   the last 16 KB of the power log (power_log.h)
+//     ?all=1    the whole file
+//     ?old=1    the rotated file
+//     ?clear=1  delete both
+void handleDebugPowerLog() {
+  if (server.hasArg("clear")) {
+    LittleFS.remove(PLOG_PATH);
+    LittleFS.remove(PLOG_OLD_PATH);
+    server.send(200, "text/plain", "cleared");
+    return;
+  }
+  File f = LittleFS.open(server.hasArg("old") ? PLOG_OLD_PATH : PLOG_PATH, "r");
+  if (!f) { server.send(404, "text/plain", "no power log yet"); return; }
+  size_t size = f.size(), start = 0;
+  if (!server.hasArg("all") && size > 16384) {
+    f.seek(size - 16384);
+    f.readStringUntil('\n');   // drop the partial first row
+    start = f.position();
+  }
+  size_t left = size - start;   // rows added while this runs are left for the next read
+  server.setContentLength(left + (start ? strlen(PLOG_HEADER) + 1 : 0));
+  server.send(200, "text/csv", "");
+  if (start) { server.sendContent(PLOG_HEADER); server.sendContent("\n"); }
+  static char buf[1024];
+  while (left) {
+    size_t n = f.read((uint8_t*)buf, left < sizeof(buf) ? left : sizeof(buf));
+    if (!n) break;
+    server.sendContent(buf, n);
+    left -= n;
+    hangBeatWifiMs = millis();   // a long read still counts as alive
+  }
+  f.close();
+}
+#endif
+
 #ifdef VOICE_ENABLED
 // ---- vizbrain voice endpoints (see voice_client.h) ----
 void handleBrainStatus() {
@@ -2973,6 +3010,7 @@ void setupWebServer() {
   #endif
   #ifdef BOARD_HAS_STACKCHAN_BASE
   server.on("/debug/servo", handleDebugServo);
+  server.on("/debug/powerlog", handleDebugPowerLog);
   #endif
 
   // Bot mode endpoints
