@@ -16,6 +16,38 @@
 // Current temp, condition, wind and day/night; today's hi/lo and rain chance.
 // ============================================================================
 
+// ---- one network job at a time ----------------------------------------------
+// The weather fetch, a VizCloud call (cloud_client.h) and a firmware upload
+// from the web page (web_ui.h) never overlap: a TLS session alone takes ~45 KB
+// of this board's heap, and Update.end() hashing an image next to a TLS
+// handshake starves everything else. The two tasks take g_netMutex around a
+// call; an upload raises g_otaUploadAt, which makes netTake() fail until it is
+// over, and waits out a call already running (netHoldForUpload()).
+static SemaphoreHandle_t g_netMutex = nullptr;
+static volatile uint32_t g_otaUploadAt = 0;   // millis() of the last upload chunk, 0 = no upload
+
+inline void netLockInit() { if (!g_netMutex) g_netMutex = xSemaphoreCreateMutex(); }
+// A stalled upload (the browser went away without an abort) stops counting after 30 s
+inline bool otaUploadActive() { uint32_t t = g_otaUploadAt; return t && millis() - t < 30000; }
+inline void netGive() { xSemaphoreGive(g_netMutex); }
+// For the network tasks. False when another job has the network or an upload is running
+inline bool netTake(uint32_t waitMs) {
+  if (!g_netMutex || xSemaphoreTake(g_netMutex, pdMS_TO_TICKS(waitMs)) != pdTRUE) return false;
+  if (otaUploadActive()) { netGive(); return false; }
+  return true;
+}
+// For the loop task as an upload starts: no new network job from now on, and
+// wait (bounded) for one already running. False if it did not finish in time
+inline bool netHoldForUpload(uint32_t waitMs) {
+  g_otaUploadAt = millis() | 1;
+  if (!g_netMutex) return true;
+  if (xSemaphoreTake(g_netMutex, pdMS_TO_TICKS(waitMs)) != pdTRUE) { g_otaUploadAt = 0; return false; }
+  netGive();
+  return true;
+}
+inline void netUploadTouch() { g_otaUploadAt = millis() | 1; }
+inline void netUploadDone()  { g_otaUploadAt = 0; }
+
 enum WeatherIcon : uint8_t {
   WX_CLEAR = 0, WX_PARTLY, WX_CLOUDY, WX_FOG, WX_DRIZZLE, WX_RAIN, WX_SNOW, WX_THUNDER
 };
@@ -174,12 +206,16 @@ static void weatherTask(void *) {
   for (;;) {
     bool due = weather.valid ? (millis() - weather.lastFetchMs) > WEATHER_REFRESH_MS
                              : (lastAttempt == 0 || millis() - lastAttempt > 30000);
-    if (due && WiFi.status() == WL_CONNECTED) { lastAttempt = millis(); fetchWeather(); }
+    if (due && WiFi.status() == WL_CONNECTED && netTake(20000)) {   // not during a cloud call or an upload
+      lastAttempt = millis();
+      fetchWeather();
+      netGive();
+    }
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
-inline void weatherBegin() { xTaskCreate(weatherTask, "weather", 6144, nullptr, 1, nullptr); }
+inline void weatherBegin() { netLockInit(); xTaskCreate(weatherTask, "weather", 6144, nullptr, 1, nullptr); }
 
 // The ink weather scenes (ink_time.h): one of 7 behaviours of the drop
 enum InkSky : uint8_t { SKY_CLEAR = 0, SKY_CLOUDY, SKY_RAIN, SKY_SNOW, SKY_STORM, SKY_FOG, SKY_WIND, SKY_NUM };
