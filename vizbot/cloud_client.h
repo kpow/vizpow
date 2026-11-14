@@ -146,6 +146,21 @@ static char cloudOtaError[64] = "";         // reported as otaError until a sync
 static bool cloudOtaHold = false;           // no update attempt before cloudOtaHoldUntilMs
 static unsigned long cloudOtaHoldUntilMs = 0;
 
+// Content that the bot crashed while applying (NVS "cntTry", see
+// cloudContentCheckBoot): that version is left alone for an hour, so a bot that
+// falls over on some content does not download it again on every boot.
+#define CLOUD_CONTENT_SETTLE_MS 180000UL    // "cntTry" stays this long after applying
+#define CLOUD_CONTENT_SKIP_MS   3600000UL   // a version it crashed on waits this long
+static uint32_t cloudContentSkipVer = 0;
+static unsigned long cloudContentSkipUntilMs = 0;
+static unsigned long cloudContentTryMs = 0;   // "cntTry" written then (0 = none)
+static char cloudContentError[64] = "";       // reported as contentError while skipped
+
+static bool cloudContentSkipped(uint32_t version) {
+  return cloudContentSkipVer && version == cloudContentSkipVer &&
+         (int32_t)(millis() - cloudContentSkipUntilMs) < 0;
+}
+
 // Scheduled command buffer
 #define SCHED_CMD_SLOTS 8
 struct ScheduledCommand {
@@ -391,7 +406,9 @@ static String buildRegistrationBody() {
 
 static String buildSyncBody() {
   JsonDocument doc;
-  doc["contentVersion"] = cloudMeta.contentVersion;
+  // Skipping a version it crashed on: report that one, so the server does not send it again yet
+  bool contentSkipped = cloudContentSkipped(cloudContentSkipVer);
+  doc["contentVersion"] = contentSkipped ? cloudContentSkipVer : cloudMeta.contentVersion;
   doc["status"] = "active";
 
   // Protocol v2 (a v1 server ignores these)
@@ -401,6 +418,7 @@ static String buildSyncBody() {
   doc["configRev"] = cloudConfigRev;
   if (!cloudBootReported) doc["resetReason"] = cloudResetReasonStr();
   if (cloudOtaError[0]) doc["otaError"] = cloudOtaError;
+  if (contentSkipped) doc["contentError"] = cloudContentError;
 
   if (ackCount > 0) {
     JsonArray acks = doc["commandAcks"].to<JsonArray>();
@@ -600,6 +618,58 @@ static int cloudPost(const char* url, const String& body, String& response) {
 // ============================================================================
 // Process Content from Server Response
 // ============================================================================
+
+// Boot: content was being applied when the bot last went down. After a crash
+// that version waits an hour; after anything else (power, a reset) it is
+// simply fetched again.
+static void cloudContentCheckBoot() {
+  Preferences prefs;
+  if (!prefs.begin(CLOUD_NVS_NAMESPACE, false)) return;
+  if (prefs.isKey("cntTry")) {
+    uint32_t version = prefs.getUInt("cntTry", 0);
+    esp_reset_reason_t why = esp_reset_reason();
+    if (why == ESP_RST_PANIC || why == ESP_RST_INT_WDT || why == ESP_RST_TASK_WDT || why == ESP_RST_WDT) {
+      cloudContentSkipVer = version;
+      cloudContentSkipUntilMs = millis() + CLOUD_CONTENT_SKIP_MS;
+      snprintf(cloudContentError, sizeof(cloudContentError), "v%lu skipped 1 h: %s while applying it",
+               (unsigned long)version, cloudResetReasonStr());
+      Serial.printf("[Cloud] content %s\n", cloudContentError);
+    }
+    prefs.remove("cntTry");
+  }
+  prefs.end();
+}
+
+// Applying content is marked in NVS until the bot has stayed up a while after
+static void cloudContentSettle() {
+  if (!cloudContentTryMs || millis() - cloudContentTryMs < CLOUD_CONTENT_SETTLE_MS) return;
+  cloudContentTryMs = 0;
+  Preferences prefs;
+  if (prefs.begin(CLOUD_NVS_NAMESPACE, false)) {
+    prefs.remove("cntTry");
+    prefs.end();
+  }
+}
+
+static void processContent(JsonObject& content);
+
+// Content from a register or sync answer, unless this version is skipped
+static bool cloudApplyContent(JsonObject& content, uint32_t version) {
+  if (cloudContentSkipped(version)) {
+    DBG("Cloud: content v");
+    DBG(version);
+    DBGLN(" skipped (crashed on it)");
+    return false;
+  }
+  Preferences prefs;
+  if (prefs.begin(CLOUD_NVS_NAMESPACE, false)) {
+    prefs.putUInt("cntTry", version);
+    prefs.end();
+  }
+  cloudContentTryMs = millis() | 1;
+  processContent(content);
+  return true;
+}
 
 static void processContent(JsonObject& content) {
   // Serialize content types separately for cache
@@ -1015,6 +1085,7 @@ bool cloudRegister() {
     // The id comes from the server. A bot that already had one sent it, and
     // gets it back. Its cached content is rewritten only if the version moved.
     uint32_t version = doc["contentVersion"] | 0;
+    uint32_t heldVersion = cloudMeta.contentVersion;
     bool sameContent = strcmp(botId, cloudMeta.botId) == 0 && version == cloudMeta.contentVersion;
     strncpy(cloudMeta.botId, botId, sizeof(cloudMeta.botId) - 1);
     cloudMeta.botId[sizeof(cloudMeta.botId) - 1] = '\0';
@@ -1040,7 +1111,10 @@ bool cloudRegister() {
     // Cache content
     if (!doc["content"].isNull() && !sameContent) {
       JsonObject content = doc["content"];
-      processContent(content);
+      if (!cloudApplyContent(content, version)) {
+        cloudMeta.contentVersion = heldVersion;   // still the content it holds
+        saveCloudNVS();
+      }
     }
 
     // Save meta to LittleFS
@@ -1134,6 +1208,7 @@ bool cloudSync() {
     }
 
     // Update content version
+    uint32_t heldVersion = cloudMeta.contentVersion;
     cloudMeta.contentVersion = doc["contentVersion"] | cloudMeta.contentVersion;
 
     // Process commands
@@ -1229,9 +1304,12 @@ bool cloudSync() {
     // Process content update
     if (!doc["content"].isNull()) {
       JsonObject content = doc["content"];
-      processContent(content);
-      saveCloudNVS();
-      DBGLN("Cloud: content updated");
+      if (cloudApplyContent(content, cloudMeta.contentVersion)) {
+        saveCloudNVS();
+        DBGLN("Cloud: content updated");
+      } else {
+        cloudMeta.contentVersion = heldVersion;   // still the content it holds
+      }
     }
 
     // v2: settings changed in the admin. Sent only when its rev differs from
@@ -1356,6 +1434,8 @@ void initCloudClient() {
     }
   }
 
+  cloudContentCheckBoot();
+
   // Boot delay — let WiFi stack settle before first cloud poll
   cloudNextPollMs = millis() + 2000;
 
@@ -1433,6 +1513,7 @@ static void cloudNetHoldEnd() {
 
 void pollCloudSync() {
   if (cloudServerChanged) cloudApplyServerChange();
+  cloudContentSettle();
   if (!sysStatus.staConnected) return;
 
   unsigned long now = millis();
