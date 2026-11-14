@@ -194,7 +194,7 @@ function nm(){D.nn=0;post('/device/name','v='+encodeURIComponent($('nn').value.t
 function csv(){D.cu=0;post('/cloud/server','url='+encodeURIComponent($('cu').value.trim()),'ch2')}
 ['nn','cu'].forEach(function(i){$(i).oninput=function(){D[i]=1}});
 function ago(n){return n<0?'never':n<90?n+' s ago':n<5400?Math.round(n/60)+' min ago':Math.round(n/3600)+' h ago'}
-var CST={approved:'Approved',pending:'Waiting for approval in the admin',disabled:'Switched off in the admin',new:'Registering…',auth:'Key refused · re-pairing in up to an hour',error:'Can\'t reach the server',offline:'Not on WiFi',off:'Not in this build'};
+var CST={approved:'Approved',pending:'Waiting for approval in the admin',disabled:'Switched off in the admin',forgotten:'Forgotten in the admin · registering again',new:'Registering…',auth:'Key refused · re-pairing in up to an hour',error:'Can\'t reach the server',offline:'Not on WiFi',off:'Not in this build'};
 function say(){var e=$('t'),v=e.value.trim();if(!v)return;g('/bot/say?text='+encodeURIComponent(v));$('sh').textContent='Said: “'+v+'”';e.value=''}
 function snow(){set('snow',!S.snow);g('/bot/snow?v='+(S.snow?1:0))}
 function tg(id){var b=$(id),sh=b.classList.toggle('shut');b.previousElementSibling.classList.toggle('shut',sh);

@@ -34,7 +34,9 @@
 // Identity: botId, botToken and the applied config revision live in NVS. With
 // a token he sends X-Bot-Token; without one, the public v1 value as
 // X-Bot-Secret (see CLOUD_LEGACY_SECRET). A 401 means wait an hour, then
-// register again; nothing ever stops the client for good.
+// register again; nothing ever stops the client for good. A sync answered
+// approval "unknown" means the admin forgot him: he drops id, token and config
+// revision and registers as a new bot (at most once per 5 minutes).
 // A test server set on the web page keeps its own identity under separate NVS
 // keys, so testing never disturbs the production pairing.
 //
@@ -229,7 +231,8 @@ static uint32_t cloudIsoToEpoch(const char *s) {
 // ============================================================================
 // State
 // ============================================================================
-enum CloudApproval : uint8_t { CA_UNKNOWN = 0, CA_APPROVED, CA_PENDING, CA_DISABLED };
+// CA_UNKNOWN: not heard yet. CA_FORGOTTEN: the server said "unknown" (no bot with his id).
+enum CloudApproval : uint8_t { CA_UNKNOWN = 0, CA_APPROVED, CA_PENDING, CA_DISABLED, CA_FORGOTTEN };
 
 struct CloudState {
   // ---- saved in NVS ----
@@ -256,6 +259,7 @@ struct CloudState {
   // ---- cloud task only ----
   bool     regTried = false;               // registered against this server since boot
   uint32_t regAt = 0;
+  uint32_t forgotAt = 0;                   // millis() of the last identity reset after "unknown", 0 = none
   bool     resetSent = false;              // resetReason goes on syncs until one that is not pending succeeds
   char     otaErr[65] = "";                // reported as otaError (max 64 characters) until a sync takes it
   uint32_t otaAt = 0;                      // millis() of the last update attempt, 0 = none
@@ -599,12 +603,14 @@ static void cloudBuildRegister() {
   reqAdd(",\"resetReason\":\"%s\"}", cloudResetReason());
 }
 
-// approval: "approved" | "pending" | "disabled". A value he does not know counts
-// as pending (do nothing). A v1 server sends none: what it answers is approved.
+// approval: "approved" | "pending" | "disabled" | "unknown" (forgotten). A value
+// he does not know counts as pending (do nothing). A v1 server sends none: what
+// it answers is approved.
 static void cloudReadApproval(const char *root, bool v1IsApproved) {
   char a[12];
   if (jsStr(jsGet(root, "approval"), a, sizeof(a))) {
-    g_cl.approval = !strcmp(a, "approved") ? CA_APPROVED : !strcmp(a, "disabled") ? CA_DISABLED : CA_PENDING;
+    g_cl.approval = !strcmp(a, "approved") ? CA_APPROVED : !strcmp(a, "disabled") ? CA_DISABLED :
+                    !strcmp(a, "unknown") ? CA_FORGOTTEN : CA_PENDING;
   } else if (v1IsApproved) {
     g_cl.approval = CA_APPROVED;
   }
@@ -868,6 +874,31 @@ static void cloudTakeFirmware(const char *fwj) {
   cloudOta(fw);
 }
 
+// approval "unknown": the admin forgot him and the server has no bot with his
+// id. Drop the id, the token and the config revision (RAM and NVS) and what the
+// old id left behind; the cloud task then registers without a botId on its
+// next call, as on first boot, and he waits for approval as a new bot. At most
+// once per 5 minutes (a server that keeps saying "unknown" must not cause a
+// register storm); inside that window he keeps polling as usual.
+#define CLOUD_FORGET_MIN_MS 300000UL
+static void cloudForget() {
+  uint32_t now = millis();
+  if (g_cl.forgotAt && now - g_cl.forgotAt < CLOUD_FORGET_MIN_MS) {
+    Serial.println("[cloud] forgotten again: identity reset waits (5 minute limit)");
+    return;
+  }
+  g_cl.forgotAt = now | 1;                                 // 0 means never
+  Serial.printf("[cloud] the server has forgotten %s: registering as a new bot\n", g_cl.botId);
+  g_cl.botId[0] = g_cl.token[0] = 0;
+  g_cl.cfgRev = 0;
+  g_cl.otaErr[0] = 0;                                      // was about the old id's update assignment
+  g_cl.otaSameWarned = false;
+  g_cl.regTried = false;
+  g_cl.approval = CA_UNKNOWN;                              // "new" on his page until register answers
+  g_cAckN = 0;
+  cloudSaveIdentity();                                     // cId/cTok/cRev (tId/tTok/tRev on a test server)
+}
+
 // 200: { contentVersion, commands[], content, config, groups[], fleet{},
 //        approval, firmware }
 static bool cloudSync() {
@@ -885,7 +916,8 @@ static bool cloudSync() {
   cloudOtaConfirm();                                       // new firmware has now proved it can sync
 
   cloudReadApproval(g_cResp, true);
-  if (g_cl.approval != CA_APPROVED) return true;           // pending or disabled: nothing to do, quietly
+  if (g_cl.approval == CA_FORGOTTEN) cloudForget();        // the next call registers anew
+  if (g_cl.approval != CA_APPROVED) return true;           // pending, disabled or forgotten: nothing to do, quietly
   // The server keeps what this request carried once only (as vizbot: a
   // pending answer stores nothing, so both go again on the next sync)
   if (sentReset) g_cl.resetSent = true;
@@ -1055,11 +1087,11 @@ inline void cloudLoop() {
 
 // For /state: {"st":..,"server":..,"url":..,"id":..,"lastS":..,"nextS":..,"err":..,...}
 // st: offline (no WiFi) | auth (key refused, re-pairing) | error | approved |
-//     pending | disabled | new (not registered yet)
+//     pending | disabled | forgotten (server said "unknown", re-registering) | new (not registered yet)
 inline String cloudStatusJson() {
   const char *st = !g_cl.online ? "offline" : g_cl.reauth ? "auth" : g_cl.fails ? "error" :
                    g_cl.approval == CA_APPROVED ? "approved" : g_cl.approval == CA_PENDING ? "pending" :
-                   g_cl.approval == CA_DISABLED ? "disabled" : "new";
+                   g_cl.approval == CA_DISABLED ? "disabled" : g_cl.approval == CA_FORGOTTEN ? "forgotten" : "new";
   const char *base = cloudBase(), *host = strstr(base, "://");
   uint32_t now = millis(), last = g_cl.lastOkMs;
   int32_t next = (int32_t)(g_cl.nextAt - now);

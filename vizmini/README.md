@@ -110,6 +110,11 @@ a byte is written.
 - **Cloud firmware updates** download over the pinned HTTPS connection,
   check size and SHA-256, and roll back unless the new firmware syncs within
   10 minutes.
+- **Forgotten** (0.8.1): a sync answered `approval: "unknown"` means the admin
+  forgot him. He clears his id, key and config revision (NVS `cId`/`cTok`/`cRev`,
+  `tId`/`tTok`/`tRev` on a test server), registers again without an id on the
+  next call and waits for approval as a new bot. At most one such reset per 5
+  minutes; inside that window he keeps polling.
 - **Memory**: the calls run in their own task, one network job at a time (never
   beside the weather fetch or a web upload), and wait when the heap is short.
   The System card shows free / lowest memory; the Cloud card shows the cloud
