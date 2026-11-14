@@ -1187,7 +1187,7 @@ static void cloudForgetIdentity() {
   cloudMeta.fleetOnline = 0;
   cloudNoTokenServer = false;
   cloudTokenRetry = false;
-  cloudApproval[0] = '\0';
+  // cloudApproval keeps "unknown" so the web panel says why it registers again; register sets it anew.
   clearAcks();                                  // acks for the old id's commands
   cloudOtaOffer.present = false;
   cloudOtaError[0] = '\0';                      // belongs to the old id's update assignment
