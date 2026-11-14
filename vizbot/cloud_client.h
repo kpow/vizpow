@@ -558,9 +558,13 @@ static int cloudPost(const char* url, const String& body, String& response) {
       esp_http_client_cleanup(client);
 
       // Now read temp file with recovered heap
+      // One allocation of the whole size (PSRAM past 4 KB), not readString()'s
+      // byte-by-byte growth through internal RAM
       File tmpR = LittleFS.open("/cloud_tmp.json", "r");
       if (tmpR) {
-        response = tmpR.readString();
+        response = "";
+        response.reserve(tmpR.size() + 1);
+        while ((read_len = tmpR.read((uint8_t*)buf, sizeof(buf))) > 0) response.concat(buf, read_len);
         tmpR.close();
       }
       LittleFS.remove("/cloud_tmp.json");
@@ -603,13 +607,17 @@ static void processContent(JsonObject& content) {
   String personalitiesStr;
   String sequencesStr;
 
+  // Sized up front: one allocation each (PSRAM past 4 KB) instead of growing
   if (content["sayings"].is<JsonArray>()) {
+    sayingsStr.reserve(measureJson(content["sayings"]) + 1);
     serializeJson(content["sayings"], sayingsStr);
   }
   if (content["personalities"].is<JsonArray>()) {
+    personalitiesStr.reserve(measureJson(content["personalities"]) + 1);
     serializeJson(content["personalities"], personalitiesStr);
   }
   if (content["sequences"].is<JsonArray>()) {
+    sequencesStr.reserve(measureJson(content["sequences"]) + 1);
     serializeJson(content["sequences"], sequencesStr);
   }
 
@@ -993,7 +1001,7 @@ bool cloudRegister() {
   cloudLastHttpCode = code;
 
   if (code == 200) {
-    JsonDocument doc;
+    JsonDocument doc(&psramJsonAllocator);   // content: ~43 KB of JSON
     DeserializationError err = deserializeJson(doc, response);
     const char* botId = doc["botId"] | "";
     if (err || !botId[0] || strlen(botId) >= sizeof(cloudMeta.botId)) {
@@ -1083,7 +1091,7 @@ bool cloudSync() {
   cloudLastHttpCode = code;
 
   if (code == 200) {
-    JsonDocument doc;
+    JsonDocument doc(&psramJsonAllocator);   // content: ~43 KB of JSON
     DeserializationError err = deserializeJson(doc, response);
     if (err) {
       DBG("Cloud: sync JSON error: ");
