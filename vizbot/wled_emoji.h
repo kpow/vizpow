@@ -371,7 +371,9 @@ void wledEmojiUpdate() {
   }
   } // switch
 
-  if (needSend) {
+  // While a cloud request runs (system_status.h) the ~30 fps fade frames are
+  // skipped; the 2 s keepalive still goes, and repaints whatever was missed
+  if (needSend && (wledEmoji.phase == WLED_EMOJI_HOLD || !cloudNetHeld())) {
     wledEmojiRenderFrame();
     wledSendDDP();
     wledEmoji.lastSendMs = now;

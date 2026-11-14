@@ -1412,6 +1412,17 @@ static void cloudApplyServerChange() {
   DBGLN(cloudServerUrl);
 }
 
+// Bulk UDP senders hold off for each request and for parsing and storing its
+// answer (system_status.h). The short wait lets packets already queued go first.
+static void cloudNetHoldBegin() {
+  cloudNetHoldMs = millis() | 1;   // 0 means no hold
+  vTaskDelay(pdMS_TO_TICKS(50));
+}
+
+static void cloudNetHoldEnd() {
+  cloudNetHoldMs = 0;
+}
+
 void pollCloudSync() {
   if (cloudServerChanged) cloudApplyServerChange();
   if (!sysStatus.staConnected) return;
@@ -1442,7 +1453,9 @@ void pollCloudSync() {
   bool needId = !cloudMeta.registered || strlen(cloudMeta.botId) == 0;
   if (needId || (!cloudToken[0] && !cloudNoTokenServer)) {
     static uint8_t regFails = 0;
+    cloudNetHoldBegin();
     cloudRegister();
+    cloudNetHoldEnd();
     if (cloudState == CLOUD_ERROR_AUTH) return;
     if (cloudState != CLOUD_REGISTERED) {
       if (regFails < 5) regFails++;
@@ -1500,6 +1513,7 @@ void pollCloudSync() {
       return;
     }
 
+    cloudNetHoldBegin();
     cloudSync();
 
     #ifdef CLOUD_OTA_ENABLED
@@ -1508,6 +1522,7 @@ void pollCloudSync() {
       cloudOtaUpdate();
     }
     #endif
+    cloudNetHoldEnd();
   }
 
   cloudNextPollMs = now + 1000;  // check again in 1s

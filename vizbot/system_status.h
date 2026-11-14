@@ -57,4 +57,16 @@ struct SystemStatus {
 
 extern SystemStatus sysStatus;
 
+// Set by the cloud task (cloud_client.h) for each cloud request (register,
+// sync, firmware download) and while it parses and stores the answer. Bulk UDP
+// senders hold off meanwhile (the voice wake stream, WLED emoji frames): a
+// steady mic stream fills the WiFi TX queue (8 static buffers) and the lwIP
+// pool, so the TLS download's ACKs and the next connect fail with ENOMEM. The
+// 3-minute limit lets go if the task never clears it.
+volatile uint32_t cloudNetHoldMs = 0;
+
+inline bool cloudNetHeld() {
+  return cloudNetHoldMs && millis() - cloudNetHoldMs < 180000;
+}
+
 #endif // SYSTEM_STATUS_H

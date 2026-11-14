@@ -12,6 +12,7 @@
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
 #include "config.h"
+#include "system_status.h"   // cloudNetHeld(): the stream holds off during cloud requests
 
 // ============================================================================
 // Voice Client — push-to-talk conversation with vizbrain (the Mac service)
@@ -899,7 +900,24 @@ static bool wakeStart() {
   return true;
 }
 
+// Send failures are local: the WiFi TX queue or lwIP is out of buffers
+// (endPacket errno 12). Retrying every 32 ms chunk keeps them that way, so after
+// WAKE_FAIL_RUN failures in a row the stream pauses, 1 s at first and doubling
+// to 8 s while it keeps failing. One success ends the back-off.
+#define WAKE_FAIL_RUN        3
+#define WAKE_PAUSE_MIN_MS    1000
+#define WAKE_PAUSE_MAX_MS    8000
+static uint8_t  wakeFailRun = 0;
+static uint32_t wakePauseMs = 0, wakePauseUntilMs = 0;
+
+// No mic audio goes out now: send failures backed off, or a cloud request runs
+static bool wakeSendPaused() {
+  if (wakePauseUntilMs && (int32_t)(millis() - wakePauseUntilMs) < 0) return true;
+  return cloudNetHeld();
+}
+
 static void wakeSend(uint32_t seq, uint8_t flags, const void* payload, size_t len) {
+  if (wakePauseUntilMs && (int32_t)(millis() - wakePauseUntilMs) < 0) return;
   uint8_t hdr[12] = {'V', 'Z', 'W', '1'};
   memcpy(hdr + 4, &seq, 4);
   hdr[8] = flags;
@@ -908,8 +926,18 @@ static void wakeSend(uint32_t seq, uint8_t flags, const void* payload, size_t le
       (len == 0 || wake.udp.write((const uint8_t*)payload, len) == len) &&
       wake.udp.endPacket()) {
     wake.sent++;
+    wakeFailRun = 0;
+    wakePauseMs = 0;
   } else {
     wake.sendFails++;
+    if (++wakeFailRun >= WAKE_FAIL_RUN) {
+      wakeFailRun = 0;
+      wakePauseMs = wakePauseMs ? min(wakePauseMs * 2, (uint32_t)WAKE_PAUSE_MAX_MS) : WAKE_PAUSE_MIN_MS;
+      wakePauseUntilMs = millis() + wakePauseMs;
+      wake.open = false;   // the next burst starts afresh, with START and pre-roll
+      Serial.printf("[Wake] UDP send failing (%lu fails so far), pausing %lu ms\n",
+                    (unsigned long)wake.sendFails, (unsigned long)wakePauseMs);
+    }
   }
 }
 
@@ -948,6 +976,16 @@ static void wakeProcessChunk(uint32_t idx) {
   float thr = fmaxf(WAKE_FLOOR_RMS, wake.noise * WAKE_OPEN_RATIO);
   if (rms > thr) wake.lastLoudMs = now;
 
+  // Paused: close any burst (END is one small packet; it is dropped too while
+  // failures are backed off) and send nothing, heartbeats included.
+  if (wakeSendPaused()) {
+    if (wake.open) {
+      wake.open = false;
+      wakeSend(idx, WAKE_F_END, nullptr, 0);
+    }
+    return;
+  }
+
   if (!wake.open && rms > thr) {
     wake.open = true;
     wake.bursts++;
@@ -955,6 +993,8 @@ static void wakeProcessChunk(uint32_t idx) {
     avail = min(avail, idx);
     for (uint32_t k = idx - avail; k < idx; k++) {
       wakeSend(k, k == idx - avail ? WAKE_F_START : 0, wakeChunk(k), VOICE_CHUNK * sizeof(int16_t));
+      if (!wake.open) return;                           // sends failed and backed off
+      vTaskDelay(1);   // ~1 s of audio at once otherwise outruns the 8 WiFi TX buffers
     }
     wakeSend(idx, avail ? 0 : WAKE_F_START, c, VOICE_CHUNK * sizeof(int16_t));
     return;
