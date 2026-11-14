@@ -14,6 +14,12 @@
 //   DRIFT:  Small random movements around center (original behavior, bigger range)
 //   SWEEP:  Full slow scan across the environment — surveys the room
 //
+// Ranges and speeds follow M5's own idle motion (StackChan firmware's
+// IdleMotionModifier): yaw within about ±50°, BSP speeds of roughly 150-400, and
+// no new move until the last one has finished. Our older idle swung to ±80° at
+// speed 670-900, and those hard far swings are what knocked the servos off the
+// bus (both go deaf while still holding, until the rail is cycled).
+//
 // Personality controls frequency, amplitude, and sweep chance:
 //   Hyper:  frequent moves, big range, sweeps often
 //   Chill:  moderate moves, medium range, occasional sweeps
@@ -72,6 +78,7 @@ struct ScIdleServo {
 
     // DRIFT phase
     if (now < nextMoveMs) return;
+    if (headStillMoving(now)) return;
 
     // Personality-driven parameters
     int yawRange, pitchRange;
@@ -81,11 +88,11 @@ struct ScIdleServo {
 
     switch (personalityIndex) {
       case PERSONALITY_HYPER:
-        yawRange = 600;       // ±60° — big head turns
+        yawRange = 500;       // ±50° — big head turns
         pitchRange = 150;     // ±15°
         intervalMin = 2000;
         intervalMax = 4000;
-        moveTimeMs = 400;
+        moveTimeMs = 1400;    // BSP speed ~400
         sweepChance = 50;     // sweeps often
         driftsBeforeSweep = 3;
         break;
@@ -95,17 +102,17 @@ struct ScIdleServo {
         pitchRange = 50;      // ±5°
         intervalMin = 8000;
         intervalMax = 15000;
-        moveTimeMs = 900;
+        moveTimeMs = 1900;    // BSP speed ~165
         sweepChance = 15;     // rarely sweeps
         driftsBeforeSweep = 8;
         break;
 
       default:  // CHILL
-        yawRange = 450;       // ±45° — relaxed scanning
+        yawRange = 400;       // ±40° — relaxed scanning
         pitchRange = 100;     // ±10°
         intervalMin = 3000;
         intervalMax = 7000;
-        moveTimeMs = 600;
+        moveTimeMs = 1600;    // BSP speed ~310
         sweepChance = 35;     // occasional sweeps
         driftsBeforeSweep = 5;
         break;
@@ -149,12 +156,12 @@ struct ScIdleServo {
       case PERSONALITY_HYPER:
         // Fast zigzag: far left → far right → center, head bobs
         sweepStepCount = 5;
-        sweepPoints[0] = -800;  sweepPitch[0] = pitchHome + 80;
-        sweepPoints[1] =  800;  sweepPitch[1] = pitchHome - 60;
-        sweepPoints[2] = -400;  sweepPitch[2] = pitchHome + 40;
-        sweepPoints[3] =  400;  sweepPitch[3] = pitchHome - 40;
+        sweepPoints[0] = -500;  sweepPitch[0] = pitchHome + 80;
+        sweepPoints[1] =  500;  sweepPitch[1] = pitchHome - 60;
+        sweepPoints[2] = -300;  sweepPitch[2] = pitchHome + 40;
+        sweepPoints[3] =  300;  sweepPitch[3] = pitchHome - 40;
         sweepPoints[4] =    0;  sweepPitch[4] = pitchHome;
-        sweepSpeed = 500;
+        sweepSpeed = 1400;
         break;
 
       case PERSONALITY_GRUMPY:
@@ -163,18 +170,18 @@ struct ScIdleServo {
         sweepPoints[0] = -300;  sweepPitch[0] = pitchHome;
         sweepPoints[1] =  300;  sweepPitch[1] = pitchHome + 30;
         sweepPoints[2] =    0;  sweepPitch[2] = pitchHome;
-        sweepSpeed = 1000;
+        sweepSpeed = 1900;
         break;
 
       default:  // CHILL
         // Smooth panoramic scan: left → right → center, gentle pitch wave
         sweepStepCount = 5;
-        sweepPoints[0] = -700;  sweepPitch[0] = pitchHome + 50;
-        sweepPoints[1] = -300;  sweepPitch[1] = pitchHome - 30;
-        sweepPoints[2] =  300;  sweepPitch[2] = pitchHome - 30;
-        sweepPoints[3] =  700;  sweepPitch[3] = pitchHome + 50;
+        sweepPoints[0] = -500;  sweepPitch[0] = pitchHome + 50;
+        sweepPoints[1] = -200;  sweepPitch[1] = pitchHome - 30;
+        sweepPoints[2] =  200;  sweepPitch[2] = pitchHome - 30;
+        sweepPoints[3] =  500;  sweepPitch[3] = pitchHome + 50;
         sweepPoints[4] =    0;  sweepPitch[4] = pitchHome;
-        sweepSpeed = 800;
+        sweepSpeed = 1600;
         break;
     }
 
@@ -186,6 +193,7 @@ struct ScIdleServo {
 
   void updateSweep(unsigned long now, uint8_t personalityIndex) {
     if (now < sweepNextMs) return;
+    if (headStillMoving(now)) { sweepNextMs = nextMoveMs; return; }
 
     sweepStep++;
     if (sweepStep >= sweepStepCount) {
@@ -197,14 +205,22 @@ struct ScIdleServo {
 
     uint16_t sweepSpeed;
     switch (personalityIndex) {
-      case PERSONALITY_HYPER:  sweepSpeed = 500;  break;
-      case PERSONALITY_GRUMPY: sweepSpeed = 1000; break;
-      default:                 sweepSpeed = 800;  break;
+      case PERSONALITY_HYPER:  sweepSpeed = 1400; break;
+      case PERSONALITY_GRUMPY: sweepSpeed = 1900; break;
+      default:                 sweepSpeed = 1600; break;
     }
 
     scMoveYaw(sweepPoints[sweepStep], sweepSpeed);
     scMovePitch(sweepPitch[sweepStep], sweepSpeed);
     sweepNextMs = now + sweepSpeed + random(200, 800);
+  }
+
+  // Like M5's idle: never retarget a head that is still on its way. Asking
+  // costs a bus read, so only ask once a move is due, then check back in 500ms.
+  bool headStillMoving(unsigned long now) {
+    if (!scChan.Motion.isMoving()) return false;
+    nextMoveMs = now + 500;
+    return true;
   }
 
   // Immediately return to home (called after reactions end)

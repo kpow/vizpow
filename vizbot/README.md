@@ -413,6 +413,11 @@ HTTPS to a DigitalOcean App Platform server:
 - **Scheduled commands**: ISO-8601 `execute_at`, 8 slots.
 - **Content sync**: sayings + personalities cached to LittleFS.
 - **Telemetry**: expression, personality, RSSI, heap, uptime, NTP, IMU, lux, mesh peers.
+- **Forgotten bots** (3.11.2): a sync answered `approval: "unknown"` means the admin forgot this bot.
+  The bot clears its botId, token and configRev (NVS `botId`/`token`/`cfgRev`, `t_*` on a test server,
+  plus the old identity's `cfgPoll`, `cfgPers`, `otaErr` and the botId in `/cloud/meta.json`) and
+  registers again without a botId on the next cloud cycle, then waits for approval as a new bot.
+  At most one such reset per 5 minutes; inside that window it keeps polling. Cached content is kept.
 
 Runs cooperatively inside `wifiServerTask` on Core 0 — TLS serialized with WLED HTTP to limit heap
 fragmentation. See `FIRMWARE-INTEGRATION.md` for the full spec.

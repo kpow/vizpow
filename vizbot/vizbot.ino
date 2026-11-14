@@ -413,7 +413,17 @@ void setup() {
   cfg.internal_spk = false;
   cfg.internal_mic = false;
   #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  // Leave the CoreS3's 5V output (BUS_OUT_EN + boost) off. With it on, USB never
+  // reaches the AXP2101 on the stackchan base, so the battery never charges and
+  // drains ~0.5 A until the bot crash-loops. The base doesn't use that 5V: its
+  // chips run on 3V3 and the servo rail boosts off the battery.
+  cfg.output_power = false;
+  #endif
   M5.begin(cfg);
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  plogCaptureBoot();   // why it last switched off, before anything else touches the power chip
+  #endif
   #ifdef BOARD_HAS_FACES_BASE
   M5.Speaker.end();
   #endif
@@ -507,6 +517,7 @@ void setup() {
 void loop() {
   uint32_t loopStartMs = millis();
   loopStatsBegin();
+  hangBeatLoopMs = loopStartMs;
 
   // Only read IMU if it initialized successfully
   if (sysStatus.imuReady) {
@@ -616,15 +627,12 @@ void loop() {
   #else
   const bool voiceTurn = false;
   #endif
-  // BSP's Motion task owns the bus and manages torque, so there is no health
-  // poll or torque tick here. The periodic rail cycle below is a workaround for
-  // the head still intermittently going stiff — see stackchan_base.h.
-  // Skip the scheduled rail cycle during chill: chill doubles as the
-  // idle-drift-off soak experiment, and a blind reinit every 5 min would
-  // silently mask any stall, ruining the result.
-  // Both are held off during a voice turn: servo noise would keep the
-  // end-of-speech detector open, and a rail cycle mid-reply is jarring.
-  if (!scTouch_state.chillMode && !voiceTurn) scServoWatchdogTick();
+  // BSP's Motion task owns the bus and manages torque. The watchdog only pings
+  // the servos and cycles the rail when they stop answering (stackchan_base.h).
+  // Held off during a voice turn: servo noise would keep the end-of-speech
+  // detector open, and a rail cycle mid-reply is jarring.
+  if (!voiceTurn) scServoWatchdogTick();
+  plogTick();   // power log: battery lows and a row every 15 s (power_log.h)
 
   // Idle head drift — suppressed during chill mode and voice turns
   if (!scTouch_state.chillMode && !voiceTurn && !partyBlob.code) {   // code mode moves the head itself

@@ -186,7 +186,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.10.2"
+#define FIRMWARE_VERSION "3.11.2.plog1"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -296,7 +296,7 @@
   #define SC_BASE_LED_COUNT     12    // WS2812C ring (driven via IO expander IO14)
   #define SC_SERVO_X_ID         1     // SCS0009 yaw servo
   #define SC_SERVO_Y_ID         2     // SCS0009 pitch servo
-  #define SC_SERVO_Y_MIN_DEG    25    // Pitch safety floor (prevents head hitting base)
+  #define SC_SERVO_Y_MIN_DEG    40    // Pitch safety floor: ~16° clear of the end stop (raw ~572); driving near the stop stalls the servos
   #define SC_SERVO_Y_MAX_DEG    85    // Pitch safety ceiling (hardware limit)
   #define SC_SERVO_Y_HOME_DEG   48    // Resting pitch (desk-friendly, looking up at user)
 
@@ -389,13 +389,32 @@
   #define CLOUD_ENABLED
 #endif
 #ifdef CLOUD_ENABLED
+  // Built-in production server. The web panel's "Cloud server" field (NVS) can
+  // point a bot at another one for testing; empty means this.
   #define CLOUD_SERVER_URL       "https://vizcloud-raxo5.ondigitalocean.app"
-  #define CLOUD_BOT_SECRET       "349baac1c179460b0ea78ca572bcc7a1187bcab891b71b47c28dce5dae5c5103"
+  #define CLOUD_SERVER_URL_MAX   96   // scheme://host[:port], no path
+  // NOT a credential. This value ships in every firmware image, so it is public;
+  // it only fills the X-Bot-Secret header a v1 server insists on. Protocol v2
+  // identifies a bot by the per-bot token the server issues at register, and
+  // the header is sent only while the bot has no token (see cloud_client.h).
+  #define CLOUD_LEGACY_COMPAT_KEY "349baac1c179460b0ea78ca572bcc7a1187bcab891b71b47c28dce5dae5c5103"
+  #define CLOUD_PROTOCOL_VERSION 2
   #define CLOUD_POLL_DEFAULT     60
   #define CLOUD_CONNECT_TIMEOUT  10000
   #define CLOUD_RESPONSE_TIMEOUT 15000
   #define CLOUD_BOOT_TIMEOUT     5000
   #define CLOUD_NVS_NAMESPACE    "vizcloud"
+  #define CLOUD_AUTH_BACKOFF_MS  3600000UL   // after a 401: wait, then register again
+
+  // Cloud firmware updates write the app slot that is not running, so they need
+  // a table with two OTA slots that both belong to vizBot: default_8MB.csv
+  // (lcd-169, lcd-13) and default_16MB.csv (m5cores3, stackchan) have them. The
+  // Faces build does not: its other slot is the game console (ota_update.h).
+  #ifndef BOARD_HAS_FACES_BASE
+    #define CLOUD_OTA_ENABLED
+    #define CLOUD_OTA_RETRY_MS   3600000UL   // at most one update attempt per hour
+    #define CLOUD_OTA_CONFIRM_MS 600000UL    // an updated app must sync within this, or it rolls back
+  #endif
 #endif
 
 // Debug serial output (comment out to save ~700 bytes of flash)

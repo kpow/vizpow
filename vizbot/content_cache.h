@@ -22,6 +22,25 @@
 //   /cloud/sequences.json     — MIDI sequences array from server
 // ============================================================================
 
+// ArduinoJson 7 allocates every 1 KB slot pool and every string on its own,
+// all under the 4 KB always-internal malloc limit, so a parsed 43 KB content
+// answer took tens of KB of internal RAM that WiFi and lwIP need. Documents
+// for cloud content use PSRAM when the board has it, internal RAM otherwise.
+struct PsramJsonAllocator : ArduinoJson::Allocator {
+  void* allocate(size_t size) override {
+    void* p = psramFound() ? heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : nullptr;
+    return p ? p : malloc(size);
+  }
+  void deallocate(void* p) override {
+    free(p);   // free() takes either heap
+  }
+  void* reallocate(void* p, size_t size) override {
+    void* q = psramFound() ? heap_caps_realloc(p, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : nullptr;
+    return q ? q : realloc(p, size);   // a failed heap_caps_realloc leaves p as it was
+  }
+};
+static PsramJsonAllocator psramJsonAllocator;
+
 // Thread safety: set true while cloud task writes, checked by getCloudSaying()
 volatile bool contentUpdateInProgress = false;
 
@@ -145,12 +164,12 @@ bool loadCloudSequences(JsonDocument& doc) {
 // Parse cloud sequences JSON into runtime MidiSequenceDef/MidiEvent arrays
 // (defined in bot_sounds.h: cloudSeqEvents, cloudSequences, cloudSequenceCount)
 #ifdef MIDI_SYNTH_ENABLED
-extern MidiEvent  cloudSeqEvents[][SEQ_MAX_EVENTS];
+extern MidiEvent  (*cloudSeqEvents)[SEQ_MAX_EVENTS];
 extern MidiSequenceDef cloudSequences[];
 extern uint8_t cloudSequenceCount;
 
 void applyCloudSequences() {
-  JsonDocument doc;
+  JsonDocument doc(&psramJsonAllocator);
   if (!loadCloudSequences(doc)) {
     DBGLN("Cache: no cloud sequences to apply");
     return;
@@ -161,6 +180,17 @@ void applyCloudSequences() {
     DBGLN("Cache: cloud sequences array empty");
     cloudSequenceCount = 0;
     return;
+  }
+
+  if (!cloudSeqEvents) {
+    cloudSeqEvents = (MidiEvent (*)[SEQ_MAX_EVENTS])heap_caps_calloc(
+        MAX_CLOUD_SEQUENCES, sizeof(*cloudSeqEvents), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!cloudSeqEvents) cloudSeqEvents = (MidiEvent (*)[SEQ_MAX_EVENTS])calloc(MAX_CLOUD_SEQUENCES, sizeof(*cloudSeqEvents));
+    if (!cloudSeqEvents) {
+      DBGLN("Cache: no memory for cloud sequences");
+      cloudSequenceCount = 0;
+      return;
+    }
   }
 
   uint8_t count = 0;
@@ -279,7 +309,7 @@ bool loadCloudPersonalities(JsonDocument& doc) {
 // Cloud rate fields (floats) are mapped to firmware timer values.
 
 void applyCloudPersonalities() {
-  JsonDocument doc;
+  JsonDocument doc(&psramJsonAllocator);
   if (!loadCloudPersonalities(doc)) {
     DBGLN("Cache: no cloud personalities to apply");
     return;
@@ -416,7 +446,7 @@ bool getCloudSaying(SayingCategory category, char* buffer, uint8_t bufSize) {
   if (contentUpdateInProgress) return false;
   if (!categoryHasCloudMapping(category)) return false;
 
-  JsonDocument doc;
+  JsonDocument doc(&psramJsonAllocator);   // the whole sayings file, on every pick
   if (!loadCloudSayings(doc)) return false;
 
   JsonArray sayings = doc.as<JsonArray>();

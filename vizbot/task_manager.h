@@ -476,6 +476,7 @@ static StaticTask_t wifiTaskTCB;
 
 void wifiServerTask(void* param) {
   for (;;) {
+    hangBeatWifiMs = millis();
     if (wifiEnabled) {
       pollWifiConnectTask();             // connect request + STA poll
       pollWledDisplay();                 // WLED text send + restore
@@ -485,6 +486,7 @@ void wifiServerTask(void* param) {
       dnsServer.processNextRequest();    // Captive portal DNS
       server.handleClient();             // HTTP
     }
+    ramLowTick();                        // /debug/tasks: what was busy at each RAM low
     // NOTE: cloud sync (blocking TLS, up to CLOUD_CONNECT_TIMEOUT) runs in its
     // own task (cloudTask) so a slow/failing handshake never freezes HTTP and
     // backs up control-page requests. See startCloudTask().
@@ -503,12 +505,31 @@ static StackType_t cloudTaskStack[8192];   // 8KB in BSS (mbedTLS handshake stac
 static StaticTask_t cloudTaskTCB;
 TaskHandle_t cloudTaskHandle = nullptr;
 
+#ifdef CLOUD_OTA_ENABLED
+// cloud_client.h asks this before a firmware update: not on a nearly flat battery.
+bool cloudOtaPowerOk() {
+  #ifdef BAT_ADC_PIN
+  if (batteryAdc.volts > 0 && !batteryAdc.usb && batteryAdc.percent < 20) return false;
+  #endif
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  if (sysStatus.scBatteryMonReady) {
+    float volts = scGetBatteryVoltage();
+    if (volts > 1.0f && volts < 3.5f) return false;   // around 0 V means no cell fitted
+  }
+  #endif
+  return true;
+}
+#endif
+
 void cloudTask(void* param) {
   for (;;) {
-    if (wifiEnabled) {
+    if (wifiEnabled && !otaUploadActive()) {   // ota_update.h: no TLS during a firmware upload
       pollCloudSync();                   // Cloud registration + sync (TLS)
       pollScheduledCommands();           // Execute scheduled commands at their target time
     }
+    #ifdef CLOUD_OTA_ENABLED
+    otaRollbackIfUnconfirmed();          // ota_update.h: a cloud update that never synced goes back
+    #endif
     vTaskDelay(pdMS_TO_TICKS(200));      // cloud is not latency-sensitive
   }
 }
@@ -528,6 +549,26 @@ void startCloudTask() {
 }
 #endif
 
+#ifdef BOARD_HAS_STACKCHAN_BASE
+// Hang watchdog. A wedged wifi_srv or loop leaves WiFi up (ping answers) and the
+// bot dead until a cold boot, with no coredump: the task watchdog only sees a
+// task hogging the CPU, not one stuck waiting. If either stops checking in for
+// 30 s, abort on purpose: the bot reboots itself and the coredump holds every
+// task's stack at the moment of the hang.
+#define HANG_LIMIT_MS 30000
+static void hangCheck(TimerHandle_t) {
+  uint32_t now = millis();
+  // Signed: a beat written on the other core just after `now` was read is not a hang
+  if (hangBeatWifiMs && (int32_t)(now - hangBeatWifiMs) > HANG_LIMIT_MS) esp_system_abort("hang: wifi_srv stopped for 30 s");
+  if (hangBeatLoopMs && (int32_t)(now - hangBeatLoopMs) > HANG_LIMIT_MS) esp_system_abort("hang: loop stopped for 30 s");
+}
+
+void startHangWatch() {
+  static TimerHandle_t t = xTimerCreate("hang", pdMS_TO_TICKS(5000), pdTRUE, nullptr, hangCheck);
+  if (t) xTimerStart(t, 0);
+}
+#endif
+
 // Call after WiFi AP + web server are up (end of boot sequence)
 void startWifiTask() {
   wifiTaskHandle = xTaskCreateStaticPinnedToCore(
@@ -541,6 +582,9 @@ void startWifiTask() {
     0                  // Core 0 (protocol CPU)
   );
   DBGLN("WiFi server task started on Core 0 (static 8KB)");
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  startHangWatch();
+  #endif
 }
 
 // ============================================================================

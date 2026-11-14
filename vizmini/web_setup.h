@@ -165,7 +165,7 @@ static const char UPDATE_HTML[] PROGMEM = R"HTML(<!doctype html><html><head><met
 
 <div class=wrap><div class=card><h2>Firmware update</h2>
 <div class=kv><span>Running</span><span id=ver>&ndash;</span></div>
-<label class=drop id=dz for=f><b id=fn>Choose firmware.bin</b><div class=hint id=fz>From .pio/build/c3-oled/ after a build</div></label>
+<label class=drop id=dz for=f><b id=fn>Choose vizmini-c3-v….bin</b><div class=hint id=fz>From the builds/ folder after a build (the name must contain vizmini-c3)</div></label>
 <input type=file id=f accept=".bin" hidden>
 <button class=go id=b onclick=up() disabled>Flash firmware</button>
 <div class=bar id=pg hidden><i id=pi></i></div>
@@ -181,6 +181,7 @@ ver().catch(function(){});
 function take(fl){FL=null;$('b').disabled=true;M('');if(!fl)return;
  $('fn').textContent=fl.name;$('fz').textContent=(fl.size/1048576).toFixed(2)+' MB';
  if(!/\.bin$/i.test(fl.name))return M('Pick a .bin file.','bad');
+ if(fl.name.indexOf('vizmini-c3')<0)return M('Wrong board type: pick a vizmini-c3-v….bin from builds/.','bad');
  if(fl.size>0x1E0000)return M('Too big for his app space (1.88 MB max).','bad');
  fl.slice(0,1).arrayBuffer().then(function(a){if(new Uint8Array(a)[0]!=0xE9)return M('That isn’t an ESP32 firmware image.','bad');FL=fl;$('b').disabled=false})}
 $('f').onchange=function(){take(this.files[0])};

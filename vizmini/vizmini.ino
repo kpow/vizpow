@@ -27,7 +27,8 @@ uint8_t    botBackgroundStyle = 0;                 // 0 = no ambient stroke
 #include "strip_leds.h"
 #include "weather.h"
 #include "ink_time.h"          // Ink Time: the clock and weather as ferrofluid
-#include "web_ui.h"
+#include "device_name.h"       // his name: hotspot, <name>.local, VizCloud
+#include "web_ui.h"            // also brings in cloud_client.h (VizCloud)
 #include <time.h>
 
 // Top-level interaction mode
@@ -337,6 +338,9 @@ void ctlSay(const char* text) {
 String ctlStateJson() {
   String s = "{";
   s += "\"fw\":\"" FIRMWARE_VERSION "\",";
+  s += "\"name\":" + jsonStr(g_devName) + ",\"host\":\"" + String(g_devHost) + ".local\",";
+  s += "\"heap\":" + String(ESP.getFreeHeap()) + ",\"minHeap\":" + String(ESP.getMinFreeHeap()) + ",";
+  s += "\"cloud\":" + cloudStatusJson() + ",";
   s += "\"ip\":\"" + webIP() + "\",";
   s += "\"rssi\":" + String((WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0) + ",";
   s += "\"ap\":" + String(webIsAP() ? "true" : "false") + ",";
@@ -417,14 +421,14 @@ void bootFrame(unsigned long) {
 void ctlIntroFrame(long t, long k, bool ap) {
   if (t >= 0) ink.introJoin(u8g2.getBufferPtr(), t, webSsid().c_str());
   else if (k >= 0) ink.introResult(u8g2.getBufferPtr(), k, !ap, ap ? "vizMini-8DCC" : "10.0.0.227",
-                                   ap ? "192.168.4.1" : MDNS_HOSTNAME ".local");
+                                   ap ? "192.168.4.1" : (String(g_devHost) + ".local").c_str());
 }
 
 // After webBegin(): finish the opening if the join beat it, then the result
 // and the swell. The web server already answers between frames.
 void bootOutro(bool online, const String &where) {
   while (!g_bootAt || millis() - g_bootAt < InkTime::INTRO_JOIN_AT) { bootFrame(0); delay(5); }
-  String small = online ? String(MDNS_HOSTNAME) + ".local" : String("192.168.4.1");
+  String small = online ? String(g_devHost) + ".local" : String("192.168.4.1");
   unsigned long rs = millis();
   for (;;) {
     unsigned long now = millis();
@@ -443,6 +447,8 @@ void bootOutro(bool online, const String &where) {
 void setup() {
   Serial.begin(115200);
   randomSeed(esp_random());
+  cloudBootCheck();                  // keep (or wait to keep) the running firmware image
+  deviceNameLoad();                  // before the WiFi: hotspot and mDNS use it
 
   gfxDev.begin();
   gfxDev.setContrast((uint8_t)constrain(DEFAULT_CONTRAST * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX));   // the intro is a white lightbox
@@ -474,6 +480,7 @@ void setup() {
     configTzTime(TZ_POSIX, NTP_SERVER_1, NTP_SERVER_2);
   }
   weatherBegin();                    // background fetches (waits for WiFi itself)
+  cloudBegin();                      // VizCloud sync task (waits for a network itself)
 #else
   WiFi.mode(WIFI_OFF);               // TEMP: radio fully off for the noise test
   where = "wifi-off-test";
@@ -497,6 +504,7 @@ void setup() {
 void loop() {
   if (WIFI_ENABLED) webLoop();        // keep web control responsive every pass
   leds.update();                      // inside lights, 50 Hz
+  cloudLoop();                        // run what VizCloud asked for (cheap when idle)
 
   // ---- WiFi signal readout (gated; rssi also lives in /state) ----
 #if WIFI_RSSI_LOG
