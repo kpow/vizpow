@@ -50,6 +50,8 @@ p/SgguMh1YQdc4acLa/KNJvxn7kjNuK8YAOdgLOaVsjh4rsUecrNIdSUtUlD
 //               delivered once per boot), otaError (after a failed update)
 //             -> approval, config { rev, ... }, firmware { buildId, ... }
 //   401       -> wait CLOUD_AUTH_BACKOFF_MS, drop the token, register again
+//   approval "unknown" (admin forgot the bot) -> drop id, token and configRev,
+//               register as a new bot (at most once per 5 min)
 //
 // Thread safety:
 // - Pushes commands via FreeRTOS queue (cross-core safe)
@@ -107,13 +109,14 @@ static unsigned long cloudNextPollMs = 0;
 // once and it lives in NVS. A v1 server never issues one, and then the bot
 // carries on the v1 way.
 static char cloudToken[48] = "";            // X-Bot-Token ("" = none yet)
-static char cloudApproval[12] = "";         // approved | pending | disabled ("" = server did not say: v1)
+static char cloudApproval[12] = "";         // approved | pending | disabled | unknown ("" = server did not say: v1)
 static bool cloudNoTokenServer = false;     // register gave no token; do not ask again for now
 static bool cloudTokenRetry = false;        // ...until cloudTokenRetryAtMs
 static unsigned long cloudTokenRetryAtMs = 0;
 static unsigned long cloudAuthRetryAtMs = 0;   // end of the back-off after a 401
 static bool cloudHwTypeLegacy = false;      // server refused "stackchan": report the CoreS3 type instead
 static bool cloudBootReported = false;      // resetReason has reached the server
+static unsigned long cloudForgotAtMs = 0;   // last identity reset after approval "unknown" (0 = none)
 static int cloudLastHttpCode = 0;
 static volatile bool cloudEverSynced = false;
 static volatile unsigned long cloudLastSyncOkMs = 0;
@@ -1148,6 +1151,58 @@ bool cloudRegister() {
 }
 
 // ============================================================================
+// Forgotten by the server (approval "unknown")
+// ============================================================================
+// The admin forgot this bot: the server has no bot with this id any more. Drop
+// the id, token and config rev (RAM and NVS) and whatever the old identity
+// left behind; the next pollCloudSync() then registers without a botId and
+// the bot waits for approval as a new one. Register itself is left to the
+// cloud task's usual "no id" path. At most once per 5 minutes, so a server
+// that keeps answering "unknown" cannot cause a register storm; inside that
+// window the bot just keeps polling.
+#define CLOUD_FORGET_MIN_MS 300000UL
+
+static void cloudForgetIdentity() {
+  unsigned long now = millis();
+  if (cloudForgotAtMs && now - cloudForgotAtMs < CLOUD_FORGET_MIN_MS) {
+    DBGLN("Cloud: approval unknown again, identity reset waits (5 min limit)");
+    return;
+  }
+  cloudForgotAtMs = now | 1;   // 0 means never
+  DBG("Cloud: server has forgotten ");
+  DBG(cloudMeta.botId);
+  DBGLN(", registering as a new bot");
+
+  // cloudMeta.registered stays set: the empty id alone makes pollCloudSync()
+  // register, and the web panel's /cloud/sync (which registers from the web
+  // task when not registered) is not given a new opening.
+  cloudMeta.botId[0] = '\0';
+  cloudToken[0] = '\0';
+  cloudConfigRev = 0;
+  cloudCfgPollSec = 0;                          // the old identity's admin settings
+  cloudCfgPersonality[0] = '\0';
+  cloudMeta.pollIntervalSec = CLOUD_POLL_DEFAULT;
+  cloudMeta.groupCount = 0;
+  cloudMeta.fleetTotal = 0;
+  cloudMeta.fleetOnline = 0;
+  cloudNoTokenServer = false;
+  cloudTokenRetry = false;
+  cloudApproval[0] = '\0';
+  clearAcks();                                  // acks for the old id's commands
+  cloudOtaOffer.present = false;
+  cloudOtaError[0] = '\0';                      // belongs to the old id's update assignment
+
+  saveCloudNVS();                               // botId, token, cfgRev, cfgPoll, cfgPers (or t_*)
+  Preferences prefs;
+  if (prefs.begin(CLOUD_NVS_NAMESPACE, false)) {
+    prefs.remove("otaErr");
+    prefs.end();
+  }
+  // /cloud/meta.json too, or a reboot before register would bring the old id back
+  if (sysStatus.littlefsReady) saveCloudMeta(cloudMeta);
+}
+
+// ============================================================================
 // Sync
 // ============================================================================
 
@@ -1187,10 +1242,13 @@ bool cloudSync() {
 
     // v2: approval. A bot waiting for approval, or switched off in the admin,
     // gets an empty answer; apply none of it and keep polling as usual. A v1
-    // server sends no approval, which reads as approved.
+    // server sends no approval, which reads as approved. "unknown": the server
+    // has forgotten this id; reset the identity (the next cycle registers anew).
+    // Any other value is not approval either.
     const char* approval = doc["approval"] | "";
     strlcpy(cloudApproval, approval, sizeof(cloudApproval));
-    if (strcmp(approval, "pending") == 0 || strcmp(approval, "disabled") == 0) {
+    if (approval[0] && strcmp(approval, "approved") != 0) {
+      if (strcmp(approval, "unknown") == 0) cloudForgetIdentity();
       cloudState = CLOUD_REGISTERED;
       cloudBackoffSec = 0;
       return true;
@@ -1641,7 +1699,8 @@ String getCloudStatusExtraJson() {
   json += ",\"protocol\":" + String(CLOUD_PROTOCOL_VERSION);
   json += ",\"hasToken\":" + String(cloudToken[0] ? "true" : "false");
   const char* approval = cloudApproval;
-  bool known = !strcmp(approval, "approved") || !strcmp(approval, "pending") || !strcmp(approval, "disabled");
+  bool known = !strcmp(approval, "approved") || !strcmp(approval, "pending") || !strcmp(approval, "disabled") ||
+               !strcmp(approval, "unknown");
   json += ",\"approval\":\"" + String(known ? approval : "") + "\"";
   json += ",\"lastSyncSec\":" + String(cloudEverSynced ? (long)((millis() - cloudLastSyncOkMs) / 1000) : -1L);
   json += ",\"configRev\":" + String(cloudConfigRev);

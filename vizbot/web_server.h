@@ -838,6 +838,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
       let st = c.approval === 'pending' ? 'waiting for approval'
              : c.approval === 'disabled' ? 'paused in the admin'
              : c.approval === 'approved' ? 'approved'
+             : c.approval === 'unknown' ? 'forgotten in the admin, registering again'
              : c.lastSyncSec >= 0 ? 'connected' : 'connecting';
       if (c.state === 'auth_error') st = 'pairing again in ' + Math.ceil((c.retrySec || 0) / 60) + ' min';
       const ago = c.lastSyncSec < 0 ? 'no sync yet'
