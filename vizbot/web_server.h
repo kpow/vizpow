@@ -6,6 +6,7 @@
 #include <ESPmDNS.h>
 #include <FastLED.h>
 #include "config.h"
+#include "mem.h"
 #include "palettes.h"
 #include "ota_update.h"
 extern uint16_t staReconnects;   // wifi_provisioning.h (STA rejoin watchdog)
@@ -2588,6 +2589,18 @@ void ramLowTick() {
   if (p == r.busy) snprintf(p, end - p, "-");
 }
 
+// GET /debug/mem — who holds how much memory, by name (mem.h): bytes held now,
+// the most ever held, failed requests, and how many PSRAM requests had to land
+// in internal RAM. Plus free / least-ever free / largest block of both heaps.
+void handleDebugMem() {
+  const size_t cap = 1024;   // not a static: internal RAM has ~1 KB to spare over the camera's DMA block
+  char* buf = (char*)memAlloc(MEM_WEB, cap);
+  if (!buf) { server.send(500, "application/json", "{\"error\":\"out of memory\"}"); return; }
+  memReportJson(buf, cap);
+  server.send(200, "application/json", buf);
+  memFree(MEM_WEB, buf);
+}
+
 // GET /debug/tasks — the least free stack each task has ever had (bytes), and
 // the least free internal RAM since boot. For the wifi_srv crash of 2026-11-05
 // (lwIP accept found its socket's queue gone): a stack or heap running near
@@ -2870,12 +2883,12 @@ void handleBrainLastWav() {
 // /brain/voices -> vizbrain GET /v1/voices (the picker's choices)
 void handleBrainVoices() {
   const size_t cap = 8192;
-  char* buf = (char*)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+  char* buf = (char*)memAlloc(MEM_WEB, cap, MEM_BIG_ONLY);
   if (!buf) { server.send(500, "application/json", "{\"error\":\"out of memory\"}"); return; }
   int status = voiceBrainRequest(false, "/v1/voices", nullptr, buf, cap);
   if (status > 0) server.send(status, "application/json", buf);
   else server.send(502, "application/json", "{\"error\":\"brain offline\"}");
-  free(buf);
+  memFree(MEM_WEB, buf);
 }
 
 // /brain/voice?id=<voice id> -> vizbrain POST /v1/voices {"id": ...}; he says a sample in it
@@ -3006,6 +3019,7 @@ void setupWebServer() {
   server.on("/brightness", handleBrightness);
   server.on("/debug/wifidrop", handleDebugWifiDrop);
   server.on("/debug/tasks", handleDebugTasks);
+  server.on("/debug/mem", handleDebugMem);
   #ifdef TARGET_CORES3
   server.on("/debug/power", handleDebugPower);
   #endif

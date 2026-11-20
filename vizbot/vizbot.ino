@@ -23,7 +23,6 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <esp_wifi.h>   // esp_wifi_set_max_tx_power (WiFi.setTxPower no-ops before start event)
-#include <mbedtls/platform.h>
 #include <esp_heap_caps.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -35,6 +34,7 @@
 #endif
 
 #include "config.h"
+#include "mem.h"            // Memory owner: every runtime buffer, by name (see /debug/mem)
 #include "device_id.h"  // Per-device unique SSID + mDNS hostname (from eFuse MAC)
 #include "palettes.h"
 #include "loop_stats.h"     // Real loop/push timing for GET /state (must come before display_lcd.h)
@@ -334,17 +334,6 @@ void toggleWifiAP() {
   }
 }
 
-// TLS memory goes to PSRAM. The prebuilt framework sets
-// CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC, so every HTTPS connection (cloud sync each
-// minute, weather, updates) took ~44 KB of internal RAM for its 16 KB record
-// buffers and handshake state — the RAM WiFi, DMA and the camera need. This is
-// what CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC does, set at runtime. Boards without
-// PSRAM fall back to internal RAM.
-static void* tlsCalloc(size_t n, size_t size) {
-  void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  return p ? p : heap_caps_calloc(n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-}
-
 void setup() {
   #ifdef PWR_HOLD_PIN
   pinMode(PWR_HOLD_PIN, OUTPUT);
@@ -354,7 +343,7 @@ void setup() {
   #ifdef BAT_ADC_PIN
   batteryAdc.init();
   #endif
-  mbedtls_platform_set_calloc_free(tlsCalloc, heap_caps_free);   // before any TLS
+  memInit();   // mem.h: TLS memory goes to PSRAM. Before any TLS.
   Serial.begin(115200);
   delay(500);
 

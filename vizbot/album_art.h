@@ -24,6 +24,7 @@
 
 #include <WebServer.h>
 #include "display_lcd.h"
+#include "mem.h"
 
 extern WebServer server;
 
@@ -51,7 +52,7 @@ static void handleArtUpload() {
     artTooBig = false;
     artLen = 0;
     if (artPending) { artTooBig = true; return; }   // the last one isn't drawn yet
-    if (!artBuf) artBuf = (uint8_t*)heap_caps_malloc(ART_MAX_BYTES, MALLOC_CAP_SPIRAM);
+    if (!artBuf) artBuf = (uint8_t*)memAlloc(MEM_ART, ART_MAX_BYTES, MEM_BIG_ONLY);
     if (!artBuf) artTooBig = true;
   } else if (up.status == UPLOAD_FILE_WRITE) {
     hangBeatWifiMs = millis();           // the whole upload runs inside one handleClient()

@@ -7,6 +7,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include "config.h"
+#include "mem.h"
 #include "bot_sayings.h"
 
 // ============================================================================
@@ -27,17 +28,9 @@
 // answer took tens of KB of internal RAM that WiFi and lwIP need. Documents
 // for cloud content use PSRAM when the board has it, internal RAM otherwise.
 struct PsramJsonAllocator : ArduinoJson::Allocator {
-  void* allocate(size_t size) override {
-    void* p = psramFound() ? heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : nullptr;
-    return p ? p : malloc(size);
-  }
-  void deallocate(void* p) override {
-    free(p);   // free() takes either heap
-  }
-  void* reallocate(void* p, size_t size) override {
-    void* q = psramFound() ? heap_caps_realloc(p, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : nullptr;
-    return q ? q : realloc(p, size);   // a failed heap_caps_realloc leaves p as it was
-  }
+  void* allocate(size_t size) override { return memAlloc(MEM_JSON, size); }
+  void deallocate(void* p) override { memFree(MEM_JSON, p); }
+  void* reallocate(void* p, size_t size) override { return memRealloc(MEM_JSON, p, size); }
 };
 static PsramJsonAllocator psramJsonAllocator;
 
@@ -183,9 +176,8 @@ void applyCloudSequences() {
   }
 
   if (!cloudSeqEvents) {
-    cloudSeqEvents = (MidiEvent (*)[SEQ_MAX_EVENTS])heap_caps_calloc(
-        MAX_CLOUD_SEQUENCES, sizeof(*cloudSeqEvents), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!cloudSeqEvents) cloudSeqEvents = (MidiEvent (*)[SEQ_MAX_EVENTS])calloc(MAX_CLOUD_SEQUENCES, sizeof(*cloudSeqEvents));
+    cloudSeqEvents = (MidiEvent (*)[SEQ_MAX_EVENTS])memCalloc(
+        MEM_MIDI, MAX_CLOUD_SEQUENCES, sizeof(*cloudSeqEvents));
     if (!cloudSeqEvents) {
       DBGLN("Cache: no memory for cloud sequences");
       cloudSequenceCount = 0;

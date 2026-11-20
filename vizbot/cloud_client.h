@@ -11,6 +11,7 @@
 #include <mbedtls/platform.h>
 #include <mbedtls/sha256.h>
 #include "config.h"
+#include "mem.h"
 #include "system_status.h"
 #include "content_cache.h"
 #include "device_id.h"    // deviceName: the name the cloud is told
@@ -566,7 +567,7 @@ static int cloudPost(const char* url, const String& body, String& response) {
       // hold the temp String + parse (the large alloc lands in PSRAM, and the
       // read happens after TLS closes); without PSRAM we stay conservative to
       // avoid OOM. Runtime check covers every target uniformly.
-      const int CLOUD_MAX_RESPONSE = psramFound() ? 65536 : 16384;
+      const int CLOUD_MAX_RESPONSE = memHasBig() ? 65536 : 16384;
       while ((read_len = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
         tmp.write((uint8_t*)buf, read_len);
         totalRead += read_len;
@@ -875,10 +876,14 @@ static void applyCloudConfig(JsonObject cfg) {
 // trial until its first sync (ota_update.h). A failure is reported as otaError
 // on the next sync; the server gives up after three.
 
+#define CLOUD_SYNC_BIG_BYTES 28672       // free block one sync's TLS session needs
+#define CLOUD_SYNC_INTERNAL_BYTES 8192   // and what its sockets and HTTP buffers need in internal RAM
+
 #ifdef CLOUD_OTA_ENABLED
 extern bool cloudOtaPowerOk();   // task_manager.h: false on a nearly flat battery
 
 #define CLOUD_OTA_CHUNK 4096
+#define CLOUD_OTA_BIG_BYTES 40960   // free block a firmware download needs before it starts
 
 static void cloudOtaFail(const char* why) {
   strlcpy(cloudOtaError, why, sizeof(cloudOtaError));
@@ -935,7 +940,7 @@ static void cloudOtaUpdate() {
 
   // A second TLS session plus the flash writer's buffers; boards without PSRAM
   // take all of it from internal RAM
-  if (heap_caps_get_largest_free_block(psramFound() ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL) < 40960) {
+  if (!memRoomFor(CLOUD_OTA_BIG_BYTES, 0)) {
     cloudOtaFail("not enough free memory");
     return;
   }
@@ -943,7 +948,7 @@ static void cloudOtaUpdate() {
   char url[CLOUD_SERVER_URL_MAX + sizeof(o.url)];
   snprintf(url, sizeof(url), "%s%s", cloudServerUrl, o.url);   // a path on our own server, never another host
   esp_http_client_handle_t client = cloudHttpInit(url, HTTP_METHOD_GET);
-  uint8_t* buf = (uint8_t*)malloc(CLOUD_OTA_CHUNK);
+  uint8_t* buf = (uint8_t*)memAlloc(MEM_OTA, CLOUD_OTA_CHUNK, MEM_DEFAULT);
   mbedtls_sha256_context sha;
   mbedtls_sha256_init(&sha);
   mbedtls_sha256_starts(&sha, 0);
@@ -1012,7 +1017,7 @@ static void cloudOtaUpdate() {
     esp_http_client_close(client);   // TLS gone before Update.end() hashes the image (see ota_update.h)
     esp_http_client_cleanup(client);
   }
-  free(buf);
+  memFree(MEM_OTA, buf);
 
   if (!why[0]) {
     // Mark the trial before the boot slot changes, so the new firmware cannot
@@ -1462,18 +1467,7 @@ void pollScheduledCommands() {
 // Cloud Init (called from boot, before task starts)
 // ============================================================================
 
-// mbedTLS is built to allocate in internal RAM (CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC),
-// so each sync's handshake took ~30 KB of it and left WiFi, lwIP and the web
-// server ~3 KB to share (seen on /debug/tasks, 2026-11-06). Prefer PSRAM, as
-// IDF's CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC would; boards without it fall back.
-static void* cloudTlsCalloc(size_t n, size_t size) {
-  void* p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  return p ? p : heap_caps_calloc(n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-}
-
 void initCloudClient() {
-  mbedtls_platform_set_calloc_free(cloudTlsCalloc, heap_caps_free);
-
   // Load from NVS first (survives reflash)
   loadCloudNVS();
 
@@ -1635,14 +1629,13 @@ void pollCloudSync() {
   if (now - lastSyncAttempt >= interval * 1000) {
     lastSyncAttempt = now;
 
-    // TLS buffers live in PSRAM when there is some (cloudTlsCalloc), so that's the heap to check
-    uint32_t tlsCaps = psramFound() ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL;
-    size_t largest = heap_caps_get_largest_free_block(tlsCaps);
-    size_t freeHeap = heap_caps_get_free_size(tlsCaps);
+    // TLS buffers land where MEM_BIG does (mem.h): PSRAM when there is some
+    size_t largest = memLargest(true);
+    size_t internalBlock = memLargest(false);
     DBG("Cloud: sync, largest block=");
     DBG(largest);
-    DBG(" free=");
-    DBGLN(freeHeap);
+    DBG(" internal=");
+    DBGLN(internalBlock);
 
     DBG("Cloud: stack HWM=");
     DBGLN(uxTaskGetStackHighWaterMark(NULL));
@@ -1651,8 +1644,7 @@ void pollCloudSync() {
     // With reduced HTTP buffers (1024+512 vs 2048+1024), threshold lowered from 32768.
     // Sockets, pbufs and the HTTP buffers still come from internal RAM (they're
     // under the 4 KB always-internal limit), so with TLS in PSRAM keep ~8 KB there too.
-    size_t internalBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    if (largest < 28672 || internalBlock < 8192) {
+    if (!memRoomFor(CLOUD_SYNC_BIG_BYTES, CLOUD_SYNC_INTERNAL_BYTES)) {
       DBG("Cloud: skip — heap too fragmented (need 28672, have ");
       DBG(largest);
       DBG("; internal ");

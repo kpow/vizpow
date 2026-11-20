@@ -12,6 +12,7 @@
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
 #include "config.h"
+#include "mem.h"
 #include "system_status.h"   // cloudNetHeld(): the stream holds off during cloud requests
 
 // ============================================================================
@@ -196,16 +197,16 @@ static void voiceSetError(const char* msg) {
 static bool voiceAllocBuffers() {
   if (!voice.recBuf) {
     voice.recCapSamples = (size_t)VOICE_MIC_RATE * VOICE_MAX_REC_MS / 1000;
-    voice.recBuf = (int16_t*)heap_caps_malloc(
-        (voice.recCapSamples + VOICE_WAV_HDR_SAMPLES) * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    voice.recBuf = (int16_t*)memAlloc(
+        MEM_VOICE, (voice.recCapSamples + VOICE_WAV_HDR_SAMPLES) * sizeof(int16_t), MEM_BIG_ONLY);
   }
   for (uint32_t ms = VOICE_MAX_PLAY_MS; !voice.playBuf && ms >= VOICE_MIN_PLAY_MS; ms /= 2) {
     voice.playCapSamples = (size_t)VOICE_PLAY_RATE * ms / 1000;
-    voice.playBuf = (int16_t*)heap_caps_malloc(voice.playCapSamples * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    voice.playBuf = (int16_t*)memAlloc(MEM_VOICE, voice.playCapSamples * sizeof(int16_t), MEM_BIG_ONLY);
   }
   if (!voice.env) {
     voice.envCap = voice.playCapSamples / (VOICE_PLAY_RATE * VOICE_ENV_FRAME_MS / 1000) + 2;
-    voice.env = (uint8_t*)heap_caps_malloc(voice.envCap, MALLOC_CAP_SPIRAM);
+    voice.env = (uint8_t*)memAlloc(MEM_VOICE, voice.envCap, MEM_BIG_ONLY);
   }
   return voice.recBuf && voice.playBuf && voice.env;
 }
@@ -880,7 +881,7 @@ static bool wakeStart() {
   if (lastTryMs && millis() - lastTryMs < 10000) return false;   // brain lookup backoff
   lastTryMs = millis();
   if (!wake.ring) {
-    wake.ring = (int16_t*)heap_caps_malloc(WAKE_RING_CHUNKS * VOICE_CHUNK * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    wake.ring = (int16_t*)memAlloc(MEM_WAKE, WAKE_RING_CHUNKS * VOICE_CHUNK * sizeof(int16_t), MEM_BIG_ONLY);
     if (!wake.ring) return false;
   }
   if (!voiceResolveBrain()) return false;
