@@ -8,6 +8,7 @@
 #include "config.h"
 #include "mem.h"
 #include <esp_core_dump.h>
+#include <esp_flash.h>
 #include "palettes.h"
 #include "ota_update.h"
 extern uint16_t staReconnects;   // wifi_provisioning.h (STA rejoin watchdog)
@@ -2595,6 +2596,26 @@ void ramLowTick() {
 // with addr2line against that build's firmware.elf; elfSha says which build).
 // ?erase=1 clears it, so the next one is known to be new.
 void handleDebugCrash() {
+  if (server.arg("raw") == "1") {   // the whole coredump image, for decoding on a computer
+    size_t addr = 0, size = 0;
+    const size_t cap = 2048;
+    uint8_t* buf = (uint8_t*)memAlloc(MEM_WEB, cap);
+    if (!buf || esp_core_dump_image_get(&addr, &size) != ESP_OK) {
+      memFree(MEM_WEB, buf);
+      server.send(404, "text/plain", "no dump");
+      return;
+    }
+    server.setContentLength(size);
+    server.send(200, "application/octet-stream", "");
+    for (size_t off = 0; off < size; off += cap) {
+      const size_t n = min(cap, size - off);
+      if (esp_flash_read(NULL, buf, addr + off, n) != ESP_OK) break;
+      server.sendContent((const char*)buf, n);
+      hangBeatWifiMs = millis();
+    }
+    memFree(MEM_WEB, buf);
+    return;
+  }
   JsonDocument d;
   if (server.arg("erase") == "1") { d["erased"] = esp_core_dump_image_erase() == ESP_OK; }
   d["haveDump"] = esp_core_dump_image_check() == ESP_OK;
@@ -2603,6 +2624,7 @@ void handleDebugCrash() {
     char reason[160] = "";
     if (esp_core_dump_get_panic_reason(reason, sizeof(reason)) == ESP_OK) d["reason"] = reason;
     d["task"] = s->exc_task;
+    d["tcb"] = s->exc_tcb;
     char hex[12];
     snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->exc_pc);
     d["pc"] = hex;
@@ -2667,6 +2689,9 @@ void handleDebugTasks() {
     o["recvMs"] = otaTrace.recvMs;
     o["maxGapMs"] = otaTrace.maxGapMs;
     o["finishMs"] = otaTrace.finishMs;
+    o["ramFreeMin"] = otaTrace.ramFreeMin;       // internal RAM, sampled at every chunk
+    o["ramFreeLast"] = otaTrace.ramFreeLast;
+    o["ramBlockMin"] = otaTrace.ramBlockMin;     // largest free block, every 16th chunk
   }
   JsonArray lows = d["ramLows"].to<JsonArray>();
   for (uint8_t i = 0; i < ramLowCount; i++) {

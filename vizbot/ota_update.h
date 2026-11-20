@@ -42,6 +42,10 @@ struct OtaTrace {
   uint32_t finishMs;     // Update.end(): image hash and boot slot switch
   uint32_t lastChunkMs;  // millis() of the latest chunk (this boot only)
   uint32_t startMs;
+  uint32_t ramFreeMin;   // least free internal RAM seen at a chunk
+  uint32_t ramFreeLast;  // and at the latest chunk
+  uint32_t ramBlockMin;  // smallest "largest free block", sampled every 16th chunk
+  uint32_t chunks;
 };
 #define OTA_TRACE_MAGIC 0x4F544131
 RTC_NOINIT_ATTR OtaTrace otaTrace;
@@ -182,7 +186,8 @@ static void handleOTAUpload() {
       otaUploadError = true;
     } else {
       otaUploadStartMs = millis();
-      otaTrace = { OTA_TRACE_MAGIC, OTA_PH_RECEIVING, 0, 0, 0, 0, otaUploadStartMs, otaUploadStartMs };
+      otaTrace = { OTA_TRACE_MAGIC, OTA_PH_RECEIVING, 0, 0, 0, 0, otaUploadStartMs, otaUploadStartMs,
+                   UINT32_MAX, 0, UINT32_MAX, 0 };
     }
 
   } else if (upload.status == UPLOAD_FILE_WRITE) {
@@ -195,6 +200,12 @@ static void handleOTAUpload() {
       otaTrace.lastChunkMs = now;
       otaTrace.recvMs = now - otaTrace.startMs;
       otaTrace.bytes += upload.currentSize;
+      otaTrace.ramFreeLast = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+      if (otaTrace.ramFreeLast < otaTrace.ramFreeMin) otaTrace.ramFreeMin = otaTrace.ramFreeLast;
+      if ((otaTrace.chunks++ & 15) == 0) {
+        const uint32_t blk = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        if (blk < otaTrace.ramBlockMin) otaTrace.ramBlockMin = blk;
+      }
     }
 
     // Check magic byte on first chunk
