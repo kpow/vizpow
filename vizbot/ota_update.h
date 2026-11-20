@@ -6,6 +6,7 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include "esp_ota_ops.h"
+#include <esp_heap_caps.h>
 #include "config.h"
 #include "system_status.h"
 
@@ -252,6 +253,7 @@ static void handleOTAUpload() {
     Update.abort();
     otaUploadError = true;
     otaUploadStartMs = 0;
+    if (otaTrace.magic == OTA_TRACE_MAGIC) otaTrace.phase = OTA_PH_FAILED;
   }
 }
 

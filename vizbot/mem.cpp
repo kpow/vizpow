@@ -29,7 +29,10 @@ static MemStat memStats[MEM_TAG_COUNT];
 bool memHasBig() {
   // The heap's own answer. Arduino's psramFound() is stubbed to false on a
   // board definition without BOARD_HAS_PSRAM even when IDF has PSRAM up.
-  static const bool has = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
+  // Only a yes is remembered: a call before the framework adds PSRAM to the
+  // heap must not pin the answer to no.
+  static bool has = false;
+  if (!has) has = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
   return has;
 }
 

@@ -4,9 +4,11 @@
 // ============================================================================
 // Memory owner
 // ============================================================================
-// Every buffer the firmware asks for at runtime comes through here, under the
+// Every buffer the firmware allocates by hand comes through here, under the
 // name of whoever wants it. One place decides between PSRAM and internal RAM,
 // one place answers "is there PSRAM", and /debug/mem lists who holds what.
+// Not covered: memory libraries take for themselves (the camera's frame
+// buffer, display sprites, WiFi and lwIP buffers) and static arrays.
 //
 // Internal RAM is the scarce one: WiFi, lwIP and DMA (the camera needs one
 // 30720-byte block) can only use it. Anything large goes to PSRAM when the
