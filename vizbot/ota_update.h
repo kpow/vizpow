@@ -6,6 +6,7 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include "esp_ota_ops.h"
+#include <esp_heap_caps.h>
 #include "config.h"
 #include "system_status.h"
 
@@ -18,16 +19,39 @@ extern WebServer server;
 static bool otaUploadError = false;
 static bool otaUploadSuccess = false;
 
-// Set while a firmware upload runs; the cloud task holds its syncs until it
-// clears. Update.end() hashes the whole 2 MB image without yielding, and a TLS
-// handshake does its signature math on the same core at the same priority, so
-// together they starved IDLE0 past the 5 s task watchdog. The 2-minute limit
-// releases the hold if a client vanishes mid-upload without an abort.
+// Set while a firmware upload runs; the cloud task starts no sync until it
+// clears. A sync takes about 40 KB of internal RAM while it runs and an upload
+// leaves about 38 KB free, so the two do not fit together. (This hold was
+// first added for a watchdog reset it did not cure: Update.end() takes 0.4 s,
+// and the reset came from a sync already running when the upload began. That
+// is fixed by the cloud task's priority, see startCloudTask().) The 2-minute
+// limit releases the hold if a client vanishes mid-upload without an abort.
 volatile uint32_t otaUploadStartMs = 0;
 
 inline bool otaUploadActive() {
   return otaUploadStartMs && millis() - otaUploadStartMs < 120000;
 }
+
+// How far the last web-panel upload got. Kept in RTC memory, which survives a
+// crash or watchdog reset (not a power cut), so after the restart /debug/tasks
+// can say whether an update died while receiving or while finishing.
+enum OtaPhase : uint8_t { OTA_PH_NONE = 0, OTA_PH_RECEIVING, OTA_PH_FINISHING, OTA_PH_DONE, OTA_PH_FAILED };
+struct OtaTrace {
+  uint32_t magic;
+  uint8_t  phase;
+  uint32_t bytes;        // received so far
+  uint32_t recvMs;       // first chunk to latest chunk
+  uint32_t maxGapMs;     // longest wait between two chunks
+  uint32_t finishMs;     // Update.end(): image hash and boot slot switch
+  uint32_t lastChunkMs;  // millis() of the latest chunk (this boot only)
+  uint32_t startMs;
+  uint32_t ramFreeMin;   // least free internal RAM seen at a chunk
+  uint32_t ramFreeLast;  // and at the latest chunk
+  uint32_t ramBlockMin;  // smallest "largest free block", sampled every 16th chunk
+  uint32_t chunks;
+};
+#define OTA_TRACE_MAGIC 0x4F544131
+RTC_NOINIT_ATTR OtaTrace otaTrace;
 
 // ============================================================================
 // Boot Confirmation
@@ -165,11 +189,27 @@ static void handleOTAUpload() {
       otaUploadError = true;
     } else {
       otaUploadStartMs = millis();
+      otaTrace = { OTA_TRACE_MAGIC, OTA_PH_RECEIVING, 0, 0, 0, 0, otaUploadStartMs, otaUploadStartMs,
+                   UINT32_MAX, 0, UINT32_MAX, 0 };
     }
 
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     hangBeatWifiMs = millis();           // the whole upload runs inside one handleClient()
     if (otaUploadError) return;
+    {
+      const uint32_t now = millis();
+      const uint32_t gap = now - otaTrace.lastChunkMs;
+      if (gap > otaTrace.maxGapMs) otaTrace.maxGapMs = gap;
+      otaTrace.lastChunkMs = now;
+      otaTrace.recvMs = now - otaTrace.startMs;
+      otaTrace.bytes += upload.currentSize;
+      otaTrace.ramFreeLast = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+      if (otaTrace.ramFreeLast < otaTrace.ramFreeMin) otaTrace.ramFreeMin = otaTrace.ramFreeLast;
+      if ((otaTrace.chunks++ & 15) == 0) {
+        const uint32_t blk = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        if (blk < otaTrace.ramBlockMin) otaTrace.ramBlockMin = blk;
+      }
+    }
 
     // Check magic byte on first chunk
     if (upload.totalSize == 0 && upload.currentSize > 0) {
@@ -189,23 +229,31 @@ static void handleOTAUpload() {
     if (otaUploadError) {
       Update.abort();
       otaUploadStartMs = 0;
+      otaTrace.phase = OTA_PH_FAILED;
       return;
     }
 
-    if (!Update.end(true)) {
+    otaTrace.phase = OTA_PH_FINISHING;
+    const uint32_t finishStart = millis();
+    const bool ended = Update.end(true);
+    otaTrace.finishMs = millis() - finishStart;
+    if (!ended) {
       DBGLN("OTA: Finalize failed");
       otaUploadError = true;
       otaUploadStartMs = 0;
+      otaTrace.phase = OTA_PH_FAILED;
       return;
     }
 
     DBGLN("OTA Upload: Success!");
     otaUploadSuccess = true;
+    otaTrace.phase = OTA_PH_DONE;
 
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     Update.abort();
     otaUploadError = true;
     otaUploadStartMs = 0;
+    if (otaTrace.magic == OTA_TRACE_MAGIC) otaTrace.phase = OTA_PH_FAILED;
   }
 }
 

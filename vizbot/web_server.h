@@ -6,6 +6,9 @@
 #include <ESPmDNS.h>
 #include <FastLED.h>
 #include "config.h"
+#include "mem.h"
+#include <esp_core_dump.h>
+#include <esp_flash.h>
 #include "palettes.h"
 #include "ota_update.h"
 extern uint16_t staReconnects;   // wifi_provisioning.h (STA rejoin watchdog)
@@ -2588,6 +2591,69 @@ void ramLowTick() {
   if (p == r.busy) snprintf(p, end - p, "-");
 }
 
+// GET /debug/crash — the last crash, read from the coredump partition: which
+// task was running, why it stopped, and its call stack as addresses (decode
+// with addr2line against that build's firmware.elf; elfSha says which build).
+// ?erase=1 clears it, so the next one is known to be new.
+void handleDebugCrash() {
+  if (server.arg("raw") == "1") {   // the whole coredump image, for decoding on a computer
+    size_t addr = 0, size = 0;
+    const size_t cap = 2048;
+    uint8_t* buf = (uint8_t*)memAlloc(MEM_WEB, cap);
+    if (!buf || esp_core_dump_image_get(&addr, &size) != ESP_OK) {
+      memFree(MEM_WEB, buf);
+      server.send(404, "text/plain", "no dump");
+      return;
+    }
+    server.setContentLength(size);
+    server.send(200, "application/octet-stream", "");
+    for (size_t off = 0; off < size; off += cap) {
+      const size_t n = min(cap, size - off);
+      if (esp_flash_read(NULL, buf, addr + off, n) != ESP_OK) break;
+      server.sendContent((const char*)buf, n);
+      hangBeatWifiMs = millis();
+    }
+    memFree(MEM_WEB, buf);
+    return;
+  }
+  JsonDocument d;
+  if (server.arg("erase") == "1") { d["erased"] = esp_core_dump_image_erase() == ESP_OK; }
+  d["haveDump"] = esp_core_dump_image_check() == ESP_OK;
+  esp_core_dump_summary_t* s = (esp_core_dump_summary_t*)memCalloc(MEM_WEB, 1, sizeof(esp_core_dump_summary_t));
+  if (d["haveDump"] && s && esp_core_dump_get_summary(s) == ESP_OK) {
+    char reason[160] = "";
+    if (esp_core_dump_get_panic_reason(reason, sizeof(reason)) == ESP_OK) d["reason"] = reason;
+    d["task"] = s->exc_task;
+    d["tcb"] = s->exc_tcb;
+    char hex[12];
+    snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->exc_pc);
+    d["pc"] = hex;
+    d["elfSha"] = (const char*)s->app_elf_sha256;
+    d["stackCorrupted"] = s->exc_bt_info.corrupted;
+    JsonArray bt = d["stack"].to<JsonArray>();
+    for (uint32_t i = 0; i < s->exc_bt_info.depth && i < 16; i++) {
+      snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->exc_bt_info.bt[i]);
+      bt.add(hex);
+    }
+  }
+  memFree(MEM_WEB, s);
+  String out;
+  serializeJson(d, out);
+  server.send(200, "application/json", out);
+}
+
+// GET /debug/mem — who holds how much memory, by name (mem.h): bytes held now,
+// the most ever held, failed requests, and how many PSRAM requests had to land
+// in internal RAM. Plus free / least-ever free / largest block of both heaps.
+void handleDebugMem() {
+  const size_t cap = 1024;   // not a static: internal RAM has ~1 KB to spare over the camera's DMA block
+  char* buf = (char*)memAlloc(MEM_WEB, cap);
+  if (!buf) { server.send(500, "application/json", "{\"error\":\"out of memory\"}"); return; }
+  memReportJson(buf, cap);
+  server.send(200, "application/json", buf);
+  memFree(MEM_WEB, buf);
+}
+
 // GET /debug/tasks — the least free stack each task has ever had (bytes), and
 // the least free internal RAM since boot. For the wifi_srv crash of 2026-11-05
 // (lwIP accept found its socket's queue gone): a stack or heap running near
@@ -2615,6 +2681,18 @@ void handleDebugTasks() {
   d["heapFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   d["heapMinFree"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
   d["heapMaxBlock"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+  if (otaTrace.magic == OTA_TRACE_MAGIC) {   // the last web-panel upload (ota_update.h)
+    static const char* const phases[] = { "none", "receiving", "finishing", "done", "failed" };
+    JsonObject o = d["lastUpload"].to<JsonObject>();
+    o["phase"] = phases[otaTrace.phase <= OTA_PH_FAILED ? otaTrace.phase : 0];
+    o["bytes"] = otaTrace.bytes;
+    o["recvMs"] = otaTrace.recvMs;
+    o["maxGapMs"] = otaTrace.maxGapMs;
+    o["finishMs"] = otaTrace.finishMs;
+    o["ramFreeMin"] = otaTrace.ramFreeMin;       // internal RAM, sampled at every chunk
+    o["ramFreeLast"] = otaTrace.ramFreeLast;
+    o["ramBlockMin"] = otaTrace.ramBlockMin;     // largest free block, every 16th chunk
+  }
   JsonArray lows = d["ramLows"].to<JsonArray>();
   for (uint8_t i = 0; i < ramLowCount; i++) {
     JsonObject o = lows.add<JsonObject>();
@@ -2870,12 +2948,12 @@ void handleBrainLastWav() {
 // /brain/voices -> vizbrain GET /v1/voices (the picker's choices)
 void handleBrainVoices() {
   const size_t cap = 8192;
-  char* buf = (char*)heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+  char* buf = (char*)memAlloc(MEM_WEB, cap, MEM_BIG_ONLY);
   if (!buf) { server.send(500, "application/json", "{\"error\":\"out of memory\"}"); return; }
   int status = voiceBrainRequest(false, "/v1/voices", nullptr, buf, cap);
   if (status > 0) server.send(status, "application/json", buf);
   else server.send(502, "application/json", "{\"error\":\"brain offline\"}");
-  free(buf);
+  memFree(MEM_WEB, buf);
 }
 
 // /brain/voice?id=<voice id> -> vizbrain POST /v1/voices {"id": ...}; he says a sample in it
@@ -3006,6 +3084,8 @@ void setupWebServer() {
   server.on("/brightness", handleBrightness);
   server.on("/debug/wifidrop", handleDebugWifiDrop);
   server.on("/debug/tasks", handleDebugTasks);
+  server.on("/debug/mem", handleDebugMem);
+  server.on("/debug/crash", handleDebugCrash);
   #ifdef TARGET_CORES3
   server.on("/debug/power", handleDebugPower);
   #endif

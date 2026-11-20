@@ -534,18 +534,26 @@ void cloudTask(void* param) {
   }
 }
 
+// The cloud task runs at idle priority. Each HTTPS connection verifies the
+// server's certificates with software ECDSA: seconds of solid CPU that never
+// blocks. At priority 1 that shared core 0 with the web server and the WiFi
+// receive path, and during a firmware upload the three together kept IDLE0
+// from running for 5 s, so the task watchdog reset the bot mid-upload (coredump
+// 2026-11-19: cloud in mbedtls_ecdsa_verify, wifi_srv in _parseForm, the wifi
+// task delivering packets; nothing was stuck). At idle priority the signature
+// math takes turns with IDLE0 and gives way to everything else on the core.
 void startCloudTask() {
   cloudTaskHandle = xTaskCreateStaticPinnedToCore(
     cloudTask,         // Task function
     "cloud",           // Name
     8192,              // Stack depth (StackType_t = uint8_t on ESP-IDF, so bytes)
     nullptr,           // Parameter
-    1,                 // Priority (low — same as wifi server, below WiFi stack)
+    tskIDLE_PRIORITY,  // Background priority: see the note above startCloudTask()
     cloudTaskStack,    // Stack buffer (BSS)
     &cloudTaskTCB,     // TCB (BSS)
     0                  // Core 0 (protocol CPU)
   );
-  DBGLN("Cloud task started on Core 0 (static 8KB)");
+  DBGLN("Cloud task started on Core 0 at idle priority (static 8KB)");
 }
 #endif
 

@@ -339,8 +339,8 @@ inline bool scRecoverServos() {
 // same UART (BSP keeps its bus object private) but hold BSP's own Motion mutex
 // while they do, so they never collide with the motion task's traffic.
 #include <drivers/FTServo_Arduino/src/SCSCL.h>
-#include <esp_heap_caps.h>
 #include <new>
+#include "mem.h"
 
 #define SC_SERVO_CHECK_MS     1000
 #define SC_SERVO_DEAD_CHECKS  3
@@ -376,7 +376,7 @@ struct ScBusLock {
 inline SCSCL& scProbe() {
   static SCSCL* bus = nullptr;
   if (!bus) {
-    void* mem = heap_caps_malloc(sizeof(SCSCL), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    void* mem = memAlloc(MEM_SERVO, sizeof(SCSCL), MEM_BIG_ONLY);
     bus = mem ? new (mem) SCSCL() : new SCSCL();
     bus->uart_num  = UART_NUM_1;   // BSP installed the driver; share it
     bus->IOTimeOut = 10;
