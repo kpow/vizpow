@@ -83,9 +83,24 @@ inline void scSeedServoZero(const char* key, int32_t value) {
   nvs_close(h);
 }
 
+// Si12T (head touch chip, 0x68) registers 0x02..0x12, read raw. The boot copy
+// is taken before TouchSensor.begin() resets the chip, so it shows the state
+// the chip was left in by the previous run. Shown by /debug/touchraw.
+#define SC_SI12T_REG_FIRST 0x02
+#define SC_SI12T_REG_COUNT 17
+static uint8_t scSi12tBootRegs[SC_SI12T_REG_COUNT];
+static bool    scSi12tBootOk[SC_SI12T_REG_COUNT];
+inline void scSi12tReadRegs(uint8_t* out, bool* ok) {
+  for (int i = 0; i < SC_SI12T_REG_COUNT; i++) {
+    out[i] = 0;
+    ok[i] = M5.In_I2C.readRegister(0x68, SC_SI12T_REG_FIRST + i, &out[i], 1, 100000);
+  }
+}
+
 class VizStackChan : public m5::M5StackChan_Class {
 public:
   void beginHardware() {
+    scSi12tReadRegs(scSi12tBootRegs, scSi12tBootOk);
     TouchSensor.begin();
     io_expander_init();
     // Must precede servo_init(): that is where BSP reads these.
@@ -109,12 +124,15 @@ static VizStackChan scChan;
 // speed rather than a duration. Faster moves are louder, so keep the existing
 // floor on how quick a move may be.
 #define SC_SERVO_MIN_MOVE_MS  300
+// Top speed on BSP's 0-1000 scale. It was 900; the quickest gestures (nod,
+// shake) are the hardest thing the gears and the battery see, so cap them.
+#define SC_SERVO_MAX_SPEED    700
 
 inline int scSpeedFromTimeMs(uint16_t timeMs) {
   if (timeMs < SC_SERVO_MIN_MOVE_MS) timeMs = SC_SERVO_MIN_MOVE_MS;
   if (timeMs > 2000) timeMs = 2000;
-  long sp = map((long)timeMs, (long)SC_SERVO_MIN_MOVE_MS, 2000L, 900L, 120L);
-  return (int)constrain(sp, 120L, 900L);
+  long sp = map((long)timeMs, (long)SC_SERVO_MIN_MOVE_MS, 2000L, (long)SC_SERVO_MAX_SPEED, 120L);
+  return (int)constrain(sp, 120L, (long)SC_SERVO_MAX_SPEED);
 }
 
 // ============================================================================
@@ -231,19 +249,23 @@ inline void scSetServoPower(bool enabled) {
 // When the head will be still again (millis). The camera's motion check skips
 // frames until then, so the head's own movement never reads as someone arriving.
 volatile uint32_t scHeadBusyUntilMs = 0;
+
+// True while the battery guard (below) has parked the head and cut the servo
+// rail. Moves are dropped and the freeze watchdog stands down until it clears.
+volatile bool scServosResting = false;
 inline void scMarkHeadBusy(uint16_t timeMs) {
   uint32_t until = millis() + timeMs + 1200;
   if ((int32_t)(until - scHeadBusyUntilMs) > 0) scHeadBusyUntilMs = until;
 }
 
 inline void scMoveYaw(int angleTenths, uint16_t timeMs = 500) {
-  if (!sysStatus.scServoXReady) return;
+  if (!sysStatus.scServoXReady || scServosResting) return;
   scMarkHeadBusy(timeMs);
   scChan.Motion.moveYaw(angleTenths, scSpeedFromTimeMs(timeMs));
 }
 
 inline void scMovePitch(int angleTenths, uint16_t timeMs = 500) {
-  if (!sysStatus.scServoYReady) return;
+  if (!sysStatus.scServoYReady || scServosResting) return;
   scMarkHeadBusy(timeMs);
   constexpr int minTenths = SC_SERVO_Y_MIN_DEG * 10;
   constexpr int maxTenths = SC_SERVO_Y_MAX_DEG * 10;
@@ -270,7 +292,23 @@ inline int scReadServoPos(uint8_t id) {
 // and by POST /bot/servo/reinit.
 inline bool scServoAnswers(uint8_t id);   // servo freeze watchdog, below
 
+// After the rail comes up: wait until both servos answer. Do NOT command a move
+// before this returns true. Moves sent while they are still booting are lost,
+// and BSP starts a move from the servo's read position: a failed read there
+// clamps to the range floor and turns a glide into a full-torque slam.
+// Ping rather than read angles: BSP's getCurrentAngle() falls back to the
+// animation value when a read fails, so angles look fine on a dead bus.
+inline bool scWaitServosAnswer(uint32_t maxMs) {
+  uint32_t started = millis();
+  while (millis() - started < maxMs) {
+    delay(100);
+    if (scServoAnswers(SC_SERVO_X_ID) && scServoAnswers(SC_SERVO_Y_ID)) return true;
+  }
+  return false;
+}
+
 inline bool scRecoverServos() {
+  if (scServosResting) return false;   // the rail is off on purpose: battery guard
   // Capture the pose BEFORE cutting power so the head can glide back to where
   // it was instead of snapping to home. During a freeze the servos don't answer,
   // so this is BSP's animation value (its fallback for a failed read): where the
@@ -297,17 +335,8 @@ inline bool scRecoverServos() {
   }
   delay(500);
 
-  // Do NOT command a move until both servos answer again: moves sent while
-  // they're still booting are lost, and a still head beats a half-done glide.
-  // Ping rather than read angles: BSP's getCurrentAngle() falls back to the
-  // animation value when a read fails, so angles look fine on a dead bus.
-  bool live = false;
-  uint32_t started = millis();
-  while (millis() - started < 2500) {
-    delay(100);
-    if (scServoAnswers(SC_SERVO_X_ID) && scServoAnswers(SC_SERVO_Y_ID)) { live = true; break; }
-  }
-  if (!live) {
+  // A still head beats a half-done glide: see scWaitServosAnswer().
+  if (!scWaitServosAnswer(2500)) {
     DBGLN("  reinit: bus not answering after power-up — skipping repositioning");
     plogRow("RAIL_FAIL");
     return false;
@@ -396,6 +425,7 @@ inline bool scServoAnswers(uint8_t id) {
 // Call once per loop.
 inline void scServoWatchdogTick() {
   if (!sysStatus.scServoXReady && !sysStatus.scServoYReady) return;
+  if (scServosResting) return;   // rail off on purpose: silence is expected
   uint32_t now = millis();
   if ((int32_t)(now - scNextServoCheckMs) < 0) return;
   scNextServoCheckMs = now + SC_SERVO_CHECK_MS;
@@ -414,6 +444,231 @@ inline void scServoWatchdogTick() {
   if (scRecoverServos()) scServoBackoffMs = SC_SERVO_BACKOFF_MS;
   else scServoBackoffMs = min(scServoBackoffMs * 2, (uint32_t)SC_SERVO_BACKOFF_MAX);
   scNextServoCheckMs = millis() + scServoBackoffMs;
+}
+
+// ============================================================================
+// Battery care
+// ============================================================================
+// The base cell is a small 550 mAh pack that sits on the charger for most of
+// its life and feeds the servo boost directly, so it is the part that wears.
+//
+// Charging: stop at 4.1 V instead of 4.2 V and charge at 300 mA. A cell held
+// full at 4.2 V around the clock ages fastest; 4.1 V costs about a tenth of
+// the capacity. M5Unified's defaults charge it at well over 1C.
+//
+// Low battery (2 s checks, 5 in a row to act):
+//   below 3.55 V  park the head at its floor, cut the servo rail and the LEDs
+//   below 3.30 V  and still draining: switch the unit off, before the cell is
+//                 run flat. Draining means no USB, or USB that is plugged in
+//                 but not keeping up (current still leaving the cell).
+//   above 3.75 V  after at least a minute of rest: servo rail and LEDs back
+//                 on, head back to home. The minute keeps the rebound in
+//                 voltage when the load comes off from waking it straight away.
+// The two rest thresholds can be set from the build flags, for bench tests.
+#define SC_CHARGE_MV        4100
+#define SC_CHARGE_MA        300
+#ifndef SC_BATT_REST_V
+#define SC_BATT_REST_V      3.55f
+#endif
+#ifndef SC_BATT_RESUME_V
+#define SC_BATT_RESUME_V    3.75f
+#endif
+#define SC_BATT_OFF_V       3.30f
+#define SC_BATT_DRAIN_A     0.05f    // INA226: positive is current leaving the cell
+#define SC_BATT_CHECK_MS    2000
+#define SC_BATT_CHECKS      5
+#define SC_BATT_MIN_REST_MS 60000
+#define SC_POWER_LOCK_MS    500      // how long a power switch waits for the I2C bus
+
+// The CoreS3's 5 V output. The base's LED ring is powered from it, so it has to
+// be on for the LEDs to light. On one unit, switching it on stops USB power
+// reaching the charger, and that unit must keep it off. So the choice is saved
+// per unit (NVS "power" / "ext5v", default on) and found out by test, at boot
+// when USB is plugged in and again the first time the battery guard rests a
+// unit that started on battery (sc5vBlocksUsb, sc5vLearnAtRest).
+static bool sc5vWanted  = true;
+static bool sc5vAutoOff = false;   // this boot's check switched it off: logged once
+
+inline void sc5vSave(bool on) {
+  sc5vWanted = on;
+  nvs_handle_t h;
+  if (nvs_open("power", NVS_READWRITE, &h) != ESP_OK) return;
+  nvs_set_u8(h, "ext5v", on ? 1 : 0);
+  nvs_commit(h);
+  nvs_close(h);
+}
+
+// One bus transaction each. False: the bus was busy and nothing was switched
+// or read. (Before the task manager starts there is no lock to wait for.)
+inline bool sc5vSwitch(bool on) {
+  ScI2cLock lock(SC_POWER_LOCK_MS);
+  if (!lock.held) return false;
+  M5.Power.setExtOutput(on);
+  return true;
+}
+
+inline bool scUsbPresent(bool* present) {
+  ScI2cLock lock(SC_POWER_LOCK_MS);
+  if (!lock.held) return false;
+  *present = M5.Power.Axp2101.getVBUSVoltage() > 4.0f;
+  return true;
+}
+
+// Does switching the 5 V output on take USB away from the charger? Call with
+// the output off and USB present. True only when USB went away with the output
+// on AND came back with it off, and then the output is left off. A cable pulled
+// during the test does only the first half, so it is not mistaken for the
+// fault. In every other case the output is left on.
+inline bool sc5vBlocksUsb() {
+  bool usb = false;
+  if (!sc5vSwitch(true)) return false;
+  delay(300);
+  if (!scUsbPresent(&usb) || usb) return false;   // still there: the output is harmless
+  if (!sc5vSwitch(false)) return false;
+  delay(400);
+  if (scUsbPresent(&usb) && usb) return true;     // gone with it on, back with it off
+  sc5vSwitch(true);                               // USB really went away: nothing learned
+  return false;
+}
+
+// Call right after M5.begin(): M5Unified has just written its own charger setup,
+// and vizbot.ino asked it to leave the 5 V output off.
+inline void scBatteryCareBegin() {
+  M5.Power.Axp2101.setChargeVoltage(SC_CHARGE_MV);
+  M5.Power.Axp2101.setChargeCurrent(SC_CHARGE_MA);
+
+  nvs_handle_t h;
+  uint8_t saved = 1;
+  if (nvs_open("power", NVS_READONLY, &h) == ESP_OK) {
+    nvs_get_u8(h, "ext5v", &saved);
+    nvs_close(h);
+  }
+  sc5vWanted = saved != 0;
+  if (!sc5vWanted) return;
+
+  bool usb = false;
+  scUsbPresent(&usb);
+  if (!usb) {
+    sc5vSwitch(true);   // on battery: nothing to test against yet (see sc5vLearnAtRest)
+  } else if (sc5vBlocksUsb()) {
+    sc5vSave(false);
+    sc5vAutoOff = true;
+  }
+}
+
+static uint32_t scRestSinceMs = 0;
+
+// Park the head, then cut the servo rail and the LED ring's supply. False: the
+// bus was busy and nothing was switched, so the caller tries again next check.
+inline bool scRestServos() {
+  if (scServosResting) return true;
+  // Park at the pitch floor first: with the rail off there is no torque, and
+  // from the floor the head has nowhere to fall.
+  scMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
+  delay(1300);
+  {
+    ScI2cLock lock(SC_POWER_LOCK_MS);
+    if (!lock.held) return false;
+    scChan.setServoPowerEnabled(false);
+    M5.Power.setExtOutput(false);   // the LED ring's supply
+  }
+  scServosResting = true;
+  scRestSinceMs = millis();
+  return true;
+}
+
+// Servo rail and LEDs back on, head back to home. False: bus busy, still resting.
+inline bool scWakeServos() {
+  if (!scServosResting) return true;
+  {
+    ScI2cLock lock(SC_POWER_LOCK_MS);
+    if (!lock.held) return false;
+    scChan.setServoPowerEnabled(true);
+    if (sc5vWanted) M5.Power.setExtOutput(true);
+  }
+  delay(500);   // servos need time to boot after power-on
+  const bool live = scWaitServosAnswer(2500);
+  scServosResting = false;
+  scServoDeadChecks = 0;
+  scNextServoCheckMs = millis() + 3000;
+  // Not answering yet: leave the head where it is. The freeze watchdog is back
+  // on duty and recovers it the usual way.
+  if (live) scGoHome(1800);
+  return true;
+}
+
+// A unit that started on battery never ran the boot test. The rest has just
+// cut the 5 V output: if USB shows up now where there was none a moment ago,
+// the output may have been keeping it from the charger. Test it properly and
+// save the answer. Leaves the output off either way (the unit is resting).
+inline void sc5vLearnAtRest() {
+  bool usb = false;
+  delay(400);
+  if (!scUsbPresent(&usb) || !usb) return;   // still no USB: it really is on battery
+  if (sc5vBlocksUsb()) {
+    sc5vSave(false);
+    plogRow("EXT5V_OFF", "5 V output was blocking USB: switched off and saved (base LEDs stay dark)");
+  }
+  sc5vSwitch(false);
+}
+
+// Call once per loop.
+inline void scBatteryCareTick() {
+  static uint32_t nextMs = 0;
+  static uint8_t low = 0, flat = 0, good = 0;
+  static bool offLogged = false;
+  uint32_t now = millis();
+  if ((int32_t)(now - nextMs) < 0) return;
+  nextMs = now + SC_BATT_CHECK_MS;
+
+  float volts, amps;
+  bool onUsb;
+  {
+    ScI2cLock lock(20);
+    if (!lock.held) return;
+    volts = scChan.getBatteryVoltage();
+    amps  = scChan.getBatteryCurrent();
+    onUsb = M5.Power.Axp2101.getVBUSVoltage() > 4.0f;
+  }
+  if (volts < 2.0f) return;   // no reading (I2C not up yet, or a failed read)
+
+  if (sc5vAutoOff) {
+    sc5vAutoOff = false;
+    plogRow("EXT5V_OFF", "5 V output blocked USB at boot: switched off and saved (base LEDs stay dark)");
+  }
+
+  // Resting and waking go by battery voltage alone, plugged in or not: a unit
+  // on a weak USB supply can still run its battery down. The switch-off also
+  // needs the cell to be draining: no USB, or USB that is not keeping up.
+  const bool draining = !onUsb || amps > SC_BATT_DRAIN_A;
+  flat = (draining && volts < SC_BATT_OFF_V) ? (flat < 250 ? flat + 1 : flat) : 0;
+  low  = volts < SC_BATT_REST_V ? (low < 250 ? low + 1 : low) : 0;
+  good = volts >= SC_BATT_RESUME_V ? (good < 250 ? good + 1 : good) : 0;
+
+  if (flat >= SC_BATT_CHECKS) {
+    if (!offLogged) {
+      offLogged = true;
+      plogRow("BATT_OFF", "battery under 3.30 V and draining: switching off");
+      DBGLN("Battery flat: switching off");
+    }
+    if (!scRestServos()) return;   // bus busy: next check
+    delay(300);
+    ScI2cLock lock(SC_POWER_LOCK_MS);
+    if (lock.held) M5.Power.powerOff();
+    return;                        // still here: bus busy or the PMU refused; next check
+  }
+  if (!scServosResting && low >= SC_BATT_CHECKS) {
+    if (!scRestServos()) return;
+    low = good = 0;
+    plogRow("BATT_REST", "battery low: head parked, servo rail and LEDs off");
+    DBGLN("Battery low: resting the servos and LEDs");
+    if (sc5vWanted && !onUsb) sc5vLearnAtRest();
+  } else if (scServosResting && good >= SC_BATT_CHECKS &&
+             millis() - scRestSinceMs >= SC_BATT_MIN_REST_MS) {
+    if (!scWakeServos()) return;
+    low = good = 0;   // a fresh run of checks before it may rest again
+    plogRow("BATT_WAKE", "battery recovered: servo rail and LEDs back on");
+  }
 }
 
 // ============================================================================

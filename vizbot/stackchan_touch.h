@@ -36,6 +36,41 @@ extern BotModeState botMode;
 
 enum ScTapZone : uint8_t { SC_ZONE_FRONT = 0, SC_ZONE_MIDDLE = 1, SC_ZONE_BACK = 2 };
 
+// ---- Pad log (GET /debug/touchraw) ------------------------------------------
+// What the Si12T reported, kept so a burst of taps nobody made can be read back
+// afterwards: every contact (start, length, strongest level per pad) and every
+// change in the three levels. Nothing here feeds back into the gestures.
+// It lives in PSRAM (mem.h): 1.7 KB of internal RAM is more than the camera's
+// DMA block has to spare. Without PSRAM there is no log.
+#define SC_TOUCH_LOG_CONTACTS 48
+#define SC_TOUCH_LOG_TRACE    128
+struct ScTouchContact { uint32_t ms; uint16_t durMs; uint8_t peak[3]; uint8_t samples; };
+struct ScTouchSample  { uint32_t ms; uint8_t level[3]; };
+struct ScTouchLog {
+  uint32_t reads = 0, pressedReads = 0;
+  uint32_t hist[3][4] = {};                 // [zone][level] read counts
+  uint32_t firedFront = 0, firedBack = 0, firedHold = 0, rejected = 0;
+  uint8_t  now[3] = { 0, 0, 0 };
+  ScTouchContact contacts[SC_TOUCH_LOG_CONTACTS];
+  uint32_t contactCount = 0;                // total ever; ring index = count % size
+  ScTouchSample trace[SC_TOUCH_LOG_TRACE];
+  uint32_t traceCount = 0;
+  uint32_t contactStartMs = 0;
+  uint8_t  contactSamples = 0;
+};
+static ScTouchLog* scTouchLogPtr = nullptr;   // read by the web task; made by the loop
+
+// Loop task only (ScTouchState::update): makes the log on first use.
+inline ScTouchLog* scTouchLogGet() {
+  static bool tried = false;
+  if (!scTouchLogPtr && !tried) {
+    tried = true;
+    void* mem = memAlloc(MEM_DIAG, sizeof(ScTouchLog), MEM_BIG_ONLY);
+    if (mem) scTouchLogPtr = new (mem) ScTouchLog();
+  }
+  return scTouchLogPtr;
+}
+
 struct ScTouchState {
   m5::Button_Class headBtn;
 
@@ -86,12 +121,37 @@ struct ScTouchState {
     };
     bool pressed = (inten[0] || inten[1] || inten[2]);
 
+    // Pad log: counts, and a trace entry whenever any level changes.
+    ScTouchLog* const tl = scTouchLogGet();
+    if (tl) {
+      tl->reads++;
+      if (pressed) tl->pressedReads++;
+      for (int z = 0; z < 3; z++) tl->hist[z][inten[z] & 3]++;
+      if (inten[0] != tl->now[0] || inten[1] != tl->now[1] || inten[2] != tl->now[2]) {
+        ScTouchSample& t = tl->trace[tl->traceCount % SC_TOUCH_LOG_TRACE];
+        t.ms = now;
+        for (int z = 0; z < 3; z++) t.level[z] = tl->now[z] = inten[z];
+        tl->traceCount++;
+      }
+    }
+
     // Track per-zone peak intensity; reset on a fresh contact.
     if (pressed && !rawPressed) {
       peak[0] = peak[1] = peak[2] = 0;
+      if (tl) { tl->contactStartMs = now; tl->contactSamples = 0; }
     }
     if (pressed) {
       for (int z = 0; z < 3; z++) if (inten[z] > peak[z]) peak[z] = inten[z];
+      if (tl && tl->contactSamples < 255) tl->contactSamples++;
+    }
+    if (tl && !pressed && rawPressed) {   // contact over: log it
+      ScTouchContact& c = tl->contacts[tl->contactCount % SC_TOUCH_LOG_CONTACTS];
+      uint32_t dur = now - tl->contactStartMs;
+      c.ms = tl->contactStartMs;
+      c.durMs = dur > 65535 ? 65535 : (uint16_t)dur;
+      for (int z = 0; z < 3; z++) c.peak[z] = peak[z];
+      c.samples = tl->contactSamples;
+      tl->contactCount++;
     }
     rawPressed = pressed;
 
@@ -100,6 +160,7 @@ struct ScTouchState {
     // 2s hold → chill (one-shot latch).
     if (headBtn.isPressed() && !holdFired && headBtn.pressedFor(SC_CHILL_HOLD_MS)) {
       holdFired = true;
+      if (tl) tl->firedHold++;
       return 3;
     }
 
@@ -112,10 +173,11 @@ struct ScTouchState {
       // 1, so it's rejected. Middle pad is ignored.
       bool frontHigh = peak[SC_ZONE_FRONT] >= OUTPUT_HIGH;
       bool backHigh  = peak[SC_ZONE_BACK]  >= OUTPUT_HIGH;
-      if (!frontHigh && !backHigh) return 0;
+      if (!frontHigh && !backHigh) { if (tl) tl->rejected++; return 0; }
       // Back wins ties; otherwise whichever end reached full strength.
       lastTapZone = (backHigh && peak[SC_ZONE_BACK] >= peak[SC_ZONE_FRONT])
                       ? SC_ZONE_BACK : SC_ZONE_FRONT;
+      if (tl) { if (lastTapZone == SC_ZONE_BACK) tl->firedBack++; else tl->firedFront++; }
       return 1;
     }
 
