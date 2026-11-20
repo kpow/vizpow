@@ -6,14 +6,19 @@
 // background behind the face. Built only with -DKALEIDO_ENABLED.
 // ============================================================================
 // The rule for this scene is that it must not slow vizBot down:
-//   - Nothing is allocated and no task exists while another scene is showing.
-//   - Every buffer is PSRAM (about 1 MB). Internal RAM is two task stacks
-//     (7 KB) plus a few small allocations, and only while the scene runs.
+//   - No buffer is held while another scene is showing. Every allocation goes
+//     through the memory owner (mem.h, tag "kaleido") and lands in PSRAM
+//     (about 1 MB while it shows). The two tasks are made on first use and
+//     then kept, parked: their stacks are PSRAM too, so the only internal RAM
+//     Kaleido ever holds is the two task control blocks (under 1 KB).
 //   - All drawing happens on core 0 in two tasks at priority 1, the same as
-//     wifi_srv and cloud, so those keep their share of the core (the WiFi
-//     stack itself is far above). Idle priority was tried first: the idle
-//     task sleeps a whole tick whenever its turn comes, which left Kaleido
-//     8 frames a second.
+//     wifi_srv, so it keeps its share of the core (the WiFi stack itself is far
+//     above). Idle priority was tried first: the idle task sleeps a whole tick
+//     whenever its turn comes, which left Kaleido 8 frames a second.
+//   - It gives way. While a firmware upload runs, an HTTPS connection is open
+//     (cloud sync and update, voice) or a voice turn is on, it draws nothing and
+//     the loop keeps showing the last picture. The cloud task runs at idle
+//     priority, below Kaleido, so without this a sync would barely move.
 //   - The render loop (core 1) never draws and never waits: each frame it
 //     enlarges the newest finished picture into the canvas. If core 0 is
 //     busy, Kaleido's own frame rate drops and vizBot's does not.
@@ -23,6 +28,7 @@
 //     one PSRAM bus, and with vizBot's own canvas traffic a full-size frame
 //     took 38 ms of core 0 (14 fps). Half size ran at 29 fps but looked soft.
 //   - Start-up and tear-down run on the worker, off the render loop.
+//   - /debug/mem lists what it holds; GET /state shows "busy" while it gives way.
 //
 // Tasks:
 //   kaleido      source textures (1 to 2 a second), fold tables on a look
@@ -35,7 +41,9 @@
 
 #include <Arduino.h>
 #include <esp_heap_caps.h>
+#include <Update.h>
 #include "config.h"
+#include "mem.h"
 
 extern "C" {
 #include "ko_engine.h"
@@ -61,15 +69,16 @@ static_assert(KS_OUT_W >= LCD_WIDTH && KS_OUT_H >= LCD_HEIGHT, "Kaleido picture 
 #define KS_MOTION          0.75f   // "all motion at 75% speed", as on the Mosaico
 #define KS_TUNNEL_SPEED    0.10f   // tunnel depth units per animation second
 #define KS_TEX_REST_MS     30      // pause after each source texture, so core 0 gets idle time
-#define KS_TASK_PRIORITY    1       // same as wifi_srv and cloud
-// Task stacks (internal RAM, only while the scene runs). Measured peak use on
-// the 1.69 across look changes: worker 1.6 KB, draw 1.0 KB.
+#define KS_TASK_PRIORITY    1       // same as wifi_srv
+// Task stacks, in PSRAM. Measured peak use on the 1.69 across look changes:
+// worker 1.6 KB, draw 1.0 KB.
 #define KS_WORKER_STACK    4096
 #define KS_DRAW_STACK      3072
 #define KS_FADE_MIN_US     60000u  // cross-fade length follows the texture rate
 #define KS_FADE_MAX_US     1000000u   // a slow texture (1 a second) still fades the whole way
 #define KS_IDLE_STOP_MS    3000    // no frame taken for this long: free everything
 #define KS_RETRY_MS        5000    // wait before retrying a failed start
+#define KS_BUSY_POLL_MS    50      // while giving way: how often to look again
 #define KS_SPREAD_MASK     0x07E0F81Fu
 #define KS_TEXELS          ((size_t)KO_SRC_N * KO_SRC_N)
 #define KS_FRAME_BYTES     ((size_t)KS_W * KS_H * 2)
@@ -124,13 +133,41 @@ struct KaleidoScene {
   uint32_t fadeStartUs, fadeUs, lastTexUs;
 
   uint32_t failedMs;
+  volatile uint8_t busy;           // KS_BUSY_*: why it is giving way right now
 
   // Stats for GET /state
   volatile uint32_t frames, drawUsSum, drawUsMax, textures, texUsSum, copies, copyUsSum;
 };
 static KaleidoScene ks = {};
 
-static void *ksPsram(size_t bytes) { return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM); }
+static void *ksPsram(size_t bytes) { return memAlloc(MEM_KALEIDO, bytes, MEM_BIG_ONLY); }
+static void ksRelease(void *p) { memFree(MEM_KALEIDO, p); }
+
+// The engine's own allocations (ko_port.h), PSRAM only.
+extern "C" void *ks_mem_calloc(size_t n, size_t size) { return memCalloc(MEM_KALEIDO, n, size, MEM_BIG_ONLY); }
+extern "C" void ks_mem_free(void *ptr) { memFree(MEM_KALEIDO, ptr); }
+
+// ---- Giving way -----------------------------------------------------------
+// Kaleido runs on core 0 above the cloud task (idle priority) and shares the
+// PSRAM bus with the TLS buffers. While the bot does something that matters
+// more, it stops drawing; the loop keeps showing the last picture.
+extern volatile uint32_t otaUploadStartMs;   // ota_update.h
+extern volatile uint8_t voicePhase;          // bot_mode.h: 1 listening, 2 thinking, 3 speaking
+enum : uint8_t { KS_BUSY_NONE = 0, KS_BUSY_UPLOAD, KS_BUSY_HTTPS, KS_BUSY_VOICE };
+#ifdef KALEIDO_SERIAL_STATS
+static volatile bool ksFakeBusy = false;     // dev key 'h': give way as if HTTPS were open
+#endif
+static uint8_t ksBusyReason() {
+#ifdef KALEIDO_SERIAL_STATS
+  if (ksFakeBusy) return KS_BUSY_HTTPS;
+#endif
+  const uint32_t up = otaUploadStartMs;
+  if ((up && millis() - up < 120000) || Update.isRunning()) return KS_BUSY_UPLOAD;
+  if (memHeld(MEM_TLS) > 0) return KS_BUSY_HTTPS;
+  const uint8_t vp = voicePhase;
+  if (vp >= 1 && vp <= 3) return KS_BUSY_VOICE;
+  return KS_BUSY_NONE;
+}
 
 // ---- Source textures (worker) ---------------------------------------------
 // Bilinear n x n -> KO_SRC_N^2 RGB888 upscale (same maths as the Mosaico worker).
@@ -299,12 +336,25 @@ static void ksDrawFrame() {
 
 static void ksDrawTask(void *) {
   for (;;) {
-    if (ks.state == KS_STOPPING) {             // park: the worker deletes this task
-      ks.drawParked = true;
-      for (;;) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // The worker frees the buffers once it sees drawParked. Both tasks are on
+    // core 0, so with the scheduler held it sees the state and the flag change
+    // together: never "parked" while this task is about to draw.
+    vTaskSuspendAll();
+    const bool run = ks.state == KS_RUNNING;
+    ks.drawParked = !run;
+    xTaskResumeAll();
+    if (!run) {                                // parked between runs; the task is kept
+      ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+      continue;
     }
     if (ks.frameReady) {                       // the loop has not taken the last frame yet
       ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
+      continue;
+    }
+    const uint8_t busy = ksBusyReason();
+    ks.busy = busy;
+    if (busy) {                                // giving way: the loop keeps the last picture
+      vTaskDelay(pdMS_TO_TICKS(KS_BUSY_POLL_MS));
       continue;
     }
     // Drawing goes before source textures: the worker drops to idle priority
@@ -338,22 +388,20 @@ static bool ksAllocate() {
 }
 
 static void ksFree() {
-  if (ks.drawTask) vTaskDelete(ks.drawTask);   // parked, or never started
-  ks.drawTask = nullptr;
   for (int i = 0; i < 2; ++i) {
     ko_engine_destroy(ks.engine[i]);
     ks.engine[i] = nullptr;
-    heap_caps_free(ks.frame[i]);
+    ksRelease(ks.frame[i]);
     ks.frame[i] = nullptr;
   }
-  heap_caps_free(ks.texShow);
-  heap_caps_free(ks.texPrev);
-  heap_caps_free(ks.texNext);
-  heap_caps_free(ks.texBack);
-  heap_caps_free(ks.tex565);
-  heap_caps_free(ks.rgb);
-  heap_caps_free(ks.rgbSmall);
-  heap_caps_free(ks.rgbSharp);
+  ksRelease(ks.texShow);
+  ksRelease(ks.texPrev);
+  ksRelease(ks.texNext);
+  ksRelease(ks.texBack);
+  ksRelease(ks.tex565);
+  ksRelease(ks.rgb);
+  ksRelease(ks.rgbSmall);
+  ksRelease(ks.rgbSharp);
   ks.texShow = ks.texPrev = ks.texNext = ks.texBack = nullptr;
   ks.tex565 = nullptr;
   ks.rgb = ks.rgbSmall = ks.rgbSharp = nullptr;
@@ -361,10 +409,15 @@ static void ksFree() {
   ks.organic = nullptr;
 }
 
-static void ksWorkerTask(void *) {
-  ks.workerTask = xTaskGetCurrentTaskHandle();
-  bool ok = ksAllocate();
-  if (ok) {
+// One showing of the scene: allocate, run until stopped, free everything.
+static void ksRun() {
+  if (!ksAllocate()) {
+    ksFree();
+    ks.failedMs = millis() | 1;
+    ks.state = KS_OFF;
+    return;
+  }
+  {
     ks.lutBlack = -1.0f;                       // forces the panel table to be built
     ks.frontEngine = 0;
     ksBuildFold(0, ks.lookReq);
@@ -377,20 +430,14 @@ static void ksWorkerTask(void *) {
     ks.enginePending = false;
     ks.frameReady = false;
     ks.haveFrame = false;
-    ks.drawParked = false;
     ks.frontFrame = 0;
     ks.lastUs = 0;
     ks.lastTexUs = micros();
-    ok = xTaskCreatePinnedToCore(ksDrawTask, "kaleido_draw", KS_DRAW_STACK, nullptr, KS_TASK_PRIORITY, &ks.drawTask, 0) == pdPASS;
-  }
-  if (!ok) {
-    ksFree();
-    ks.failedMs = millis() | 1;
-    ks.state = KS_OFF;
-    vTaskDelete(nullptr);
+    ks.busy = KS_BUSY_NONE;
   }
   ks.lastFrameMs = millis();
   ks.state = KS_RUNNING;
+  xTaskNotifyGive(ks.drawTask);
 
   for (;;) {
     // Nobody is taking frames (another scene, a full-screen page, another mode): let go.
@@ -408,7 +455,11 @@ static void ksWorkerTask(void *) {
       ksFree();
       ks.state = KS_OFF;
       xSemaphoreGive(ks.lock);
-      vTaskDelete(nullptr);
+      return;
+    }
+    if (ksBusyReason()) {                      // giving way: no textures, no fold tables
+      vTaskDelay(pdMS_TO_TICKS(KS_BUSY_POLL_MS));
+      continue;
     }
     if (!ks.enginePending && ks.lookReq != ks.engineLook[ks.frontEngine]) {
       ksBuildFold(ks.frontEngine ^ 1, ks.lookReq);   // about 0.3 s; the old look keeps running
@@ -425,6 +476,35 @@ static void ksWorkerTask(void *) {
       vTaskDelay(pdMS_TO_TICKS(4));
     }
   }
+}
+
+static void ksWorkerTask(void *) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   // a start from the loop
+    if (ks.state == KS_STARTING) ksRun();
+  }
+}
+
+// First showing only: make both tasks, stacks in PSRAM (the framework allows
+// it: CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY). Neither task touches flash,
+// so a PSRAM stack is safe. The control blocks are small and stay internal.
+static bool ksCreateTasks() {
+  StackType_t *ws = (StackType_t *)ksPsram(KS_WORKER_STACK);
+  StackType_t *ds = (StackType_t *)ksPsram(KS_DRAW_STACK);
+  StaticTask_t *wt = (StaticTask_t *)memCalloc(MEM_KALEIDO, 1, sizeof(StaticTask_t), MEM_DEFAULT);
+  StaticTask_t *dt = (StaticTask_t *)memCalloc(MEM_KALEIDO, 1, sizeof(StaticTask_t), MEM_DEFAULT);
+  if (!ws || !ds || !wt || !dt) {
+    ksRelease(ws);
+    ksRelease(ds);
+    ksRelease(wt);
+    ksRelease(dt);
+    return false;
+  }
+  ks.drawTask = xTaskCreateStaticPinnedToCore(ksDrawTask, "kaleido_draw", KS_DRAW_STACK, nullptr,
+                                              KS_TASK_PRIORITY, ds, dt, 0);
+  ks.workerTask = xTaskCreateStaticPinnedToCore(ksWorkerTask, "kaleido", KS_WORKER_STACK, nullptr,
+                                                KS_TASK_PRIORITY, ws, wt, 0);
+  return ks.drawTask && ks.workerTask;
 }
 
 // ---- Render-loop API (core 1) ---------------------------------------------
@@ -480,13 +560,14 @@ inline bool kaleidoSceneRender(uint16_t *px, uint32_t nowMs) {
   if (ks.state == KS_OFF) {
     if (ks.failedMs && nowMs - ks.failedMs < KS_RETRY_MS) return false;
     if (!ks.lock) ks.lock = xSemaphoreCreateMutexStatic(&ks.lockBuf);
+    if (!ks.workerTask && !ksCreateTasks()) {
+      ks.failedMs = nowMs | 1;
+      return false;
+    }
     ks.failedMs = 0;
     ks.lookReq = ks.lookIndex % KS_LOOKS;
     ks.state = KS_STARTING;
-    if (xTaskCreatePinnedToCore(ksWorkerTask, "kaleido", KS_WORKER_STACK, nullptr, KS_TASK_PRIORITY, nullptr, 0) != pdPASS) {
-      ks.failedMs = nowMs | 1;
-      ks.state = KS_OFF;
-    }
+    xTaskNotifyGive(ks.workerTask);
     return false;
   }
   if (ks.state != KS_RUNNING) return false;
@@ -526,6 +607,7 @@ inline String kaleidoSceneJson() {
   const float secs = lastMs ? (now - lastMs) / 1000.0f : 0.0f;
   const uint32_t frames = ks.frames, textures = ks.textures, copies = ks.copies;
   String json = String("{\"state\":") + String(ks.state) +
+                ",\"busy\":" + String(ks.state == KS_RUNNING ? ks.busy : 0) +
                 ",\"look\":\"" + ko_look_name(ks.lookIndex) + "\"" +
                 ",\"fps\":" + String(secs > 0.0f ? frames / secs : 0.0f, 1) +
                 ",\"drawAvgUs\":" + String(frames ? ks.drawUsSum / frames : 0) +
@@ -549,6 +631,7 @@ inline String kaleidoSceneJson() {
 // and heap figures every 5 s.
 //   k Kaleido   a ambient   b black   n next look   p party mode on/off
 //   v/V vivid -/+   c/C black level -/+   g/G gamma -/+   s/S sharpen -/+
+//   h  pretend the bot is busy (as during an HTTPS connection) on/off
 void setBotBackgroundStyle(uint8_t style);
 uint8_t getBotBackgroundStyle();
 inline void kaleidoDevSerial() {
@@ -560,6 +643,7 @@ inline void kaleidoDevSerial() {
     else if (c == 'b') setBotBackgroundStyle(0);
     else if (c == 'n') ks.lookReq = (ks.lookIndex + 1) % KS_LOOKS;
     else if (c == 'p') partyMode = !partyMode;
+    else if (c == 'h') ksFakeBusy = !ksFakeBusy;
     else if (c == 'v') ksVivid -= 0.1f;
     else if (c == 'V') ksVivid += 0.1f;
     else if (c == 'c') ksBlack -= 0.02f;
@@ -574,8 +658,9 @@ inline void kaleidoDevSerial() {
   const uint32_t now = millis();
   if (now - lastMs < 5000) return;
   lastMs = now;
-  Serial.printf("KSTAT bg=%u party=%u/%u stackFree=%u/%u heap=%u heapMin=%u heapBlock=%u psramFree=%u vivid=%.2f black=%.2f gamma=%.2f sharp=%.2f loop=%s kaleido=%s\n",
+  Serial.printf("KSTAT bg=%u party=%u/%u tls=%u kmem=%u stackFree=%u/%u heap=%u heapMin=%u heapBlock=%u psramFree=%u vivid=%.2f black=%.2f gamma=%.2f sharp=%.2f loop=%s kaleido=%s\n",
                 (unsigned)getBotBackgroundStyle(), (unsigned)partyMode, (unsigned)partyBlob.active,
+                (unsigned)memHeld(MEM_TLS), (unsigned)memHeld(MEM_KALEIDO),
                 (unsigned)(ks.state == KS_RUNNING ? uxTaskGetStackHighWaterMark(ks.workerTask) : 0),
                 (unsigned)(ks.state == KS_RUNNING ? uxTaskGetStackHighWaterMark(ks.drawTask) : 0),
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),

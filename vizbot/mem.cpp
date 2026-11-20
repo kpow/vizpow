@@ -12,6 +12,9 @@
 
 static const char* const kTagNames[MEM_TAG_COUNT] = {
   "tls", "json", "midi", "voice", "wake", "art", "ota", "servo", "web", "diag",
+#ifdef KALEIDO_ENABLED
+  "kaleido",
+#endif
 };
 
 struct MemStat {
@@ -104,6 +107,11 @@ size_t memLargest(bool big) {
 
 bool memRoomFor(size_t bigBytes, size_t internalBytes) {
   return memLargest(true) >= bigBytes && memLargest(false) >= internalBytes;
+}
+
+size_t memHeld(MemTag who) {
+  const int32_t held = memStats[who].held.load();
+  return held > 0 ? (size_t)held : 0;
 }
 
 // mbedTLS is built to allocate in internal RAM (CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC),

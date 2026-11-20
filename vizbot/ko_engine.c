@@ -29,6 +29,11 @@
 #ifndef KO_OUT
 #define KO_OUT(v) ((uint16_t)(v))
 #endif
+/* PORT: where everything else the engine allocates lives. */
+#ifndef KO_CALLOC
+#define KO_CALLOC(n, size) calloc((n), (size))
+#define KO_FREE(ptr) free(ptr)
+#endif
 
 struct ko_engine {
     int w, h;                       /* Output size this table covers. */
@@ -143,7 +148,7 @@ ko_engine_t *ko_engine_create_sized(int width, int height)
     if (width <= 0 || height <= 0 || width > KO_OUT_W || height > KO_OUT_H) {
         return NULL;
     }
-    ko_engine_t *engine = calloc(1, sizeof(*engine));
+    ko_engine_t *engine = KO_CALLOC(1, sizeof(*engine));
     if (!engine) {
         return NULL;
     }
@@ -151,7 +156,7 @@ ko_engine_t *ko_engine_create_sized(int width, int height)
     engine->h = height;
     engine->fold = KO_FOLD_ALLOC((size_t)width * height * 2 * sizeof(int16_t));
     if (!engine->fold) {
-        free(engine);
+        KO_FREE(engine);
         return NULL;
     }
     return engine;
@@ -161,7 +166,7 @@ void ko_engine_destroy(ko_engine_t *engine)
 {
     if (engine) {
         KO_FOLD_FREE(engine->fold);
-        free(engine);
+        KO_FREE(engine);
     }
 }
 

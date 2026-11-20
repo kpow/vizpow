@@ -8,6 +8,17 @@
 #include <math.h>
 #include <stdlib.h>
 
+/* PORT: where the generator's tables live (ko_port.h may say). */
+#if defined(__has_include)
+#if __has_include("ko_port.h")
+#include "ko_port.h"
+#endif
+#endif
+#ifndef KO_CALLOC
+#define KO_CALLOC(n, size) calloc((n), (size))
+#define KO_FREE(ptr) free(ptr)
+#endif
+
 #define KO_PI 3.14159265358979f
 #define KO_TAU 6.28318530717959f
 #define CELL_COUNT 16
@@ -394,7 +405,7 @@ ko_organic_t *ko_organic_create(int size)
     if (size < 64 || size > 512 || (size & (size - 1))) {
         return NULL;
     }
-    ko_organic_t *gen = calloc(1, sizeof(*gen));
+    ko_organic_t *gen = KO_CALLOC(1, sizeof(*gen));
     if (!gen) {
         return NULL;
     }
@@ -407,7 +418,7 @@ ko_organic_t *ko_organic_create(int size)
     float **fields[] = {&gen->warp_x, &gen->warp_y, &gen->bg, &gen->ring,
                         &gen->mq_x, &gen->mq_y, &gen->mr};
     for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
-        *fields[i] = calloc(i < 4 ? cells : mcells, sizeof(float));
+        *fields[i] = KO_CALLOC(i < 4 ? cells : mcells, sizeof(float));
         if (!*fields[i]) {
             ko_organic_destroy(gen);
             return NULL;
@@ -421,14 +432,14 @@ void ko_organic_destroy(ko_organic_t *gen)
     if (!gen) {
         return;
     }
-    free(gen->warp_x);
-    free(gen->warp_y);
-    free(gen->bg);
-    free(gen->ring);
-    free(gen->mq_x);
-    free(gen->mq_y);
-    free(gen->mr);
-    free(gen);
+    KO_FREE(gen->warp_x);
+    KO_FREE(gen->warp_y);
+    KO_FREE(gen->bg);
+    KO_FREE(gen->ring);
+    KO_FREE(gen->mq_x);
+    KO_FREE(gen->mq_y);
+    KO_FREE(gen->mr);
+    KO_FREE(gen);
 }
 
 void ko_organic_render(ko_organic_t *gen, ko_organic_variant_t variant,
