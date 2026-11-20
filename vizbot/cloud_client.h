@@ -1499,10 +1499,12 @@ void initCloudClient() {
 
   // The last update failed (ota_update.h found it rolled back, or the download
   // did): no second attempt for an hour, however often the bot restarts into it
+  #ifdef CLOUD_OTA_ENABLED
   if (cloudOtaError[0]) {
     cloudOtaHold = true;
     cloudOtaHoldUntilMs = millis() + CLOUD_OTA_RETRY_MS;
   }
+  #endif
 
   DBG("Cloud init: server=");
   DBG(cloudServerUrl);
