@@ -83,9 +83,24 @@ inline void scSeedServoZero(const char* key, int32_t value) {
   nvs_close(h);
 }
 
+// Si12T (head touch chip, 0x68) registers 0x02..0x12, read raw. The boot copy
+// is taken before TouchSensor.begin() resets the chip, so it shows the state
+// the chip was left in by the previous run. Shown by /debug/touchraw.
+#define SC_SI12T_REG_FIRST 0x02
+#define SC_SI12T_REG_COUNT 17
+static uint8_t scSi12tBootRegs[SC_SI12T_REG_COUNT];
+static bool    scSi12tBootOk[SC_SI12T_REG_COUNT];
+inline void scSi12tReadRegs(uint8_t* out, bool* ok) {
+  for (int i = 0; i < SC_SI12T_REG_COUNT; i++) {
+    out[i] = 0;
+    ok[i] = M5.In_I2C.readRegister(0x68, SC_SI12T_REG_FIRST + i, &out[i], 1, 100000);
+  }
+}
+
 class VizStackChan : public m5::M5StackChan_Class {
 public:
   void beginHardware() {
+    scSi12tReadRegs(scSi12tBootRegs, scSi12tBootOk);
     TouchSensor.begin();
     io_expander_init();
     // Must precede servo_init(): that is where BSP reads these.

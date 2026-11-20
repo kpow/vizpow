@@ -2708,6 +2708,74 @@ void handleDebugTasks() {
 }
 
 #ifdef BOARD_HAS_STACKCHAN_BASE
+// GET /debug/touchraw — what the head touch chip reported: read counts per pad
+// and level, the taps that fired, the last contacts (start ms, length, strongest
+// level per pad [front, middle, back], reads) and the last level changes.
+// The log never feeds back into the gestures. Three arguments do change
+// things, and the answer's "did" lists the ones that ran:
+//   ?clear=1     empties the log
+//   ?recal=1     makes the chip recalibrate its reference
+//   ?sleep=0|1   switches the chip's slow-scan mode, until the next restart
+// The last two are for finding why the pads latch.
+void handleDebugTouchRaw() {
+  ScTouchLog* const logp = scTouchLogPtr;   // made by the loop task on its first read
+  if (!logp) { server.send(503, "application/json", "{\"error\":\"no pad log (not started yet, or no PSRAM)\"}"); return; }
+  String did;
+  uint8_t regs[SC_SI12T_REG_COUNT];
+  bool regsOk[SC_SI12T_REG_COUNT];
+  {
+    ScI2cLock lock(300);
+    if (!lock.held) { server.send(503, "text/plain", "I2C busy"); return; }
+    if (server.hasArg("recal")) { scChan.TouchSensor.recalibrate(); did += "recal "; }
+    if (server.hasArg("sleep")) {
+      scChan.TouchSensor.setSleep(server.arg("sleep") == "1");
+      did += server.arg("sleep") == "1" ? "sleep=1 " : "sleep=0 ";
+    }
+    scSi12tReadRegs(regs, regsOk);
+  }
+  if (server.hasArg("clear")) { new (logp) ScTouchLog(); did += "clear "; }   // in place: it is 1.7 KB
+  did.trim();
+  auto hexRow = [](const uint8_t* v, const bool* ok) {
+    String s;
+    char b[4];
+    for (int i = 0; i < SC_SI12T_REG_COUNT; i++) {
+      if (ok[i]) snprintf(b, sizeof(b), "%02X", v[i]); else snprintf(b, sizeof(b), "--");
+      s += String(i ? " " : "") + b;
+    }
+    return s;
+  };
+  const ScTouchLog& L = *logp;
+  String j;
+  j.reserve(6000);
+  j += "{\"did\":\"" + did + "\",\"regs02to12\":\"" + hexRow(regs, regsOk) + "\",\"bootRegs02to12\":\"" + hexRow(scSi12tBootRegs, scSi12tBootOk) + "\",";
+  j += "\"upMs\":" + String(millis()) + ",\"reads\":" + String(L.reads) + ",\"pressedReads\":" + String(L.pressedReads);
+  j += ",\"now\":[" + String(L.now[0]) + "," + String(L.now[1]) + "," + String(L.now[2]) + "]";
+  static const char* zn[3] = { "front", "middle", "back" };
+  j += ",\"hist\":{";
+  for (int z = 0; z < 3; z++) {
+    j += String(z ? "," : "") + "\"" + zn[z] + "\":[" + String(L.hist[z][0]) + "," + String(L.hist[z][1]) + "," +
+         String(L.hist[z][2]) + "," + String(L.hist[z][3]) + "]";
+  }
+  j += "},\"fired\":{\"front\":" + String(L.firedFront) + ",\"back\":" + String(L.firedBack) + ",\"hold\":" +
+       String(L.firedHold) + ",\"rejected\":" + String(L.rejected) + "}";
+  j += ",\"contactCount\":" + String(L.contactCount) + ",\"contacts\":[";
+  uint32_t n = L.contactCount < SC_TOUCH_LOG_CONTACTS ? L.contactCount : SC_TOUCH_LOG_CONTACTS;
+  for (uint32_t i = 0; i < n; i++) {
+    const ScTouchContact& c = L.contacts[(L.contactCount - n + i) % SC_TOUCH_LOG_CONTACTS];
+    j += String(i ? "," : "") + "[" + String(c.ms) + "," + String(c.durMs) + "," + String(c.peak[0]) + "," +
+         String(c.peak[1]) + "," + String(c.peak[2]) + "," + String(c.samples) + "]";
+  }
+  j += "],\"traceCount\":" + String(L.traceCount) + ",\"trace\":[";
+  n = L.traceCount < SC_TOUCH_LOG_TRACE ? L.traceCount : SC_TOUCH_LOG_TRACE;
+  for (uint32_t i = 0; i < n; i++) {
+    const ScTouchSample& t = L.trace[(L.traceCount - n + i) % SC_TOUCH_LOG_TRACE];
+    j += String(i ? "," : "") + "[" + String(t.ms) + "," + String(t.level[0]) + "," + String(t.level[1]) + "," +
+         String(t.level[2]) + "]";
+  }
+  j += "]}";
+  server.send(200, "application/json", j);
+}
+
 // GET /debug/servo — each head servo's own registers, to tell a servo that shut
 // itself off (overload/overheat flag, torque dropped) from one that stopped
 // answering. Read-only. Uses the watchdog's second bus handle (stackchan_base.h)
@@ -3099,6 +3167,7 @@ void setupWebServer() {
   #endif
   #ifdef BOARD_HAS_STACKCHAN_BASE
   server.on("/debug/servo", handleDebugServo);
+  server.on("/debug/touchraw", handleDebugTouchRaw);
   server.on("/debug/powerlog", handleDebugPowerLog);
   #endif
 

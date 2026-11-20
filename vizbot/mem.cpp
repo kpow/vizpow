@@ -11,7 +11,7 @@
 // driver's frame buffer, LovyanGFX sprites).
 
 static const char* const kTagNames[MEM_TAG_COUNT] = {
-  "tls", "json", "midi", "voice", "wake", "art", "ota", "servo", "web",
+  "tls", "json", "midi", "voice", "wake", "art", "ota", "servo", "web", "diag",
 };
 
 struct MemStat {

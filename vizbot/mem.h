@@ -28,6 +28,7 @@ enum MemTag : uint8_t {
   MEM_OTA,        // cloud firmware download chunk
   MEM_SERVO,      // servo probe bus
   MEM_WEB,        // web handler scratch buffers
+  MEM_DIAG,       // logs kept only for the /debug pages (MEM_DEBUG is an lwIP macro)
   MEM_TAG_COUNT
 };
 
