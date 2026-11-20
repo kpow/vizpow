@@ -11,10 +11,13 @@
 //     (about 1 MB while it shows). The two tasks are made on first use and
 //     then kept, parked: their stacks are PSRAM too, so the only internal RAM
 //     Kaleido ever holds is its two static task control blocks (under 1 KB).
-//   - All drawing happens on core 0 in two tasks at priority 1, the same as
-//     wifi_srv, so it keeps its share of the core (the WiFi stack itself is far
-//     above). Idle priority was tried first: the idle task sleeps a whole tick
-//     whenever its turn comes, which left Kaleido 8 frames a second.
+//   - All drawing happens on core 0. The draw task runs at priority 1, the
+//     same as wifi_srv (idle priority was tried first: the idle task sleeps a
+//     whole tick whenever its turn comes, which left Kaleido 8 frames a
+//     second). The texture worker runs at idle priority, taking turns with
+//     IDLE0 and the cloud task. At priority 1 it filled every gap the draw
+//     task left; at 80 MHz (low power mode) one texture is seconds of CPU, so
+//     IDLE0 never ran and the task watchdog reset the pendant (2026-11-20).
 //   - It gives way. The cloud task runs at idle priority, below Kaleido, so
 //     without this a sync would barely move:
 //       firmware upload or update: it draws nothing; the loop keeps the last
@@ -72,7 +75,8 @@ static_assert(KS_OUT_W >= LCD_WIDTH && KS_OUT_H >= LCD_HEIGHT, "Kaleido picture 
 #define KS_MOTION          0.75f   // "all motion at 75% speed", as on the Mosaico
 #define KS_TUNNEL_SPEED    0.10f   // tunnel depth units per animation second
 #define KS_TEX_REST_MS     30      // pause after each source texture, so core 0 gets idle time
-#define KS_TASK_PRIORITY    1       // same as wifi_srv
+#define KS_TASK_PRIORITY    1       // draw task: same as wifi_srv
+#define KS_WORKER_PRIORITY tskIDLE_PRIORITY   // textures: never keeps IDLE0 (the watchdog) out
 // Task stacks, in PSRAM. Measured peak use on the 1.69 across look changes:
 // worker 1.6 KB, draw 1.0 KB.
 #define KS_WORKER_STACK    4096
@@ -368,13 +372,9 @@ static void ksDrawTask(void *) {
       vTaskDelay(pdMS_TO_TICKS(KS_BUSY_POLL_MS));
       continue;
     }
-    // Drawing goes before source textures: the worker drops to idle priority
-    // for the length of a frame. Sharing the core evenly made every frame
-    // miss its loop frame (15 fps); this way both fit (29 fps, 2 textures/s).
+    // Drawing goes before source textures: the worker is at idle priority.
     const uint32_t t0 = micros();
-    vTaskPrioritySet(ks.workerTask, tskIDLE_PRIORITY);
     ksDrawFrame();
-    vTaskPrioritySet(ks.workerTask, KS_TASK_PRIORITY);
     ks.frameReady = true;
     if (busy) {                                // easing: at most 1/(1+ksEase) of core 0
       const uint32_t ms = (micros() - t0) * ksEase / 1000;
@@ -521,7 +521,7 @@ static bool ksCreateTasks() {
   ks.drawTask = xTaskCreateStaticPinnedToCore(ksDrawTask, "kaleido_draw", KS_DRAW_STACK, nullptr,
                                               KS_TASK_PRIORITY, ds, &ksDrawTcb, 0);
   ks.workerTask = xTaskCreateStaticPinnedToCore(ksWorkerTask, "kaleido", KS_WORKER_STACK, nullptr,
-                                                KS_TASK_PRIORITY, ws, &ksWorkerTcb, 0);
+                                                KS_WORKER_PRIORITY, ws, &ksWorkerTcb, 0);
   return ks.drawTask && ks.workerTask;
 }
 
