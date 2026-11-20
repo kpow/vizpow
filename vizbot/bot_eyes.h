@@ -345,7 +345,7 @@ void renderBotFace(BotFaceState &face, uint16_t bgColor) {
   int16_t cy = botFaceDrawCY;
 
   // ---- Black stroke behind face elements (only on ambient background) ----
-  bool drawStroke = (botBackgroundStyle == 4);
+  bool drawStroke = BG_STYLE_IS_SCENE(botBackgroundStyle);
 
   botEyes.render(cx, cy, botFaceDrawScale, botFaceColor, drawStroke, millis());
   drawBotMouth(face, cx, cy + face.mouthOffsetY, drawStroke, bgColor);

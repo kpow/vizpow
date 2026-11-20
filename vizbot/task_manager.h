@@ -348,7 +348,7 @@ void drainCommandQueue() {
         if (on <= 1) {
           partyMode = (on == 1);
           // Party mode only shows on the ambient scene, so turning it on from Black switches to it
-          if (partyMode && botBackgroundStyle != 4) setBotBackgroundStyle(4);
+          if (partyMode && !BG_STYLE_IS_SCENE(botBackgroundStyle)) setBotBackgroundStyle(4);
         }
         if (size <= 2) partySize = size;
         markSettingsDirty();
@@ -524,8 +524,14 @@ bool cloudOtaPowerOk() {
 void cloudTask(void* param) {
   for (;;) {
     if (wifiEnabled && !otaUploadActive()) {   // ota_update.h: no TLS during a firmware upload
+      #ifdef KALEIDO_ENABLED
+      ksCloudStepMs = millis() | 1;      // kaleido_scene.h eases off while a step does real work
+      #endif
       pollCloudSync();                   // Cloud registration + sync (TLS)
       pollScheduledCommands();           // Execute scheduled commands at their target time
+      #ifdef KALEIDO_ENABLED
+      ksCloudStepMs = 0;
+      #endif
     }
     #ifdef CLOUD_OTA_ENABLED
     otaRollbackIfUnconfirmed();          // ota_update.h: a cloud update that never synced goes back

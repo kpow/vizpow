@@ -1591,7 +1591,7 @@ struct PartyBlob {
   // Party off: the face rounds into the drop where it is. Party on: he flies in from his corner.
   void codeStart(unsigned long now) {
     if (!ready) init();
-    bool fromCorner = active && !code && morph != 2 && partyMode && botBackgroundStyle == 4;
+    bool fromCorner = active && !code && morph != 2 && partyMode && BG_STYLE_IS_SCENE(botBackgroundStyle);
     if (!codeOn) { codeT0 = now; codeBackdrop.reset(); quipN = 0; codeVoice = false; }
     codeOn = true;
     codeSignalMs = now;
@@ -1631,7 +1631,7 @@ struct PartyBlob {
     abortSeqs(now); retractAll(true);
     rdI[0] = rdI[1] = -1;
     head(0, 0, 1200, now, true);
-    if (codeParty && partyMode && botBackgroundStyle == 4 && active && !morph) {
+    if (codeParty && partyMode && BG_STYLE_IS_SCENE(botBackgroundStyle) && active && !morph) {
       code = false;
       startRun(corner, PARTY_CODE, now, 0);
       schNextAt = now + 4000;
@@ -2836,7 +2836,7 @@ struct PartyBlob {
 PartyBlob partyBlob;
 
 // Party mode only takes effect on the ambient scene
-static inline bool partyWanted() { return partyMode && botBackgroundStyle == 4; }
+static inline bool partyWanted() { return partyMode && BG_STYLE_IS_SCENE(botBackgroundStyle); }
 
 static inline const char *partyCornerName(uint8_t c) {
   static const char *names[4] = {"tr", "br", "bl", "tl"};

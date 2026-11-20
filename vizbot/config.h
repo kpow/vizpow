@@ -73,6 +73,23 @@
   typedef DisplayProxy GfxDevice;
 #endif
 
+// Background styles: 0=black 1=gradient 2=breathing 3=starfield 4=ambient.
+// 5 = Kaleido HD (kaleido_scene.h), only in builds with -DKALEIDO_ENABLED: the
+// 1.69 ([env:lcd-169]). Other builds never accept it.
+// BG_STYLE_IS_SCENE: a moving picture fills the screen behind the face, so the
+// face gets its dark outline and party mode may run on top of it.
+#ifdef KALEIDO_ENABLED
+  #ifndef BOARD_ESP32S3_LCD_169
+    #error "Kaleido HD is a 1.69 feature: it is sized and tested for that board's PSRAM, panel and pendant use only"
+  #endif
+  #define BG_STYLE_KALEIDO 5
+  #define BG_STYLE_MAX BG_STYLE_KALEIDO
+  #define BG_STYLE_IS_SCENE(s) ((s) == 4 || (s) == BG_STYLE_KALEIDO)
+#else
+  #define BG_STYLE_MAX 4
+  #define BG_STYLE_IS_SCENE(s) ((s) == 4)
+#endif
+
 // Manual override: uncomment to enable both displays (if hardware supports)
 // #define DISPLAY_DUAL
 

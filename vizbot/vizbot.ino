@@ -508,6 +508,9 @@ void setup() {
 void loop() {
   uint32_t loopStartMs = millis();
   loopStatsBegin();
+  #ifdef KALEIDO_SERIAL_STATS
+  kaleidoDevSerial();   // bench aid: scene keys + stats over USB serial (kaleido_scene.h)
+  #endif
   hangBeatLoopMs = loopStartMs;
 
   // Only read IMU if it initialized successfully

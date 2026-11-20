@@ -29,6 +29,9 @@ enum MemTag : uint8_t {
   MEM_SERVO,      // servo probe bus
   MEM_WEB,        // web handler scratch buffers
   MEM_DIAG,       // logs kept only for the /debug pages (MEM_DEBUG is an lwIP macro)
+#ifdef KALEIDO_ENABLED
+  MEM_KALEIDO,    // Kaleido HD scene (kaleido_scene.h): PSRAM only, freed when it stops
+#endif
   MEM_TAG_COUNT
 };
 
@@ -56,6 +59,10 @@ size_t memLargest(bool big);
 // True when a bigBytes block fits where MEM_BIG lands AND an internalBytes
 // block fits in internal RAM. For callers that would rather skip than fail.
 bool memRoomFor(size_t bigBytes, size_t internalBytes);
+
+// Bytes one owner holds right now. memHeld(MEM_TLS) > 0 means an HTTPS
+// connection is open (cloud sync, cloud update, voice turn).
+size_t memHeld(MemTag who);
 
 // Writes the /debug/mem JSON into buf; returns its length.
 size_t memReportJson(char* buf, size_t cap);

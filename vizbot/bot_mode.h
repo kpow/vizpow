@@ -7,6 +7,7 @@
 #include "bot_faces.h"
 #include "bot_eyes.h"
 #include "party_blob.h"
+#include "kaleido_scene.h"   // experimental Kaleido scene; empty without KALEIDO_ENABLED
 #include "bot_sayings.h"
 #include "bot_overlays.h"
 #ifdef HAS_BASE_LEDS
@@ -872,6 +873,9 @@ void renderBotMode() {
   // ---- Clear canvas with background ----
   uint16_t bgColor = BOT_COLOR_BG;
   partyBlob.codeRequests(frameNow);   // GET /bot/code (party_blob.h)
+  #ifdef KALEIDO_ENABLED
+  if (botBackgroundStyle != BG_STYLE_KALEIDO) kaleidoSceneRelease();   // frees its memory
+  #endif
 
   if (codeBackdrop.alpha > 0) {
     // Code mode: its scrolling code minimap replaces the background (the blob draws it)
@@ -915,6 +919,12 @@ void renderBotMode() {
     }
     renderBotAmbientBackground();
     bgColor = 0x0000;  // Mouth cut-outs use black on top of the effect
+  #ifdef KALEIDO_ENABLED
+  } else if (botBackgroundStyle == BG_STYLE_KALEIDO) {
+    // Kaleido draws straight into the canvas; black until it has started
+    if (!kaleidoSceneRender(lcdCanvasPixels(), frameNow)) gfx->fillScreen(BOT_COLOR_BG);
+    bgColor = 0x0000;
+  #endif
   } else {
     // Out-of-range style (stale NVS value etc.) — always clear to avoid overlay
     gfx->fillScreen(BOT_COLOR_BG);
@@ -1074,7 +1084,7 @@ void setBotFaceColor(uint16_t color) {
 }
 
 void setBotBackgroundStyle(uint8_t style) {
-  botBackgroundStyle = (style <= 4) ? style : 0;
+  botBackgroundStyle = (style <= BG_STYLE_MAX) ? style : 0;
 }
 
 uint8_t getBotBackgroundStyle() {
