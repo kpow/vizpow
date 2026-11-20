@@ -18,11 +18,13 @@ extern WebServer server;
 static bool otaUploadError = false;
 static bool otaUploadSuccess = false;
 
-// Set while a firmware upload runs; the cloud task holds its syncs until it
-// clears. Update.end() hashes the whole 2 MB image without yielding, and a TLS
-// handshake does its signature math on the same core at the same priority, so
-// together they starved IDLE0 past the 5 s task watchdog. The 2-minute limit
-// releases the hold if a client vanishes mid-upload without an abort.
+// Set while a firmware upload runs; the cloud task starts no sync until it
+// clears. A sync takes about 40 KB of internal RAM while it runs and an upload
+// leaves about 38 KB free, so the two do not fit together. (This hold was
+// first added for a watchdog reset it did not cure: Update.end() takes 0.4 s,
+// and the reset came from a sync already running when the upload began. That
+// is fixed by the cloud task's priority, see startCloudTask().) The 2-minute
+// limit releases the hold if a client vanishes mid-upload without an abort.
 volatile uint32_t otaUploadStartMs = 0;
 
 inline bool otaUploadActive() {
