@@ -89,6 +89,32 @@ struct ScTouchState {
   bool chillMode = false;
   unsigned long chillEndMs = 0;
 
+  // Self-heal. Touches nobody made come on all three pads at once, in bursts
+  // or as one contact that never ends (see the chip start in stackchan_base.h).
+  // Four such contacts inside eight seconds, or one held for fifteen, and the
+  // chip is started again; nothing it reported around then counts as a tap.
+  // Patting the whole head that fast costs a real tap and 1.5 s of no touch.
+  static constexpr uint8_t  SC_STORM_CONTACTS  = 4;
+  static constexpr uint16_t SC_STORM_WINDOW_MS = 8000;
+  static constexpr uint16_t SC_LATCH_MS        = 15000;
+  static constexpr uint16_t SC_HEAL_GAP_MS     = 10000;   // at most one chip start per this
+  uint32_t contactStartMs = 0;
+  uint32_t allPadMs[SC_STORM_CONTACTS] = {};   // when the last all-pad contacts ended (0 = none)
+  uint8_t  allPadIdx = 0;
+  uint32_t lastHealMs = 0;
+  uint32_t heals = 0;                          // shown by /debug/touchraw
+
+  void heal(unsigned long now) {
+    scTouchQuietUntilMs = now + SC_TOUCH_QUIET_MS;   // no taps, chip start or not
+    if (heals && now - lastHealMs < SC_HEAL_GAP_MS) return;
+    lastHealMs = now;
+    heals++;
+    for (auto& t : allPadMs) t = 0;
+    ScI2cLock lock(100);
+    if (lock.held) scTouchChipStartLocked();
+    else scTouchAskRestart(200);
+  }
+
   void init() {
     // Hold threshold parked well above any plausible tap so a lingering finger
     // still registers as a click on release (Button_Class would otherwise convert
@@ -112,6 +138,12 @@ struct ScTouchState {
 
     if (chillMode && now >= chillEndMs) chillMode = false;
 
+    // A chip start that was asked for: a rail was switched, or boot has settled.
+    if (scTouchRestartAtMs && (int32_t)(now - scTouchRestartAtMs) >= 0) {
+      ScI2cLock lock(100);
+      if (lock.held) { scTouchRestartAtMs = 0; scTouchChipStartLocked(); }
+    }
+
     // Read fresh touch data, normalize Front→Middle→Back (BSP reverses raw index).
     scReadTouch();
     uint8_t inten[3] = {
@@ -119,7 +151,10 @@ struct ScTouchState {
       scGetTouchZone(1),  // MIDDLE
       scGetTouchZone(0),  // BACK
     };
-    bool pressed = (inten[0] || inten[1] || inten[2]);
+    // Right after a chip start the pads are taking their reference: the log
+    // still shows what they report, the gestures see no touch.
+    const bool quiet = (int32_t)(scTouchQuietUntilMs - now) > 0;
+    bool pressed = !quiet && (inten[0] || inten[1] || inten[2]);
 
     // Pad log: counts, and a trace entry whenever any level changes.
     ScTouchLog* const tl = scTouchLogGet();
@@ -138,6 +173,7 @@ struct ScTouchState {
     // Track per-zone peak intensity; reset on a fresh contact.
     if (pressed && !rawPressed) {
       peak[0] = peak[1] = peak[2] = 0;
+      contactStartMs = now;
       if (tl) { tl->contactStartMs = now; tl->contactSamples = 0; }
     }
     if (pressed) {
@@ -152,6 +188,17 @@ struct ScTouchState {
       for (int z = 0; z < 3; z++) c.peak[z] = peak[z];
       c.samples = tl->contactSamples;
       tl->contactCount++;
+    }
+
+    // Self-heal (see heal()): a contact on all three pads that will not end,
+    // or the fourth short one in eight seconds.
+    const bool allPads = peak[0] >= OUTPUT_MID && peak[1] >= OUTPUT_MID && peak[2] >= OUTPUT_MID;
+    if (pressed && allPads && now - contactStartMs > SC_LATCH_MS) heal(now);
+    if (!pressed && rawPressed && allPads) {
+      allPadMs[allPadIdx] = now | 1;
+      allPadIdx = (allPadIdx + 1) % SC_STORM_CONTACTS;
+      const uint32_t oldest = allPadMs[allPadIdx];
+      if (oldest && now - oldest < SC_STORM_WINDOW_MS) heal(now);
     }
     rawPressed = pressed;
 
@@ -168,6 +215,8 @@ struct ScTouchState {
     // consumed here so it doesn't also fire a tap reaction.
     if (headBtn.wasClicked()) {
       if (holdFired) { holdFired = false; return 0; }
+      // The chip was just started (boot, a rail switch, a self-heal): not a tap.
+      if ((int32_t)(scTouchQuietUntilMs - now) > 0) { if (tl) tl->rejected++; return 0; }
       // Require a FULL-strength hit (level 3). A real finger easily reaches it;
       // stray capacitive noise (e.g. a ceiling fan) only nudges a pad to level
       // 1, so it's rejected. Middle pad is ignored.
