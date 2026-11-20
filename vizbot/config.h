@@ -73,6 +73,19 @@
   typedef DisplayProxy GfxDevice;
 #endif
 
+// Background styles: 0=black 1=gradient 2=breathing 3=starfield 4=ambient.
+// 5 = the experimental Kaleido scene (kaleido_scene.h), only in builds with
+// -DKALEIDO_ENABLED ([env:lcd-169-kaleido]). Other builds never accept it.
+// BG_STYLE_IS_SCENE: a moving picture fills the screen behind the face, so the
+// face gets its dark outline and party mode may run on top of it.
+#ifdef KALEIDO_ENABLED
+  #define BG_STYLE_MAX 5
+  #define BG_STYLE_IS_SCENE(s) ((s) == 4 || (s) == 5)
+#else
+  #define BG_STYLE_MAX 4
+  #define BG_STYLE_IS_SCENE(s) ((s) == 4)
+#endif
+
 // Manual override: uncomment to enable both displays (if hardware supports)
 // #define DISPLAY_DUAL
 

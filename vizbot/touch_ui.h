@@ -382,18 +382,34 @@ static void uiIcon(UiIcon id, int16_t x, int16_t y, int16_t size, uint16_t color
 }
 
 // ---- Scene model: 0 = Black, 1..16 = ambient effect behind the face -------
+#ifdef KALEIDO_ENABLED
+// Experimental: one more scene after the ambient effects (kaleido_scene.h)
+#define UI_SCENE_KALEIDO (NUM_AMBIENT_EFFECTS + 1)
+#define UI_NUM_SCENES (NUM_AMBIENT_EFFECTS + 2)
+#else
 #define UI_NUM_SCENES (NUM_AMBIENT_EFFECTS + 1)
+#endif
 
 static uint8_t uiSceneIndex() {
+  #ifdef KALEIDO_ENABLED
+  if (getBotBackgroundStyle() == BG_STYLE_KALEIDO) return UI_SCENE_KALEIDO;
+  #endif
   return getBotBackgroundStyle() == 4 ? (uint8_t)(effectIndex % NUM_AMBIENT_EFFECTS) + 1 : 0;
 }
 static const char* uiSceneName(uint8_t i) {
+  #ifdef KALEIDO_ENABLED
+  if (i == UI_SCENE_KALEIDO) return "Kaleido HD";
+  #endif
   return i == 0 ? "Black" : ambientEffectNames[(i - 1) % NUM_AMBIENT_EFFECTS];
 }
 static void uiSetScene(uint8_t i) {
   i %= UI_NUM_SCENES;
   if (i == 0) {
     setBotBackgroundStyle(0);
+  #ifdef KALEIDO_ENABLED
+  } else if (i == UI_SCENE_KALEIDO) {
+    setBotBackgroundStyle(BG_STYLE_KALEIDO);
+  #endif
   } else {
     setBotBackgroundStyle(4);
     effectIndex = i - 1;
@@ -1446,7 +1462,7 @@ static void uiRowAction(uint8_t i, int16_t x) {
     case RK_PARTY:
       partyMode = !partyMode;
       // Party mode only shows on the ambient scene, so turning it on from Black switches to it
-      if (partyMode && botBackgroundStyle != 4) setBotBackgroundStyle(4);
+      if (partyMode && !BG_STYLE_IS_SCENE(botBackgroundStyle)) setBotBackgroundStyle(4);
       markSettingsDirty();
       uiToast(partyMode ? "Party on" : "Party off", UI_C_LOOK);
       break;

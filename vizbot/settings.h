@@ -81,7 +81,7 @@ void loadSettings() {
   paletteIndex       = prefs.getUChar("palette",  paletteIndex);
   autoCycle          = prefs.getBool ("autoCyc",  autoCycle);
   botBackgroundStyle = prefs.getUChar("bgStyle",  botBackgroundStyle);
-  if (botBackgroundStyle > 4) botBackgroundStyle = 0;  // clamp stale NVS values
+  if (botBackgroundStyle > BG_STYLE_MAX) botBackgroundStyle = 0;  // clamp stale NVS values
   partyMode          = prefs.getBool ("party",    partyMode);
   partySize          = prefs.getUChar("pSize",    partySize);
   if (partySize > 2) partySize = 1;

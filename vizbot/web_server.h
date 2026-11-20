@@ -754,6 +754,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           partyOn = state.party.on;
           partySizeCur = 'sml'.indexOf(state.party.size);
         }
+        if (state.kaleido && !botBgStyles.some(s => s.v === 5)) {
+          botBgStyles.push({n:"Kaleido HD",v:5});   // only firmware built with the Kaleido scene reports it
+        }
         if (state.audioFx !== undefined) {
           audioFxOn = state.audioFx;
           document.getElementById('audioFxToggle').className = 'tog ' + (audioFxOn ? 'on' : '');
@@ -1344,6 +1347,9 @@ void handleState() {
                 ",\"wledEmoji\":" + getWledEmojiJson() +
                 ",\"infoActive\":" + (infoMode.active ? "true" : "false") +
                 ",\"loop\":" + loopStatsJson() +                  // real fps, loop work and panel push µs since the last read
+                #ifdef KALEIDO_ENABLED
+                ",\"kaleido\":" + kaleidoSceneJson() +          // experimental Kaleido scene: render µs, textures per second
+                #endif
                 ",\"faceRender\":" + botFaceRenderStatsJson() +   // µs per face render since the last read
                 ",\"party\":{\"on\":" + (partyMode ? "true" : "false") +
                   ",\"size\":\"" + String("sml"[partySize % 3]) + "\"" +
@@ -1532,7 +1538,7 @@ void handleBotBackground() {
     cmdSetFaceColor(colors[idx]);
   }
   if (server.hasArg("style")) {
-    uint8_t style = constrain(server.arg("style").toInt(), 0, 4);
+    uint8_t style = constrain(server.arg("style").toInt(), 0, BG_STYLE_MAX);
     cmdSetBgStyle(style);
   }
   server.send(200, "text/plain", "OK");
