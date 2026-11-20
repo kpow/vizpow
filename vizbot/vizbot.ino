@@ -403,15 +403,17 @@ void setup() {
   cfg.internal_mic = false;
   #endif
   #ifdef BOARD_HAS_STACKCHAN_BASE
-  // Leave the CoreS3's 5V output (BUS_OUT_EN + boost) off. With it on, USB never
-  // reaches the AXP2101 on the stackchan base, so the battery never charges and
-  // drains ~0.5 A until the bot crash-loops. The base doesn't use that 5V: its
-  // chips run on 3V3 and the servo rail boosts off the battery.
+  // Start with the CoreS3's 5V output (BUS_OUT_EN + boost) off. scBatteryCareBegin()
+  // switches it on just below, because the base's LED ring is powered from it,
+  // unless this unit is saved as (or found to be) one where that output stops
+  // USB reaching the AXP2101: there the battery never charges and drains until
+  // the bot crash-loops. See "Battery care" in stackchan_base.h.
   cfg.output_power = false;
   #endif
   M5.begin(cfg);
   #ifdef BOARD_HAS_STACKCHAN_BASE
   plogCaptureBoot();   // why it last switched off, before anything else touches the power chip
+  scBatteryCareBegin();   // charge to 4.1 V at 300 mA; 5 V output on unless it blocks USB
   #endif
   #ifdef BOARD_HAS_FACES_BASE
   M5.Speaker.end();
@@ -622,6 +624,7 @@ void loop() {
   // detector open, and a rail cycle mid-reply is jarring.
   if (!voiceTurn) scServoWatchdogTick();
   plogTick();   // power log: battery lows and a row every 15 s (power_log.h)
+  scBatteryCareTick();   // rest the servos, then switch off, as the battery runs down
 
   // Idle head drift — suppressed during chill mode and voice turns
   if (!scTouch_state.chillMode && !voiceTurn && !partyBlob.code) {   // code mode moves the head itself

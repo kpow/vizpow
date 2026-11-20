@@ -1412,6 +1412,7 @@ void handleState() {
                   (sysStatus.scServoXReady ? ",\"servoXAngle\":" + String(scReadServoPos(SC_SERVO_X_ID)) : "") +
                   (sysStatus.scServoYReady ? ",\"servoYAngle\":" + String(scReadServoPos(SC_SERVO_Y_ID)) : "") +
                   ",\"servoReboots\":" + String(scServoReboots) +
+                  ",\"servosResting\":" + String(scServosResting ? "true" : "false") +
                   (sysStatus.scBatteryMonReady ? ",\"voltage\":" + String(scGetBatteryVoltage(), 2) +
                                                   ",\"current\":" + String(scGetBatteryCurrent(), 3) : "") +
                   ",\"chill\":" + (scTouch_state.chillMode ? "true" : "false") +
@@ -2782,11 +2783,18 @@ void handleDebugPower() {
   if (!i2cAcquire(200)) { server.send(503, "text/plain", "I2C busy"); return; }
   // ?ext=0|1 switches the CoreS3 5V bus (BUS_OUT_EN + boost) before reading, to
   // test whether output mode is what keeps USB from reaching the AXP2101.
+  // Add &save=1 to keep the choice for this unit across boots (stackchan_base.h).
   if (server.hasArg("ext")) {
     M5.Power.setExtOutput(server.arg("ext") == "1");
     delay(500);
     d["ext"] = server.arg("ext") == "1";
+    #ifdef BOARD_HAS_STACKCHAN_BASE
+    if (server.arg("save") == "1") { sc5vSave(server.arg("ext") == "1"); d["saved"] = true; }
+    #endif
   }
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  d["ext5vWanted"] = sc5vWanted;
+  #endif
   d["charging"] = M5.Power.isCharging() == m5::Power_Class::is_charging;
   d["batteryMv"] = M5.Power.getBatteryVoltage();
   d["batteryPct"] = M5.Power.getBatteryLevel();
