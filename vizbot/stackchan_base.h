@@ -97,11 +97,68 @@ inline void scSi12tReadRegs(uint8_t* out, bool* ok) {
   }
 }
 
+// ---- Head touch chip start --------------------------------------------------
+// BSP's TouchSensor.begin() lets the chip out of its reset first and writes the
+// settings afterwards. A chip that has just been powered still holds its
+// power-on settings at that reset, and it then reports touches nobody made, on
+// all pads at once, for the whole run (seen in /debug/touchraw: 71 contacts in
+// five minutes, hands off). A chip that kept its power across an ESP restart
+// already holds the settings when the reset comes, and it stays quiet. So the
+// settings go in first, then the reset, which is what the quiet case does.
+// It is done again after a supply rail is switched: BSP's own notes say that
+// skews the chip's idle reference.
+#define SC_TOUCH_QUIET_MS 1500                       // no taps this long after a chip start
+static uint32_t scTouchStarts = 0;                   // chip starts this run
+static uint32_t scTouchStartFails = 0;               // ...of which a write was refused
+static volatile uint32_t scTouchQuietUntilMs = 0;    // contacts before this are not taps
+static volatile uint32_t scTouchRestartAtMs = 0;     // 0 = none asked for
+
+inline bool scSi12tWrite(uint8_t reg, uint8_t value) {
+  return M5.In_I2C.writeRegister8(0x68, reg, value, 100000);
+}
+
+// Caller holds the I2C lock. The values are the ones BSP sets.
+inline bool scTouchChipStartLocked() {
+  bool ok = true;
+  for (uint8_t r = 0x02; r <= 0x06; r++) ok &= scSi12tWrite(r, 0x33);   // sensitivity
+  ok &= scSi12tWrite(0x08, 0x22);                                        // response time
+  for (uint8_t r = 0x0A; r <= 0x0F; r++) ok &= scSi12tWrite(r, 0x00);   // every channel on and calibrating
+  ok &= scSi12tWrite(0x09, 0x0F);                                        // reset...
+  ok &= scSi12tWrite(0x09, 0x07);                                        // ...and run: the reference is taken now
+  scTouchStarts++;
+  if (!ok) scTouchStartFails++;
+  scTouchQuietUntilMs = millis() + SC_TOUCH_QUIET_MS;
+  return ok;
+}
+
+// From any task: the loop task starts the chip again once inMs has passed
+// (ScTouchState::update). Used after a rail is switched, when it has settled.
+inline void scTouchAskRestart(uint16_t inMs) {
+  scTouchRestartAtMs = (millis() + inMs) | 1;   // never 0, which means "none"
+}
+
+// Debug only (/debug/touchraw?cold=1): put the power-on settings back, then run
+// BSP's order, to bring the fault on without waiting for a cold start.
+inline void scTouchChipColdBspLocked() {
+  for (uint8_t r = 0x02; r <= 0x07; r++) scSi12tWrite(r, 0xBB);
+  scSi12tWrite(0x08, 0x22);
+  scSi12tWrite(0x09, 0x05);
+  scSi12tWrite(0x0A, 0xFE); scSi12tWrite(0x0B, 0x3F);
+  scSi12tWrite(0x0C, 0xFE); scSi12tWrite(0x0D, 0x3F);
+  scSi12tWrite(0x0E, 0x00); scSi12tWrite(0x0F, 0x00);
+  delay(50);
+  for (uint8_t r = 0x0A; r <= 0x0F; r++) scSi12tWrite(r, 0x00);
+  scSi12tWrite(0x09, 0x0F);
+  scSi12tWrite(0x09, 0x07);
+  scSi12tWrite(0x08, 0x22);
+  for (uint8_t r = 0x02; r <= 0x06; r++) scSi12tWrite(r, 0x33);
+}
+
 class VizStackChan : public m5::M5StackChan_Class {
 public:
   void beginHardware() {
     scSi12tReadRegs(scSi12tBootRegs, scSi12tBootOk);
-    TouchSensor.begin();
+    TouchSensor.begin();   // makes BSP's driver object; the chip is started properly below
     io_expander_init();
     // Must precede servo_init(): that is where BSP reads these.
     scSeedServoZero("zero_pos_1", SC_SERVO_X_ZERO_POS);
@@ -115,6 +172,10 @@ public:
     delay(500);   // servos need time to boot after power-on
     servo_init();
     ina226_init();
+    // Last, with the servo rail up: settings first, then the reset (see above).
+    // Once more shortly after the loop starts, when WiFi and the LEDs are up too.
+    scTouchChipStartLocked();   // boot: no other task is on the bus yet
+    scTouchAskRestart(1500);
   }
 };
 
@@ -334,6 +395,7 @@ inline bool scRecoverServos() {
     scChan.setServoPowerEnabled(true);
   }
   delay(500);
+  scTouchAskRestart(1500);   // the rail was switched: fresh touch reference
 
   // A still head beats a half-done glide: see scWaitServosAnswer().
   if (!scWaitServosAnswer(2500)) {
@@ -504,6 +566,7 @@ inline bool sc5vSwitch(bool on) {
   ScI2cLock lock(SC_POWER_LOCK_MS);
   if (!lock.held) return false;
   M5.Power.setExtOutput(on);
+  scTouchAskRestart(1500);   // a rail was switched: fresh touch reference
   return true;
 }
 
@@ -572,6 +635,7 @@ inline bool scRestServos() {
     scChan.setServoPowerEnabled(false);
     M5.Power.setExtOutput(false);   // the LED ring's supply
   }
+  scTouchAskRestart(1500);   // rails were switched: fresh touch reference
   scServosResting = true;
   scRestSinceMs = millis();
   return true;
@@ -586,6 +650,7 @@ inline bool scWakeServos() {
     scChan.setServoPowerEnabled(true);
     if (sc5vWanted) M5.Power.setExtOutput(true);
   }
+  scTouchAskRestart(1500);   // rails were switched: fresh touch reference
   delay(500);   // servos need time to boot after power-on
   const bool live = scWaitServosAnswer(2500);
   scServosResting = false;

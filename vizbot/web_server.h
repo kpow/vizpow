@@ -2716,7 +2716,10 @@ void handleDebugTasks() {
 //   ?clear=1     empties the log
 //   ?recal=1     makes the chip recalibrate its reference
 //   ?sleep=0|1   switches the chip's slow-scan mode, until the next restart
-// The last two are for finding why the pads latch.
+//   ?start=1     starts the chip again the way boot does (settings, then reset)
+//   ?cold=1      brings the fault on: power-on settings, then BSP's start order
+// "chipStarts" counts chip starts this run, "heals" the ones the gesture code
+// asked for because it saw touches nobody made (stackchan_touch.h).
 void handleDebugTouchRaw() {
   ScTouchLog* const logp = scTouchLogPtr;   // made by the loop task on its first read
   if (!logp) { server.send(503, "application/json", "{\"error\":\"no pad log (not started yet, or no PSRAM)\"}"); return; }
@@ -2731,6 +2734,8 @@ void handleDebugTouchRaw() {
       scChan.TouchSensor.setSleep(server.arg("sleep") == "1");
       did += server.arg("sleep") == "1" ? "sleep=1 " : "sleep=0 ";
     }
+    if (server.hasArg("cold"))  { scTouchChipColdBspLocked(); did += "cold "; }
+    if (server.hasArg("start")) { scTouchChipStartLocked(); did += "start "; }
     scSi12tReadRegs(regs, regsOk);
   }
   if (server.hasArg("clear")) { new (logp) ScTouchLog(); did += "clear "; }   // in place: it is 1.7 KB
@@ -2748,6 +2753,8 @@ void handleDebugTouchRaw() {
   String j;
   j.reserve(6000);
   j += "{\"did\":\"" + did + "\",\"regs02to12\":\"" + hexRow(regs, regsOk) + "\",\"bootRegs02to12\":\"" + hexRow(scSi12tBootRegs, scSi12tBootOk) + "\",";
+  j += "\"chipStarts\":" + String(scTouchStarts) + ",\"startFails\":" + String(scTouchStartFails) +
+       ",\"heals\":" + String(scTouch_state.heals) + ",";
   j += "\"upMs\":" + String(millis()) + ",\"reads\":" + String(L.reads) + ",\"pressedReads\":" + String(L.pressedReads);
   j += ",\"now\":[" + String(L.now[0]) + "," + String(L.now[1]) + "," + String(L.now[2]) + "]";
   static const char* zn[3] = { "front", "middle", "back" };
@@ -2854,6 +2861,9 @@ void handleDebugPower() {
   // Add &save=1 to keep the choice for this unit across boots (stackchan_base.h).
   if (server.hasArg("ext")) {
     M5.Power.setExtOutput(server.arg("ext") == "1");
+    #ifdef BOARD_HAS_STACKCHAN_BASE
+    scTouchAskRestart(1500);   // a rail was switched: fresh touch reference
+    #endif
     delay(500);
     d["ext"] = server.arg("ext") == "1";
     #ifdef BOARD_HAS_STACKCHAN_BASE
