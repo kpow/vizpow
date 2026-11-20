@@ -74,13 +74,17 @@
 #endif
 
 // Background styles: 0=black 1=gradient 2=breathing 3=starfield 4=ambient.
-// 5 = the experimental Kaleido scene (kaleido_scene.h), only in builds with
-// -DKALEIDO_ENABLED ([env:lcd-169-kaleido]). Other builds never accept it.
+// 5 = Kaleido HD (kaleido_scene.h), only in builds with -DKALEIDO_ENABLED: the
+// 1.69 ([env:lcd-169]). Other builds never accept it.
 // BG_STYLE_IS_SCENE: a moving picture fills the screen behind the face, so the
 // face gets its dark outline and party mode may run on top of it.
 #ifdef KALEIDO_ENABLED
-  #define BG_STYLE_MAX 5
-  #define BG_STYLE_IS_SCENE(s) ((s) == 4 || (s) == 5)
+  #ifndef BOARD_ESP32S3_LCD_169
+    #error "Kaleido HD is a 1.69 feature: it is sized and tested for that board's PSRAM, panel and pendant use only"
+  #endif
+  #define BG_STYLE_KALEIDO 5
+  #define BG_STYLE_MAX BG_STYLE_KALEIDO
+  #define BG_STYLE_IS_SCENE(s) ((s) == 4 || (s) == BG_STYLE_KALEIDO)
 #else
   #define BG_STYLE_MAX 4
   #define BG_STYLE_IS_SCENE(s) ((s) == 4)

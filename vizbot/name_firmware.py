@@ -9,14 +9,6 @@ def post_build(source, target, env):
 
     pio_env = env["PIOENV"]
 
-    # Experimental Kaleido envs (lcd-169-kaleido, stackchan-kaleido, ...) build
-    # the same board with -DKALEIDO_ENABLED and their own version string.
-    if "-kaleido" in pio_env:
-        m = re.search(r'#define\s+FIRMWARE_VERSION_KALEIDO\s+"([^"]+)"', cfg)
-        if m:
-            version = m.group(1)
-        pio_env = pio_env.split("-kaleido")[0]
-
     # Map PIO env name → BOARD_TYPE string (must match config.h #define BOARD_TYPE).
     # The OTA handler checks that the uploaded filename contains BOARD_TYPE,
     # so the build output must use BOARD_TYPE (not the PIO env name).

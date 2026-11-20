@@ -524,8 +524,14 @@ bool cloudOtaPowerOk() {
 void cloudTask(void* param) {
   for (;;) {
     if (wifiEnabled && !otaUploadActive()) {   // ota_update.h: no TLS during a firmware upload
+      #ifdef KALEIDO_ENABLED
+      ksCloudStepMs = millis() | 1;      // kaleido_scene.h eases off while a step does real work
+      #endif
       pollCloudSync();                   // Cloud registration + sync (TLS)
       pollScheduledCommands();           // Execute scheduled commands at their target time
+      #ifdef KALEIDO_ENABLED
+      ksCloudStepMs = 0;
+      #endif
     }
     #ifdef CLOUD_OTA_ENABLED
     otaRollbackIfUnconfirmed();          // ota_update.h: a cloud update that never synced goes back

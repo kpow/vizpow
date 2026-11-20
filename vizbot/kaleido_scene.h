@@ -10,15 +10,19 @@
 //     through the memory owner (mem.h, tag "kaleido") and lands in PSRAM
 //     (about 1 MB while it shows). The two tasks are made on first use and
 //     then kept, parked: their stacks are PSRAM too, so the only internal RAM
-//     Kaleido ever holds is the two task control blocks (under 1 KB).
+//     Kaleido ever holds is its two static task control blocks (under 1 KB).
 //   - All drawing happens on core 0 in two tasks at priority 1, the same as
 //     wifi_srv, so it keeps its share of the core (the WiFi stack itself is far
 //     above). Idle priority was tried first: the idle task sleeps a whole tick
 //     whenever its turn comes, which left Kaleido 8 frames a second.
-//   - It gives way. While a firmware upload runs, an HTTPS connection is open
-//     (cloud sync and update, voice) or a voice turn is on, it draws nothing and
-//     the loop keeps showing the last picture. The cloud task runs at idle
-//     priority, below Kaleido, so without this a sync would barely move.
+//   - It gives way. The cloud task runs at idle priority, below Kaleido, so
+//     without this a sync would barely move:
+//       firmware upload or update: it draws nothing; the loop keeps the last
+//         picture.
+//       HTTPS open, or a cloud step running longer than KS_CLOUD_GRACE_MS: no
+//         new source textures, and drawing takes at most a sixth of core 0
+//         (the picture keeps moving, more slowly).
+//     The 1.69 has no voice and no album art, so nothing else needs covering.
 //   - The render loop (core 1) never draws and never waits: each frame it
 //     enlarges the newest finished picture into the canvas. If core 0 is
 //     busy, Kaleido's own frame rate drops and vizBot's does not.
@@ -51,7 +55,6 @@ extern "C" {
 #include "ko_organic.h"
 }
 
-#define BG_STYLE_KALEIDO   5
 // Drawn size; shown at 1.5x (every 2 drawn pixels become 3 on the panel).
 // Each side is two-thirds of the panel rounded up to an even number, so the
 // enlarged picture can be a little bigger than the panel; the extra is cropped
@@ -76,9 +79,15 @@ static_assert(KS_OUT_W >= LCD_WIDTH && KS_OUT_H >= LCD_HEIGHT, "Kaleido picture 
 #define KS_DRAW_STACK      3072
 #define KS_FADE_MIN_US     60000u  // cross-fade length follows the texture rate
 #define KS_FADE_MAX_US     1000000u   // a slow texture (1 a second) still fades the whole way
-#define KS_IDLE_STOP_MS    3000    // no frame taken for this long: free everything
+#define KS_IDLE_PAUSE_MS   250     // no frame taken for this long: make no textures
+#define KS_IDLE_STOP_MS    30000   // no frame taken for this long: free everything (a page or
+                                   // the pendant's info screens come and go without a rebuild)
 #define KS_RETRY_MS        5000    // wait before retrying a failed start
-#define KS_BUSY_POLL_MS    50      // while giving way: how often to look again
+#define KS_BUSY_POLL_MS    50      // while stopped for an upload: how often to look again
+#define KS_EASE_RATIO      5       // while easing: sleep this many times the last draw.
+                                   // Measured on a 1.69 cloud sync: 3.45 s without Kaleido,
+                                   // 5.1 s at 2, 4.05 s at 5 (Kaleido ~14 fps meanwhile)
+#define KS_CLOUD_GRACE_MS  100     // a cloud step longer than this is real work, not a poll
 #define KS_SPREAD_MASK     0x07E0F81Fu
 #define KS_TEXELS          ((size_t)KO_SRC_N * KO_SRC_N)
 #define KS_FRAME_BYTES     ((size_t)KS_W * KS_H * 2)
@@ -90,7 +99,8 @@ static_assert(KS_OUT_W >= LCD_WIDTH && KS_OUT_H >= LCD_HEIGHT, "Kaleido picture 
 static float ksVivid = 1.35f;      // saturation multiplier on top of the look's own
 static float ksBlack = 0.08f;      // input level that becomes black
 static float ksGamma = 1.25f;      // >1 darkens mid-tones
-static float ksSharp = 0.75f;      // edge boost on the source image; 0 = off
+static float ksSharp = 0.75f;
+static uint8_t ksEase = KS_EASE_RATIO;      // edge boost on the source image; 0 = off
 
 enum : uint8_t { KS_OFF = 0, KS_STARTING, KS_RUNNING, KS_STOPPING };
 
@@ -133,6 +143,7 @@ struct KaleidoScene {
   uint32_t fadeStartUs, fadeUs, lastTexUs;
 
   uint32_t failedMs;
+  volatile bool stopReq;           // loop -> worker: another scene is showing
   volatile uint8_t busy;           // KS_BUSY_*: why it is giving way right now
 
   // Stats for GET /state
@@ -149,23 +160,23 @@ extern "C" void ks_mem_free(void *ptr) { memFree(MEM_KALEIDO, ptr); }
 
 // ---- Giving way -----------------------------------------------------------
 // Kaleido runs on core 0 above the cloud task (idle priority) and shares the
-// PSRAM bus with the TLS buffers. While the bot does something that matters
-// more, it stops drawing; the loop keeps showing the last picture.
-extern volatile uint32_t otaUploadStartMs;   // ota_update.h
-extern volatile uint8_t voicePhase;          // bot_mode.h: 1 listening, 2 thinking, 3 speaking
-enum : uint8_t { KS_BUSY_NONE = 0, KS_BUSY_UPLOAD, KS_BUSY_HTTPS, KS_BUSY_VOICE };
+// PSRAM bus with the TLS buffers (see the notes at the top).
+inline bool otaUploadActive();               // ota_update.h
+// Set by the cloud task (task_manager.h) around each cloud step; 0 between.
+volatile uint32_t ksCloudStepMs = 0;
+// Ordered by how far it gives way: below KS_BUSY_UPLOAD it eases, at it stops.
+enum : uint8_t { KS_BUSY_NONE = 0, KS_BUSY_CLOUD, KS_BUSY_HTTPS, KS_BUSY_UPLOAD };
 #ifdef KALEIDO_SERIAL_STATS
-static volatile bool ksFakeBusy = false;     // dev key 'h': give way as if HTTPS were open
+static volatile uint8_t ksFakeBusy = KS_BUSY_NONE;   // dev keys 'h' (HTTPS) and 'u' (upload)
 #endif
 static uint8_t ksBusyReason() {
 #ifdef KALEIDO_SERIAL_STATS
-  if (ksFakeBusy) return KS_BUSY_HTTPS;
+  if (ksFakeBusy) return ksFakeBusy;
 #endif
-  const uint32_t up = otaUploadStartMs;
-  if ((up && millis() - up < 120000) || Update.isRunning()) return KS_BUSY_UPLOAD;
+  if (otaUploadActive() || Update.isRunning()) return KS_BUSY_UPLOAD;
   if (memHeld(MEM_TLS) > 0) return KS_BUSY_HTTPS;
-  const uint8_t vp = voicePhase;
-  if (vp >= 1 && vp <= 3) return KS_BUSY_VOICE;
+  const uint32_t step = ksCloudStepMs;
+  if (step && millis() - step > KS_CLOUD_GRACE_MS) return KS_BUSY_CLOUD;
   return KS_BUSY_NONE;
 }
 
@@ -353,18 +364,24 @@ static void ksDrawTask(void *) {
     }
     const uint8_t busy = ksBusyReason();
     ks.busy = busy;
-    if (busy) {                                // giving way: the loop keeps the last picture
+    if (busy >= KS_BUSY_UPLOAD) {              // stopped: the loop keeps the last picture
       vTaskDelay(pdMS_TO_TICKS(KS_BUSY_POLL_MS));
       continue;
     }
     // Drawing goes before source textures: the worker drops to idle priority
     // for the length of a frame. Sharing the core evenly made every frame
     // miss its loop frame (15 fps); this way both fit (29 fps, 2 textures/s).
+    const uint32_t t0 = micros();
     vTaskPrioritySet(ks.workerTask, tskIDLE_PRIORITY);
     ksDrawFrame();
     vTaskPrioritySet(ks.workerTask, KS_TASK_PRIORITY);
     ks.frameReady = true;
-    vTaskDelay(1);                             // a turn for the other core 0 tasks every frame
+    if (busy) {                                // easing: at most 1/(1+ksEase) of core 0
+      const uint32_t ms = (micros() - t0) * ksEase / 1000;
+      vTaskDelay(ms > 0 ? pdMS_TO_TICKS(ms) : 1);
+    } else {
+      vTaskDelay(1);                           // a turn for the other core 0 tasks every frame
+    }
   }
 }
 
@@ -378,13 +395,13 @@ static bool ksAllocate() {
   ks.texBack = (uint32_t *)ksPsram(KS_TEXELS * 4);
   ks.tex565 = (uint16_t *)ksPsram(KS_TEXELS * 2);
   ks.rgb = (uint8_t *)ksPsram(KS_TEXELS * 3);
-  ks.rgbSmall = (uint8_t *)ksPsram((size_t)KS_ORGANIC_N * KS_ORGANIC_N * 3);
+  if (KS_ORGANIC_N != KO_SRC_N) ks.rgbSmall = (uint8_t *)ksPsram((size_t)KS_ORGANIC_N * KS_ORGANIC_N * 3);
   ks.rgbSharp = (uint8_t *)ksPsram(KS_TEXELS * 3);
   ks.frame[0] = (uint16_t *)ksPsram(KS_FRAME_BYTES);
   ks.frame[1] = (uint16_t *)ksPsram(KS_FRAME_BYTES);
   ks.organic = ko_organic_create(KS_ORGANIC_N);
   return ks.engine[0] && ks.engine[1] && ks.texShow && ks.texPrev && ks.texNext && ks.texBack &&
-         ks.tex565 && ks.rgb && ks.rgbSmall && ks.rgbSharp && ks.frame[0] && ks.frame[1] && ks.organic;
+         ks.tex565 && ks.rgb && (ks.rgbSmall || KS_ORGANIC_N == KO_SRC_N) && ks.rgbSharp && ks.frame[0] && ks.frame[1] && ks.organic;
 }
 
 static void ksFree() {
@@ -440,10 +457,11 @@ static void ksRun() {
   xTaskNotifyGive(ks.drawTask);
 
   for (;;) {
-    // Nobody is taking frames (another scene, a full-screen page, another mode): let go.
-    if (ks.state == KS_RUNNING && millis() - ks.lastFrameMs > KS_IDLE_STOP_MS) {
+    // Asked to stop, or nobody has taken a frame for a while (a full-screen
+    // page, another mode): let go. Only this task moves RUNNING -> STOPPING.
+    if (ks.state == KS_RUNNING && (ks.stopReq || millis() - ks.lastFrameMs > KS_IDLE_STOP_MS)) {
       xSemaphoreTake(ks.lock, portMAX_DELAY);
-      if (millis() - ks.lastFrameMs > KS_IDLE_STOP_MS) ks.state = KS_STOPPING;
+      ks.state = KS_STOPPING;
       xSemaphoreGive(ks.lock);
     }
     if (ks.state == KS_STOPPING) {
@@ -457,7 +475,8 @@ static void ksRun() {
       xSemaphoreGive(ks.lock);
       return;
     }
-    if (ksBusyReason()) {                      // giving way: no textures, no fold tables
+    // Giving way, or nobody is looking: no textures, no fold tables.
+    if (ksBusyReason() || millis() - ks.lastFrameMs > KS_IDLE_PAUSE_MS) {
       vTaskDelay(pdMS_TO_TICKS(KS_BUSY_POLL_MS));
       continue;
     }
@@ -487,23 +506,22 @@ static void ksWorkerTask(void *) {
 
 // First showing only: make both tasks, stacks in PSRAM (the framework allows
 // it: CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY). Neither task touches flash,
-// so a PSRAM stack is safe. The control blocks are small and stay internal.
+// so a PSRAM stack is safe.
+// FreeRTOS requires control blocks in internal RAM: a heap one could fall back
+// to PSRAM when internal RAM runs out, so they are static.
+static StaticTask_t ksWorkerTcb, ksDrawTcb;
 static bool ksCreateTasks() {
   StackType_t *ws = (StackType_t *)ksPsram(KS_WORKER_STACK);
   StackType_t *ds = (StackType_t *)ksPsram(KS_DRAW_STACK);
-  StaticTask_t *wt = (StaticTask_t *)memCalloc(MEM_KALEIDO, 1, sizeof(StaticTask_t), MEM_DEFAULT);
-  StaticTask_t *dt = (StaticTask_t *)memCalloc(MEM_KALEIDO, 1, sizeof(StaticTask_t), MEM_DEFAULT);
-  if (!ws || !ds || !wt || !dt) {
+  if (!ws || !ds) {
     ksRelease(ws);
     ksRelease(ds);
-    ksRelease(wt);
-    ksRelease(dt);
     return false;
   }
   ks.drawTask = xTaskCreateStaticPinnedToCore(ksDrawTask, "kaleido_draw", KS_DRAW_STACK, nullptr,
-                                              KS_TASK_PRIORITY, ds, dt, 0);
+                                              KS_TASK_PRIORITY, ds, &ksDrawTcb, 0);
   ks.workerTask = xTaskCreateStaticPinnedToCore(ksWorkerTask, "kaleido", KS_WORKER_STACK, nullptr,
-                                                KS_TASK_PRIORITY, ws, wt, 0);
+                                                KS_TASK_PRIORITY, ws, &ksWorkerTcb, 0);
   return ks.drawTask && ks.workerTask;
 }
 
@@ -565,6 +583,8 @@ inline bool kaleidoSceneRender(uint16_t *px, uint32_t nowMs) {
       return false;
     }
     ks.failedMs = 0;
+    ks.stopReq = false;
+    ks.lastFrameMs = nowMs;
     ks.lookReq = ks.lookIndex % KS_LOOKS;
     ks.state = KS_STARTING;
     xTaskNotifyGive(ks.workerTask);
@@ -597,7 +617,7 @@ inline bool kaleidoSceneRender(uint16_t *px, uint32_t nowMs) {
 
 // Another scene is showing: free everything (the worker does it, off the loop).
 inline void kaleidoSceneRelease() {
-  if (ks.state == KS_RUNNING) ks.state = KS_STOPPING;
+  if (ks.state != KS_OFF) ks.stopReq = true;   // the worker acts on it
 }
 
 // For GET /state. Reading starts a fresh window.
@@ -631,9 +651,13 @@ inline String kaleidoSceneJson() {
 // and heap figures every 5 s.
 //   k Kaleido   a ambient   b black   n next look   p party mode on/off
 //   v/V vivid -/+   c/C black level -/+   g/G gamma -/+   s/S sharpen -/+
-//   h  pretend the bot is busy (as during an HTTPS connection) on/off
+//   h  pretend HTTPS is open (Kaleido eases) on/off
+//   u  pretend a firmware upload runs (Kaleido stops) on/off
+//   e/E ease ratio -/+ (sleep after each frame while easing, in draw times)
+//   L  low power (pendant) mode on/off: saved, then the bot restarts
 void setBotBackgroundStyle(uint8_t style);
 uint8_t getBotBackgroundStyle();
+#include <Preferences.h>
 inline void kaleidoDevSerial() {
   static uint32_t lastMs = 0;
   while (Serial.available()) {
@@ -643,7 +667,18 @@ inline void kaleidoDevSerial() {
     else if (c == 'b') setBotBackgroundStyle(0);
     else if (c == 'n') ks.lookReq = (ks.lookIndex + 1) % KS_LOOKS;
     else if (c == 'p') partyMode = !partyMode;
-    else if (c == 'h') ksFakeBusy = !ksFakeBusy;
+    else if (c == 'e' && ksEase > 1) ksEase--;
+    else if (c == 'E' && ksEase < 20) ksEase++;
+    else if (c == 'h') ksFakeBusy = ksFakeBusy ? KS_BUSY_NONE : KS_BUSY_HTTPS;
+    else if (c == 'u') ksFakeBusy = ksFakeBusy ? KS_BUSY_NONE : KS_BUSY_UPLOAD;
+    else if (c == 'L') {
+      Preferences prefs;
+      if (prefs.begin("vizbot", false)) {
+        prefs.putBool("lowPwr", !prefs.getBool("lowPwr", false));
+        prefs.end();
+      }
+      ESP.restart();
+    }
     else if (c == 'v') ksVivid -= 0.1f;
     else if (c == 'V') ksVivid += 0.1f;
     else if (c == 'c') ksBlack -= 0.02f;
@@ -656,10 +691,22 @@ inline void kaleidoDevSerial() {
     if (ksBlack < 0.0f) ksBlack = 0.0f;
   }
   const uint32_t now = millis();
+  // Each HTTPS connection's length (cloud sync, cloud update), to compare
+  // syncs with Kaleido showing and without.
+  static uint32_t httpsStart = 0, httpsMinHeap = 0;
+  if (memHeld(MEM_TLS) > 0) {
+    if (!httpsStart) { httpsStart = now | 1; httpsMinHeap = UINT32_MAX; }
+    const uint32_t h = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if (h < httpsMinHeap) httpsMinHeap = h;
+  } else if (httpsStart) {
+    Serial.printf("KHTTPS ms=%u bg=%u kfps-state=%u busy=%u minHeap=%u\n", (unsigned)(now - httpsStart),
+                  (unsigned)getBotBackgroundStyle(), (unsigned)ks.state, (unsigned)ks.busy, (unsigned)httpsMinHeap);
+    httpsStart = 0;
+  }
   if (now - lastMs < 5000) return;
   lastMs = now;
-  Serial.printf("KSTAT bg=%u party=%u/%u tls=%u kmem=%u stackFree=%u/%u heap=%u heapMin=%u heapBlock=%u psramFree=%u vivid=%.2f black=%.2f gamma=%.2f sharp=%.2f loop=%s kaleido=%s\n",
-                (unsigned)getBotBackgroundStyle(), (unsigned)partyMode, (unsigned)partyBlob.active,
+  Serial.printf("KSTAT ease=%u mhz=%u bg=%u party=%u/%u tls=%u kmem=%u stackFree=%u/%u heap=%u heapMin=%u heapBlock=%u psramFree=%u vivid=%.2f black=%.2f gamma=%.2f sharp=%.2f loop=%s kaleido=%s\n",
+                (unsigned)ksEase, (unsigned)getCpuFrequencyMhz(), (unsigned)getBotBackgroundStyle(), (unsigned)partyMode, (unsigned)partyBlob.active,
                 (unsigned)memHeld(MEM_TLS), (unsigned)memHeld(MEM_KALEIDO),
                 (unsigned)(ks.state == KS_RUNNING ? uxTaskGetStackHighWaterMark(ks.workerTask) : 0),
                 (unsigned)(ks.state == KS_RUNNING ? uxTaskGetStackHighWaterMark(ks.drawTask) : 0),

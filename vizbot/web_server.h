@@ -755,7 +755,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
           partySizeCur = 'sml'.indexOf(state.party.size);
         }
         if (state.kaleido && !botBgStyles.some(s => s.v === 5)) {
-          botBgStyles.push({n:"Kaleido HD",v:5});   // only firmware built with the Kaleido scene reports it
+          botBgStyles.push({n:"Kaleido HD",v:5});   // BG_STYLE_KALEIDO; only firmware built with the scene reports it
         }
         if (state.audioFx !== undefined) {
           audioFxOn = state.audioFx;
@@ -2677,6 +2677,9 @@ void handleDebugTasks() {
   static const char* const names[] = {
     "wifi_srv", "cloud", "voice", "mic_task", "loopTask", "motion_task",
     "tiT", "async_udp", "arduino_events", "sys_evt", "esp_timer", "Tmr Svc",
+#ifdef KALEIDO_ENABLED
+    "kaleido", "kaleido_draw",
+#endif
   };
   JsonDocument d;
   d["upSec"] = millis() / 1000;
