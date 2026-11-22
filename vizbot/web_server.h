@@ -2353,17 +2353,17 @@ void handleScHeadRecenter() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-// POST /bot/servo/reinit — cycle VM_EN and re-ping (manual servo rail recovery)
+// POST /bot/servo/reinit — cycle VM_EN, re-ping, re-home (manual servo rail
+// recovery). MotionAO does it over ~4 s; this answers once it is queued.
 void handleScServoReinit() {
-  bool ok = scRecoverServos();
+  bool ok = scRecoverServos(true);
   String json = "{\"ok\":";
   json += ok ? "true" : "false";
-  json += ",\"servoX\":";
+  json += ",\"queued\":true,\"servoX\":";
   json += sysStatus.scServoXReady ? "true" : "false";
   json += ",\"servoY\":";
   json += sysStatus.scServoYReady ? "true" : "false";
   json += "}";
-  if (ok) scGoHome(500);
   server.send(200, "application/json", json);
 }
 
@@ -2729,6 +2729,42 @@ void handleDebugTasks() {
 //   ?cold=1      brings the fault on: power-on settings, then BSP's start order
 // "chipStarts" counts chip starts this run, "heals" the ones the gesture code
 // asked for because it saw touches nobody made (stackchan_touch.h).
+// GET /debug/timeline[?n=200] — the system timeline (ao_core.h): every event
+// published, oldest first, as [ms, signal, source, a, b], plus each active
+// object's counters. Read a failure against everything that was running.
+void handleDebugTimeline() {
+  if (!aoTimeline) { server.send(503, "application/json", "{\"error\":\"no timeline (no PSRAM)\"}"); return; }
+  uint32_t want = server.hasArg("n") ? (uint32_t)server.arg("n").toInt() : 200;
+  if (want > AO_TIMELINE_SIZE) want = AO_TIMELINE_SIZE;
+  // Copy under the lock: other tasks publish while we format.
+  static AoEvt* buf = nullptr;   // PSRAM: 8 KB of internal RAM is more than the camera can spare
+  if (!buf) buf = (AoEvt*)memAlloc(MEM_DIAG, sizeof(AoEvt) * AO_TIMELINE_SIZE, MEM_BIG_ONLY);
+  if (!buf) { server.send(503, "application/json", "{\"error\":\"no buffer\"}"); return; }
+  uint32_t total, n;
+  portENTER_CRITICAL(&aoMux);
+  total = aoTimeline->count;
+  n = total < want ? total : want;
+  for (uint32_t i = 0; i < n; i++) buf[i] = aoTimeline->ring[(total - n + i) % AO_TIMELINE_SIZE];
+  portEXIT_CRITICAL(&aoMux);
+  String j;
+  j.reserve(64 + n * 40);
+  j += "{\"upMs\":" + String(millis()) + ",\"total\":" + String(total) + ",\"published\":" + String(aoPublished) +
+       ",\"dropped\":" + String(aoDropped) + ",\"aos\":[";
+  for (uint8_t i = 0; i < aoCount; i++) {
+    const AoActive& a = *aoList[i];
+    j += String(i ? "," : "") + "{\"name\":\"" + a.name + "\",\"handled\":" + String(a.handled) +
+         ",\"dropped\":" + String(a.dropped) + ",\"maxUs\":" + String(a.maxUs) + "}";
+  }
+  j += "],\"events\":[";
+  for (uint32_t i = 0; i < n; i++) {
+    const AoEvt& e = buf[i];
+    j += String(i ? "," : "") + "[" + String(e.ms) + ",\"" + (e.sig < SIG_COUNT ? AO_SIG_NAMES[e.sig] : "?") + "\",\"" +
+         (e.src < SRC_COUNT ? AO_SRC_NAMES[e.src] : "?") + "\"," + String(e.a) + "," + String(e.b) + "]";
+  }
+  j += "]}";
+  server.send(200, "application/json", j);
+}
+
 void handleDebugTouchRaw() {
   ScTouchLog* const logp = scTouchLogPtr;   // made by the loop task on its first read
   if (!logp) { server.send(503, "application/json", "{\"error\":\"no pad log (not started yet, or no PSRAM)\"}"); return; }
@@ -2745,6 +2781,7 @@ void handleDebugTouchRaw() {
     }
     if (server.hasArg("cold"))  { scTouchChipColdBspLocked(); did += "cold "; }
     if (server.hasArg("start")) { scTouchChipStartLocked(); did += "start "; }
+    if (server.hasArg("ref"))   { aoPublish(SIG_TOUCH_RESTART, SRC_WEB); did += "ref "; }   // TouchAO: when still
     scSi12tReadRegs(regs, regsOk);
   }
   if (server.hasArg("clear")) { new (logp) ScTouchLog(); did += "clear "; }   // in place: it is 1.7 KB
@@ -2763,7 +2800,10 @@ void handleDebugTouchRaw() {
   j.reserve(6000);
   j += "{\"did\":\"" + did + "\",\"regs02to12\":\"" + hexRow(regs, regsOk) + "\",\"bootRegs02to12\":\"" + hexRow(scSi12tBootRegs, scSi12tBootOk) + "\",";
   j += "\"chipStarts\":" + String(scTouchStarts) + ",\"startFails\":" + String(scTouchStartFails) +
-       ",\"heals\":" + String(scTouch_state.heals) + ",";
+       ",\"heals\":" + String(scTouch_state.heals) + ",\"refs\":" + String(scTouch_state.refs) +
+       ",\"needRef\":" + String(scTouch_state.needRef ? "true" : "false") +
+       ",\"ignoredContacts\":" + String(scTouch_state.ignoredContacts) +
+       ",\"lockMisses\":" + String(scTouch_state.lockMisses) + ",";
   j += "\"upMs\":" + String(millis()) + ",\"reads\":" + String(L.reads) + ",\"pressedReads\":" + String(L.pressedReads);
   j += ",\"now\":[" + String(L.now[0]) + "," + String(L.now[1]) + "," + String(L.now[2]) + "]";
   static const char* zn[3] = { "front", "middle", "back" };
@@ -2779,15 +2819,21 @@ void handleDebugTouchRaw() {
   for (uint32_t i = 0; i < n; i++) {
     const ScTouchContact& c = L.contacts[(L.contactCount - n + i) % SC_TOUCH_LOG_CONTACTS];
     j += String(i ? "," : "") + "[" + String(c.ms) + "," + String(c.durMs) + "," + String(c.peak[0]) + "," +
-         String(c.peak[1]) + "," + String(c.peak[2]) + "," + String(c.samples) + "]";
+         String(c.peak[1]) + "," + String(c.peak[2]) + "," + String(c.samples) + "," + String(c.ctx) + "]";
   }
   j += "],\"traceCount\":" + String(L.traceCount) + ",\"trace\":[";
   n = L.traceCount < SC_TOUCH_LOG_TRACE ? L.traceCount : SC_TOUCH_LOG_TRACE;
   for (uint32_t i = 0; i < n; i++) {
     const ScTouchSample& t = L.trace[(L.traceCount - n + i) % SC_TOUCH_LOG_TRACE];
     j += String(i ? "," : "") + "[" + String(t.ms) + "," + String(t.level[0]) + "," + String(t.level[1]) + "," +
-         String(t.level[2]) + "]";
+         String(t.level[2]) + "," + String(t.ctx) + "]";
   }
+  // contacts [ms,dur,F,M,B,reads,ctx] and trace [ms,F,M,B,ctx]: ctx bit i = ctxNames[i];
+  // ctxReads[i] = reads with that bit on, against "reads", for how often it is on anyway.
+  j += "],\"ctxNames\":[";
+  for (int b = 0; b < SC_TOUCH_CTX_BITS; b++) j += String(b ? "," : "") + "\"" + SC_TOUCH_CTX_NAMES[b] + "\"";
+  j += "],\"ctxNow\":" + String(scTouchContext()) + ",\"ctxReads\":[";
+  for (int b = 0; b < SC_TOUCH_CTX_BITS; b++) j += String(b ? "," : "") + String(L.ctxReads[b]);
   j += "]}";
   server.send(200, "application/json", j);
 }
@@ -3187,6 +3233,7 @@ void setupWebServer() {
   #ifdef BOARD_HAS_STACKCHAN_BASE
   server.on("/debug/servo", handleDebugServo);
   server.on("/debug/touchraw", handleDebugTouchRaw);
+  server.on("/debug/timeline", handleDebugTimeline);
   server.on("/debug/powerlog", handleDebugPowerLog);
   #endif
 

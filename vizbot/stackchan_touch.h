@@ -44,8 +44,19 @@ enum ScTapZone : uint8_t { SC_ZONE_FRONT = 0, SC_ZONE_MIDDLE = 1, SC_ZONE_BACK =
 // DMA block has to spare. Without PSRAM there is no log.
 #define SC_TOUCH_LOG_CONTACTS 48
 #define SC_TOUCH_LOG_TRACE    128
-struct ScTouchContact { uint32_t ms; uint16_t durMs; uint8_t peak[3]; uint8_t samples; };
-struct ScTouchSample  { uint32_t ms; uint8_t level[3]; };
+// What the rest of vizBot was doing, as bits, stamped on every logged contact
+// and level change, so a burst of touches nobody made can be matched to the
+// subsystem that was busy at the time. scTouchContext() is defined in
+// vizbot.ino, after every subsystem's header. Names: SC_TOUCH_CTX_NAMES.
+#define SC_TOUCH_CTX_BITS 14
+static const char* const SC_TOUCH_CTX_NAMES[SC_TOUCH_CTX_BITS] = {
+  "listening", "thinking", "speaking", "wakeMic", "wakeSending", "headMoving",
+  "servosResting", "cloudSync", "camera", "party", "speaker", "upload", "chill", "ignored",
+};
+uint16_t scTouchContext();
+
+struct ScTouchContact { uint32_t ms; uint16_t durMs; uint8_t peak[3]; uint8_t samples; uint16_t ctx; };
+struct ScTouchSample  { uint32_t ms; uint8_t level[3]; uint16_t ctx; };
 struct ScTouchLog {
   uint32_t reads = 0, pressedReads = 0;
   uint32_t hist[3][4] = {};                 // [zone][level] read counts
@@ -57,6 +68,8 @@ struct ScTouchLog {
   uint32_t traceCount = 0;
   uint32_t contactStartMs = 0;
   uint8_t  contactSamples = 0;
+  uint16_t contactCtx = 0;                  // OR of the context over the contact
+  uint32_t ctxReads[SC_TOUCH_CTX_BITS] = {}; // reads with each bit set: how often it is on anyway
 };
 static ScTouchLog* scTouchLogPtr = nullptr;   // read by the web task; made by the loop
 
@@ -71,12 +84,32 @@ inline ScTouchLog* scTouchLogGet() {
   return scTouchLogPtr;
 }
 
+// ---- TouchAO -------------------------------------------------------------------
+// The head-touch active object (ao_core.h). It owns the Si12T's logic: reads it
+// every loop pass (SIG_TICK), turns contacts into taps and holds, and publishes
+// them (SIG_TOUCH_TAP / SIG_TOUCH_HOLD) instead of acting on them.
+//
+// What it fixes (docs/stackchan-interactions.md):
+//  - Disturbances. Servo moves, rail switches, LED flashes, the amp and the mic
+//    codec all shift the chip's supply. Whoever causes one publishes it; a
+//    contact that overlaps one (plus a settle margin) is logged but ignored.
+//  - The reference. A chip start makes the chip take its idle reference. Taken
+//    under load (servo homing at a cold boot, a nod after a phantom tap) it is
+//    wrong, and the chip storms until the next one. So a start is only ever
+//    requested here, and only run once the bot has been still for
+//    SC_TOUCH_STILL_MS; until then taps are muted and the idle drift is asked
+//    to hold the head (SIG_TOUCH_NEED_STILL).
+enum ScRefWhy : uint8_t { SC_REF_BOOT = 1, SC_REF_RAIL, SC_REF_STORM, SC_REF_LATCH, SC_REF_ASKED };
+#define SC_TOUCH_STILL_MS      2000   // no disturbance this long before a reference
+#define SC_TOUCH_ASK_STILL_MS  4000   // how long each "hold the head still" asks for
+#define SC_TOUCH_CTX_IGNORED   13     // contact log ctx bit: overlapped a disturbance
+
 struct ScTouchState {
   m5::Button_Class headBtn;
 
   // Peak intensity per normalized zone during the current/last contact.
   uint8_t peak[3] = { 0, 0, 0 };
-  bool    rawPressed = false;       // previous-frame raw pressed state (for peak reset)
+  bool    rawPressed = false;       // previous read's contact state
   uint8_t lastTapZone = SC_ZONE_MIDDLE;
 
   // 2s hold → chill. Detected via pressedFor() with a one-shot latch so the
@@ -84,36 +117,32 @@ struct ScTouchState {
   bool holdFired = false;
   static constexpr uint16_t SC_CHILL_HOLD_MS = 2000;
 
-  // Chill mode (quiet block, length = scChillMinutes) — owned here; read by the
-  // main loop's idle gate.
+  // Chill mode (quiet block, length = scChillMinutes): the loop's, not TouchAO's.
   bool chillMode = false;
   unsigned long chillEndMs = 0;
 
-  // Self-heal. Touches nobody made come on all three pads at once, in bursts
-  // or as one contact that never ends (see the chip start in stackchan_base.h).
-  // Four such contacts inside eight seconds, or one held for fifteen, and the
-  // chip is started again; nothing it reported around then counts as a tap.
-  // Patting the whole head that fast costs a real tap and 1.5 s of no touch.
+  // Storms. Touches nobody made come on all three pads at once, in bursts or
+  // as one contact that never ends. Four such undisturbed contacts inside
+  // eight seconds, or one held for fifteen, mean the reference is bad: ask for
+  // a new one (at most one per SC_HEAL_GAP_MS).
   static constexpr uint8_t  SC_STORM_CONTACTS  = 4;
   static constexpr uint16_t SC_STORM_WINDOW_MS = 8000;
   static constexpr uint16_t SC_LATCH_MS        = 15000;
-  static constexpr uint16_t SC_HEAL_GAP_MS     = 10000;   // at most one chip start per this
+  static constexpr uint16_t SC_HEAL_GAP_MS     = 10000;
   uint32_t contactStartMs = 0;
-  uint32_t allPadMs[SC_STORM_CONTACTS] = {};   // when the last all-pad contacts ended (0 = none)
+  bool     contactIgnored = false;               // the current contact overlapped a disturbance
+  bool     latchAsked = false;
+  uint32_t allPadMs[SC_STORM_CONTACTS] = {};    // when the last all-pad contacts ended (0 = none)
   uint8_t  allPadIdx = 0;
-  uint32_t lastHealMs = 0;
-  uint32_t heals = 0;                          // shown by /debug/touchraw
+  uint32_t heals = 0;                           // storms seen (shown by /debug/touchraw)
 
-  void heal(unsigned long now) {
-    scTouchQuietUntilMs = now + SC_TOUCH_QUIET_MS;   // no taps, chip start or not
-    if (heals && now - lastHealMs < SC_HEAL_GAP_MS) return;
-    lastHealMs = now;
-    heals++;
-    for (auto& t : allPadMs) t = 0;
-    ScI2cLock lock(100);
-    if (lock.held) scTouchChipStartLocked();
-    else scTouchAskRestart(200);
-  }
+  // Disturbances and the reference.
+  uint32_t ignoreUntilMs = 0;   // contacts before this are disturbances
+  bool     cameraOn = false;    // the camera holds the bus and its own supply: a window until it ends
+  bool     needRef = true;      // a chip power-up reference is never trusted
+  uint8_t  refWhy = SC_REF_BOOT;
+  uint32_t lastRefMs = 0, askedStillMs = 0;
+  uint32_t refs = 0, ignoredContacts = 0, lockMisses = 0;
 
   void init() {
     // Hold threshold parked well above any plausible tap so a lingering finger
@@ -128,115 +157,205 @@ struct ScTouchState {
     holdFired = false;
     chillMode = false;
     chillEndMs = 0;
+    needRef = true;
+    refWhy = SC_REF_BOOT;
+    ignoreUntilMs = millis() + SC_TOUCH_STILL_MS;   // the boot itself was a disturbance
   }
 
-  // Returns: 0=nothing, 1=tap (see lastTapZone), 3=hold → chill
-  uint8_t update() {
-    if (!sysStatus.scHeadTouchReady) return 0;
+  void disturb(uint32_t now, uint32_t ms) {
+    const uint32_t until = now + ms;
+    if ((int32_t)(until - ignoreUntilMs) > 0) ignoreUntilMs = until;
+  }
+  bool disturbed(uint32_t now) const { return cameraOn || (int32_t)(ignoreUntilMs - now) > 0; }
+  bool still(uint32_t now) const {
+    return !disturbed(now) && (int32_t)(now - ignoreUntilMs) >= (int32_t)SC_TOUCH_STILL_MS;
+  }
 
-    unsigned long now = millis();
+  void askRef(uint8_t why) {
+    if (!needRef) refWhy = why;
+    needRef = true;
+    askedStillMs = 0;   // ask for stillness on the next tick
+  }
 
-    if (chillMode && now >= chillEndMs) chillMode = false;
+  void onEvent(const AoEvt& e) {
+    const uint32_t now = millis();
+    switch (e.sig) {
+      case SIG_TICK:         sample(now); break;
+      case SIG_MOTION_START: disturb(now, e.a); break;
+      case SIG_RAIL_SWITCH:  disturb(now, e.a + 500); askRef(SC_REF_RAIL); break;
+      case SIG_LED_PUNCH:    disturb(now, e.a + 100); break;
+      case SIG_MIC_START:
+      case SIG_MIC_STOP:     disturb(now, 500); break;   // codec reset, MICBIAS step
+      case SIG_AMP_ON:
+      case SIG_AMP_OFF:      disturb(now, 300); break;
+      case SIG_CAMERA_START: cameraOn = true;  disturb(now, 300); break;
+      case SIG_CAMERA_END:   cameraOn = false; disturb(now, 300); break;
+      case SIG_TOUCH_RESTART: askRef(SC_REF_ASKED); break;
+      default: break;
+    }
+  }
 
-    // A chip start that was asked for: a rail was switched, or boot has settled.
-    if (scTouchRestartAtMs && (int32_t)(now - scTouchRestartAtMs) >= 0) {
-      ScI2cLock lock(100);
-      if (lock.held) { scTouchRestartAtMs = 0; scTouchChipStartLocked(); }
+  // Take the reference now (the bot is still). Returns false if the bus was busy.
+  bool takeRef(uint32_t now) {
+    ScI2cLock lock(100);
+    if (!lock.held) return false;
+    const bool ok = scTouchChipStartLocked();   // also sets the 1.5 s quiet window
+    refs++;
+    lastRefMs = now;
+    needRef = false;
+    latchAsked = false;
+    for (auto& t : allPadMs) t = 0;
+    aoPublish(SIG_TOUCH_REF, SRC_TOUCH, refWhy, ok ? 1 : 0);
+    return true;
+  }
+
+  void sample(uint32_t now) {
+    if (!sysStatus.scHeadTouchReady) return;
+
+    if (needRef) {
+      const bool gapOk = !refs || now - lastRefMs >= SC_HEAL_GAP_MS || refWhy == SC_REF_RAIL || refWhy == SC_REF_BOOT;
+      if (gapOk && still(now) && takeRef(now)) return;   // nothing to read until it has settled
+      if (!askedStillMs || now - askedStillMs >= SC_TOUCH_ASK_STILL_MS - 500) {
+        askedStillMs = now | 1;
+        aoPublish(SIG_TOUCH_NEED_STILL, SRC_TOUCH, SC_TOUCH_ASK_STILL_MS, refWhy);
+      }
     }
 
-    // Read fresh touch data, normalize Front→Middle→Back (BSP reverses raw index).
-    scReadTouch();
+    // Read under the bus lock, or not at all: a read without it can return
+    // another transaction's bytes, and an all-ones byte reads as all three pads.
+    {
+      ScI2cLock lock(20);
+      if (!lock.held) { lockMisses++; return; }
+      scChan.TouchSensor.update();
+    }
     uint8_t inten[3] = {
-      scGetTouchZone(2),  // FRONT
+      scGetTouchZone(2),  // FRONT  (BSP reverses the raw index)
       scGetTouchZone(1),  // MIDDLE
       scGetTouchZone(0),  // BACK
     };
     // Right after a chip start the pads are taking their reference: the log
-    // still shows what they report, the gestures see no touch.
+    // still shows what they report, nothing else sees a touch.
     const bool quiet = (int32_t)(scTouchQuietUntilMs - now) > 0;
-    bool pressed = !quiet && (inten[0] || inten[1] || inten[2]);
+    const bool pressed = !quiet && (inten[0] || inten[1] || inten[2]);
+    const bool ignoreNow = disturbed(now) || needRef;
 
     // Pad log: counts, and a trace entry whenever any level changes.
     ScTouchLog* const tl = scTouchLogGet();
+    const uint16_t ctx = tl ? (scTouchContext() | (ignoreNow ? 1u << SC_TOUCH_CTX_IGNORED : 0)) : 0;
     if (tl) {
       tl->reads++;
+      for (int b = 0; b < SC_TOUCH_CTX_BITS; b++) if (ctx & (1u << b)) tl->ctxReads[b]++;
       if (pressed) tl->pressedReads++;
       for (int z = 0; z < 3; z++) tl->hist[z][inten[z] & 3]++;
       if (inten[0] != tl->now[0] || inten[1] != tl->now[1] || inten[2] != tl->now[2]) {
         ScTouchSample& t = tl->trace[tl->traceCount % SC_TOUCH_LOG_TRACE];
         t.ms = now;
+        t.ctx = ctx;
         for (int z = 0; z < 3; z++) t.level[z] = tl->now[z] = inten[z];
         tl->traceCount++;
       }
     }
 
-    // Track per-zone peak intensity; reset on a fresh contact.
+    // A new contact: reset its peaks; it is ignored if any of it overlaps a disturbance.
     if (pressed && !rawPressed) {
       peak[0] = peak[1] = peak[2] = 0;
       contactStartMs = now;
-      if (tl) { tl->contactStartMs = now; tl->contactSamples = 0; }
+      contactIgnored = false;
+      if (tl) { tl->contactStartMs = now; tl->contactSamples = 0; tl->contactCtx = 0; }
     }
     if (pressed) {
+      if (ignoreNow) contactIgnored = true;
       for (int z = 0; z < 3; z++) if (inten[z] > peak[z]) peak[z] = inten[z];
       if (tl && tl->contactSamples < 255) tl->contactSamples++;
+      if (tl) tl->contactCtx |= ctx;
     }
-    if (tl && !pressed && rawPressed) {   // contact over: log it
-      ScTouchContact& c = tl->contacts[tl->contactCount % SC_TOUCH_LOG_CONTACTS];
-      uint32_t dur = now - tl->contactStartMs;
-      c.ms = tl->contactStartMs;
-      c.durMs = dur > 65535 ? 65535 : (uint16_t)dur;
-      for (int z = 0; z < 3; z++) c.peak[z] = peak[z];
-      c.samples = tl->contactSamples;
-      tl->contactCount++;
-    }
-
-    // Self-heal (see heal()): a contact on all three pads that will not end,
-    // or the fourth short one in eight seconds.
     const bool allPads = peak[0] >= OUTPUT_MID && peak[1] >= OUTPUT_MID && peak[2] >= OUTPUT_MID;
-    if (pressed && allPads && now - contactStartMs > SC_LATCH_MS) heal(now);
-    if (!pressed && rawPressed && allPads) {
-      allPadMs[allPadIdx] = now | 1;
-      allPadIdx = (allPadIdx + 1) % SC_STORM_CONTACTS;
-      const uint32_t oldest = allPadMs[allPadIdx];
-      if (oldest && now - oldest < SC_STORM_WINDOW_MS) heal(now);
+    if (!pressed && rawPressed) {   // contact over
+      const uint32_t dur = now - contactStartMs;
+      if (tl) {
+        ScTouchContact& c = tl->contacts[tl->contactCount % SC_TOUCH_LOG_CONTACTS];
+        c.ms = tl->contactStartMs;
+        c.durMs = dur > 65535 ? 65535 : (uint16_t)dur;
+        for (int z = 0; z < 3; z++) c.peak[z] = peak[z];
+        c.samples = tl->contactSamples;
+        c.ctx = tl->contactCtx;
+        tl->contactCount++;
+      }
+      if (contactIgnored) ignoredContacts++;
+      aoPublish(SIG_TOUCH_CONTACT, SRC_TOUCH,
+                peak[0] | (peak[1] << 8) | (peak[2] << 16) | ((contactIgnored ? 1 : 0) << 24), (int32_t)dur);
+      // Storm: the fourth undisturbed all-pad contact inside eight seconds.
+      if (allPads && !contactIgnored) {
+        allPadMs[allPadIdx] = now | 1;
+        allPadIdx = (allPadIdx + 1) % SC_STORM_CONTACTS;
+        const uint32_t oldest = allPadMs[allPadIdx];
+        if (oldest && now - oldest < SC_STORM_WINDOW_MS) {
+          heals++;
+          for (auto& t : allPadMs) t = 0;
+          aoPublish(SIG_TOUCH_STORM, SRC_TOUCH, 1);
+          askRef(SC_REF_STORM);
+        }
+      }
+    }
+    // Latch: an all-pad contact that will not end, disturbed or not.
+    if (pressed && allPads && !latchAsked && now - contactStartMs > SC_LATCH_MS) {
+      latchAsked = true;
+      heals++;
+      aoPublish(SIG_TOUCH_STORM, SRC_TOUCH, 2);
+      askRef(SC_REF_LATCH);
     }
     rawPressed = pressed;
 
-    headBtn.setRawState(now, pressed);
+    // The button sees only clean contacts: one that meets a disturbance is let go.
+    const bool clean = pressed && !contactIgnored;
+    headBtn.setRawState(now, clean);
 
     // 2s hold → chill (one-shot latch).
     if (headBtn.isPressed() && !holdFired && headBtn.pressedFor(SC_CHILL_HOLD_MS)) {
       holdFired = true;
       if (tl) tl->firedHold++;
-      return 3;
+      aoPublish(SIG_TOUCH_HOLD, SRC_TOUCH);
+      return;
     }
 
     // Immediate tap on release. A release that merely ends a chill-hold is
     // consumed here so it doesn't also fire a tap reaction.
     if (headBtn.wasClicked()) {
-      if (holdFired) { holdFired = false; return 0; }
-      // The chip was just started (boot, a rail switch, a self-heal): not a tap.
-      if ((int32_t)(scTouchQuietUntilMs - now) > 0) { if (tl) tl->rejected++; return 0; }
+      if (holdFired) { holdFired = false; return; }
+      if (contactIgnored || quiet || needRef) { if (tl) tl->rejected++; return; }
       // Require a FULL-strength hit (level 3). A real finger easily reaches it;
       // stray capacitive noise (e.g. a ceiling fan) only nudges a pad to level
       // 1, so it's rejected. Middle pad is ignored.
-      bool frontHigh = peak[SC_ZONE_FRONT] >= OUTPUT_HIGH;
-      bool backHigh  = peak[SC_ZONE_BACK]  >= OUTPUT_HIGH;
-      if (!frontHigh && !backHigh) { if (tl) tl->rejected++; return 0; }
+      const bool frontHigh = peak[SC_ZONE_FRONT] >= OUTPUT_HIGH;
+      const bool backHigh  = peak[SC_ZONE_BACK]  >= OUTPUT_HIGH;
+      if (!frontHigh && !backHigh) { if (tl) tl->rejected++; return; }
       // Back wins ties; otherwise whichever end reached full strength.
-      lastTapZone = (backHigh && peak[SC_ZONE_BACK] >= peak[SC_ZONE_FRONT])
-                      ? SC_ZONE_BACK : SC_ZONE_FRONT;
+      lastTapZone = (backHigh && peak[SC_ZONE_BACK] >= peak[SC_ZONE_FRONT]) ? SC_ZONE_BACK : SC_ZONE_FRONT;
       if (tl) { if (lastTapZone == SC_ZONE_BACK) tl->firedBack++; else tl->firedFront++; }
-      return 1;
+      aoPublish(SIG_TOUCH_TAP, SRC_TOUCH, lastTapZone);
+      return;
     }
 
     if (headBtn.isReleased()) holdFired = false;
-
-    return 0;
   }
 };
 
 static ScTouchState scTouch_state;
+static AoActive scTouchAO;
+inline void scTouchOnEvent(const AoEvt& e) { scTouch_state.onEvent(e); }
+
+// Setup: registers TouchAO and its subscriptions. Call before the app AO so
+// touch is dispatched first in each loop pass.
+inline void scTouchAOStart() {
+  scTouch_state.init();
+  scTouchAO.name = "touch";
+  scTouchAO.onEvent = scTouchOnEvent;
+  scTouchAO.tickMs = 0;   // every loop pass, as the old per-frame read
+  aoStart(scTouchAO);
+  static const AoSig subs[] = { SIG_MOTION_START, SIG_RAIL_SWITCH, SIG_LED_PUNCH, SIG_MIC_START, SIG_MIC_STOP,
+                                SIG_AMP_ON, SIG_AMP_OFF, SIG_CAMERA_START, SIG_CAMERA_END, SIG_TOUCH_RESTART };
+  for (AoSig s : subs) aoSubscribe(scTouchAO, s);
+}
 
 // Chill length picked in the touch UI / web panel; persisted in NVS ("chillMin").
 static const uint8_t SC_CHILL_OPTIONS[] = { 10, 30, 60, 120 };
@@ -338,9 +457,9 @@ inline void scFirePetReaction(uint8_t zone, uint8_t personalityIndex) {
 // ============================================================================
 // Nod / Shake — front tap = "yes", back tap = "no"
 // ============================================================================
-// Uses the proven blocking nod/shake gestures from stackchan_base.h (the same
-// ones the web UI head presets call), paired with a face change, a spoken
-// phrase, and a synth sound. The gesture pumps botSounds.update() while it runs.
+// The nod/shake gestures are MotionAO step sequences (stackchan_base.h, the
+// same ones the web UI head presets ask for), paired with a face change, a
+// spoken phrase and a synth sound. They return at once: the loop keeps running.
 
 static const char* const SC_NOD_PHRASES[]   = { "Yep!", "Mhm", "For sure", "Totally", "Yeah!" };
 static const char* const SC_SHAKE_PHRASES[] = { "Nope", "No way", "Uh-uh", "Nuh-uh", "Nah" };
@@ -354,25 +473,17 @@ inline void scPlayRandomSound(const MidiSequenceId* pool, uint8_t n) {
 }
 #endif
 
-// Pump fed to the blocking nod/shake gestures so the synth keeps ticking while
-// the servos move (the gesture briefly blocks the render loop).
-inline void scGesturePumpSound() {
-#ifdef TARGET_CORES3
-  botSounds.update();
-#endif
-}
-
 inline void scFireNod() {
   botMode.face.transitionTo(EXPR_HAPPY, 150);
   botMode.speechBubble.show(SC_NOD_PHRASES[random(0, 5)], 2500);
   scLeds.flash(80, 255, 120, 300);
   botMode.registerInteraction();
   botMode.shakeReacting = true;
-  botMode.shakeReactEnd = millis() + 2500;  // cover the blocking gesture + tail
+  botMode.shakeReactEnd = millis() + 2500;  // cover the gesture + tail
 #ifdef TARGET_CORES3
   scPlayRandomSound(SC_NOD_SOUNDS, sizeof(SC_NOD_SOUNDS) / sizeof(SC_NOD_SOUNDS[0]));
 #endif
-  scNodGesture(scGesturePumpSound);  // proven web-preset nod (blocking, pumps sound)
+  scNodGesture();
 }
 
 inline void scFireShake() {
@@ -381,11 +492,11 @@ inline void scFireShake() {
   scLeds.flash(255, 80, 40, 300);
   botMode.registerInteraction();
   botMode.shakeReacting = true;
-  botMode.shakeReactEnd = millis() + 2500;  // cover the blocking gesture + tail
+  botMode.shakeReactEnd = millis() + 2500;  // cover the gesture + tail
 #ifdef TARGET_CORES3
   scPlayRandomSound(SC_SHAKE_SOUNDS, sizeof(SC_SHAKE_SOUNDS) / sizeof(SC_SHAKE_SOUNDS[0]));
 #endif
-  scShakeGesture(scGesturePumpSound);  // proven web-preset shake (blocking, pumps sound)
+  scShakeGesture();
 }
 
 // ============================================================================

@@ -179,6 +179,9 @@ struct ScBaseLeds {
     flashR = r; flashG = g; flashB = b;
     flashStart = millis();
     flashDurationMs = durationMs;
+#ifdef BOARD_HAS_STACKCHAN_BASE
+    aoPublish(SIG_LED_PUNCH, SRC_LEDS, durationMs);   // a load step on the 5 V rail
+#endif
   }
 
   // Code mode beats (spec docs/vizself/code-mode-motion-spec.md §3.3): a mirrored

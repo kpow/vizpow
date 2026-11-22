@@ -18,3 +18,5 @@ CLAUDE.md
 # Leftovers from the eyelab branch (its node_modules and parity builds)
 eyelab/node_modules/
 eyelab/parity/
+tools/soak/runs/
+tools/soak/__pycache__/

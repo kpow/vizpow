@@ -8,6 +8,7 @@
 #include <M5StackChan.h>
 #include "config.h"
 #include "system_status.h"
+#include "ao_core.h"   // Active Object core: events, timeline (stage 1)
 #include <nvs.h>
 
 extern SystemStatus sysStatus;
@@ -111,7 +112,6 @@ inline void scSi12tReadRegs(uint8_t* out, bool* ok) {
 static uint32_t scTouchStarts = 0;                   // chip starts this run
 static uint32_t scTouchStartFails = 0;               // ...of which a write was refused
 static volatile uint32_t scTouchQuietUntilMs = 0;    // contacts before this are not taps
-static volatile uint32_t scTouchRestartAtMs = 0;     // 0 = none asked for
 
 inline bool scSi12tWrite(uint8_t reg, uint8_t value) {
   return M5.In_I2C.writeRegister8(0x68, reg, value, 100000);
@@ -131,10 +131,10 @@ inline bool scTouchChipStartLocked() {
   return ok;
 }
 
-// From any task: the loop task starts the chip again once inMs has passed
-// (ScTouchState::update). Used after a rail is switched, when it has settled.
+// From any task: a supply rail was switched. Published as an event; TouchAO
+// takes a fresh reference once the rail has settled AND the bot is still.
 inline void scTouchAskRestart(uint16_t inMs) {
-  scTouchRestartAtMs = (millis() + inMs) | 1;   // never 0, which means "none"
+  aoPublish(SIG_RAIL_SWITCH, SRC_POWER, inMs);
 }
 
 // Debug only (/debug/touchraw?cold=1): put the power-on settings back, then run
@@ -174,8 +174,9 @@ public:
     ina226_init();
     // Last, with the servo rail up: settings first, then the reset (see above).
     // Once more shortly after the loop starts, when WiFi and the LEDs are up too.
+    // TouchAO takes the reference that counts later, once the bot is still: a
+    // chip powered up from cold takes a bad one under the homing load (2026-11-22).
     scTouchChipStartLocked();   // boot: no other task is on the bus yet
-    scTouchAskRestart(1500);
   }
 };
 
@@ -305,8 +306,6 @@ inline void scSetServoPower(bool enabled) {
   scChan.setServoPowerEnabled(enabled);
 }
 
-// Move yaw by angle (tenths of degrees). Motion is internally mutex-guarded,
-// so this is safe to call from the render loop, the web task or anywhere else.
 // When the head will be still again (millis). The camera's motion check skips
 // frames until then, so the head's own movement never reads as someone arriving.
 volatile uint32_t scHeadBusyUntilMs = 0;
@@ -314,104 +313,77 @@ volatile uint32_t scHeadBusyUntilMs = 0;
 // True while the battery guard (below) has parked the head and cut the servo
 // rail. Moves are dropped and the freeze watchdog stands down until it clears.
 volatile bool scServosResting = false;
+
+// ---- MotionAO: the public side ------------------------------------------------
+// MotionAO (end of this file) is the only code that drives the servos, the
+// servo rail and the servo bus. Everyone else posts it a command, from any
+// task, and returns at once: nothing here blocks, and nothing here touches
+// hardware.
+enum ScMoveClass  : uint8_t { SC_MC_APP = 0, SC_MC_IDLE = 1 };
+enum ScGesture    : uint8_t { SC_G_NOD = 1, SC_G_SHAKE = 2 };
+enum ScRestFlags  : uint8_t { SC_REST_POWEROFF = 1, SC_REST_LEARN_5V = 2 };
+enum ScMotionKind : uint8_t { SC_MK_MOVE = 0, SC_MK_IDLE, SC_MK_GESTURE, SC_MK_RECOVER, SC_MK_REST, SC_MK_WAKE };
+static AoActive scMotionAO;
+// Last commanded angles (tenths), for /state: reading the servos from the web
+// task would put it on the servo bus.
+static volatile int16_t scYawTarget = 0, scPitchTarget = SC_SERVO_Y_HOME_DEG * 10;
+
+inline bool scPostMove(bool pitch, int angleTenths, uint16_t timeMs, ScMoveClass cls) {
+  AoEvt e = aoEvt(SIG_MOTION_MOVE, SRC_APP, angleTenths, timeMs);
+  e.flags = (pitch ? 1 : 0) | (cls << 1);
+  return aoPost(scMotionAO, e);
+}
+inline void scMoveYaw(int angleTenths, uint16_t timeMs = 500, ScMoveClass cls = SC_MC_APP) {
+  scPostMove(false, angleTenths, timeMs, cls);
+}
+inline void scMovePitch(int angleTenths, uint16_t timeMs = 500, ScMoveClass cls = SC_MC_APP) {
+  scPostMove(true, angleTenths, timeMs, cls);
+}
+inline void scGoHome(uint16_t timeMs = 500, ScMoveClass cls = SC_MC_APP) {
+  scMoveYaw(0, timeMs, cls);
+  scMovePitch(SC_SERVO_Y_HOME_DEG * 10, timeMs, cls);
+}
+// Nod "yes" / shake "no" (step tables in MotionAO). Returns at once.
+inline void scNodGesture()   { aoPost(scMotionAO, aoEvt(SIG_MOTION_GESTURE, SRC_APP, SC_G_NOD)); }
+inline void scShakeGesture() { aoPost(scMotionAO, aoEvt(SIG_MOTION_GESTURE, SRC_APP, SC_G_SHAKE)); }
+// Cycle the servo rail and re-home (POST /bot/servo/reinit). Queued, not done.
+inline bool scRecoverServos(bool homeAfter = false) {
+  return aoPost(scMotionAO, aoEvt(SIG_MOTION_RECOVER, SRC_WEB, 0, homeAfter ? 1 : 0));
+}
+
+// Current angle in tenths of a degree: the last commanded target. Not a bus read.
+inline int scReadServoPos(uint8_t id) {
+  if (id == SC_SERVO_X_ID) return scYawTarget;
+  if (id == SC_SERVO_Y_ID) return scPitchTarget;
+  return -1;
+}
+
+// ---- MotionAO only ---------------------------------------------------------------
+// Every servo move goes through here: it is the motion event TouchAO listens
+// for (servo torque comes on with each move).
+#define SC_MOTION_SETTLE_MS 300   // torque and gear settle after a move, for touch
 inline void scMarkHeadBusy(uint16_t timeMs) {
   uint32_t until = millis() + timeMs + 1200;
   if ((int32_t)(until - scHeadBusyUntilMs) > 0) scHeadBusyUntilMs = until;
+  aoPublish(SIG_MOTION_START, SRC_MOTION, timeMs + SC_MOTION_SETTLE_MS);
 }
 
-inline void scMoveYaw(int angleTenths, uint16_t timeMs = 500) {
+inline void scRawMoveYaw(int angleTenths, uint16_t timeMs) {
   if (!sysStatus.scServoXReady || scServosResting) return;
   scMarkHeadBusy(timeMs);
+  scYawTarget = angleTenths;
   scChan.Motion.moveYaw(angleTenths, scSpeedFromTimeMs(timeMs));
 }
 
-inline void scMovePitch(int angleTenths, uint16_t timeMs = 500) {
+inline void scRawMovePitch(int angleTenths, uint16_t timeMs) {
   if (!sysStatus.scServoYReady || scServosResting) return;
   scMarkHeadBusy(timeMs);
   constexpr int minTenths = SC_SERVO_Y_MIN_DEG * 10;
   constexpr int maxTenths = SC_SERVO_Y_MAX_DEG * 10;
   if (angleTenths < minTenths) angleTenths = minTenths;
   if (angleTenths > maxTenths) angleTenths = maxTenths;
+  scPitchTarget = angleTenths;
   scChan.Motion.movePitch(angleTenths, scSpeedFromTimeMs(timeMs));
-}
-
-inline void scGoHome(uint16_t timeMs = 500) {
-  scMoveYaw(0, timeMs);
-  scMovePitch(SC_SERVO_Y_HOME_DEG * 10, timeMs);
-}
-
-// Current angle in tenths of a degree. This is BSP's cached animation value,
-// NOT a bus read — polling it from the web task costs nothing and cannot
-// collide with a move in progress.
-inline int scReadServoPos(uint8_t id) {
-  if (id == SC_SERVO_X_ID) return scChan.Motion.getCurrentYawAngle();
-  if (id == SC_SERVO_Y_ID) return scChan.Motion.getCurrentPitchAngle();
-  return -1;
-}
-
-// Power-cycle the servo rail and re-home. Called by the freeze watchdog below
-// and by POST /bot/servo/reinit.
-inline bool scServoAnswers(uint8_t id);   // servo freeze watchdog, below
-
-// After the rail comes up: wait until both servos answer. Do NOT command a move
-// before this returns true. Moves sent while they are still booting are lost,
-// and BSP starts a move from the servo's read position: a failed read there
-// clamps to the range floor and turns a glide into a full-torque slam.
-// Ping rather than read angles: BSP's getCurrentAngle() falls back to the
-// animation value when a read fails, so angles look fine on a dead bus.
-inline bool scWaitServosAnswer(uint32_t maxMs) {
-  uint32_t started = millis();
-  while (millis() - started < maxMs) {
-    delay(100);
-    if (scServoAnswers(SC_SERVO_X_ID) && scServoAnswers(SC_SERVO_Y_ID)) return true;
-  }
-  return false;
-}
-
-inline bool scRecoverServos() {
-  if (scServosResting) return false;   // the rail is off on purpose: battery guard
-  // Capture the pose BEFORE cutting power so the head can glide back to where
-  // it was instead of snapping to home. During a freeze the servos don't answer,
-  // so this is BSP's animation value (its fallback for a failed read): where the
-  // head was last told to be, which is close enough to glide back from.
-  int yaw   = scChan.Motion.getCurrentYawAngle();
-  int pitch = scChan.Motion.getCurrentPitchAngle();
-
-  // Dip to the pitch floor BEFORE cutting power. When the rail drops, pitch
-  // torque vanishes and the head free-falls to its sag point. Parked at the
-  // floor there is nowhere left to fall. (A frozen servo ignores this, so a
-  // recovery from a real freeze still drops the head once.)
-  scMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
-  delay(1300);
-
-  plogRow("RAIL_CYCLE");   // written before the cut: if the unit dies here, this is its last row
-  {
-    ScI2cLock lock;
-    scChan.setServoPowerEnabled(false);
-  }
-  delay(300);
-  {
-    ScI2cLock lock;
-    scChan.setServoPowerEnabled(true);
-  }
-  delay(500);
-  scTouchAskRestart(1500);   // the rail was switched: fresh touch reference
-
-  // A still head beats a half-done glide: see scWaitServosAnswer().
-  if (!scWaitServosAnswer(2500)) {
-    DBGLN("  reinit: bus not answering after power-up — skipping repositioning");
-    plogRow("RAIL_FAIL");
-    return false;
-  }
-  plogRow("RAIL_OK");
-
-  // Glide back to the pre-cut pose. Floor values mean that read failed too —
-  // fall back to a slow re-home.
-  bool haveYaw   = (yaw   > -1270);
-  bool havePitch = (pitch > 5);
-  scMoveYaw(haveYaw ? yaw : 0, 1800);
-  scMovePitch(havePitch ? pitch : SC_SERVO_Y_HOME_DEG * 10, 1800);
-  return true;
 }
 
 // ============================================================================
@@ -484,28 +456,10 @@ inline bool scServoAnswers(uint8_t id) {
   return false;
 }
 
-// Call once per loop.
-inline void scServoWatchdogTick() {
-  if (!sysStatus.scServoXReady && !sysStatus.scServoYReady) return;
-  if (scServosResting) return;   // rail off on purpose: silence is expected
-  uint32_t now = millis();
-  if ((int32_t)(now - scNextServoCheckMs) < 0) return;
-  scNextServoCheckMs = now + SC_SERVO_CHECK_MS;
-
-  bool deaf = (sysStatus.scServoXReady && !scServoAnswers(SC_SERVO_X_ID)) ||
-              (sysStatus.scServoYReady && !scServoAnswers(SC_SERVO_Y_ID));
-  if (!deaf) { scServoDeadChecks = 0; return; }
-  if (++scServoDeadChecks < SC_SERVO_DEAD_CHECKS) return;
-
-  DBGLN("Servos stopped answering — cycling the rail");
-  scServoDeadChecks = 0;
-  scServoReboots++;
-  scMarkHeadBusy(5000);   // the rail cycle bows and lifts the head
-  // A servo that's missing or broken never comes back: don't stall the loop and
-  // cycle the rail every 18 s forever, back off up to 5 min instead.
-  if (scRecoverServos()) scServoBackoffMs = SC_SERVO_BACKOFF_MS;
-  else scServoBackoffMs = min(scServoBackoffMs * 2, (uint32_t)SC_SERVO_BACKOFF_MAX);
-  scNextServoCheckMs = millis() + scServoBackoffMs;
+// One ping each, no retries: MotionAO's wait for servos to boot asks every 100 ms.
+inline bool scServoAnswersOnce(uint8_t id) {
+  ScBusLock lock;
+  return scProbe().Ping(id) == id;
 }
 
 // ============================================================================
@@ -621,54 +575,16 @@ inline void scBatteryCareBegin() {
 
 static uint32_t scRestSinceMs = 0;
 
-// Park the head, then cut the servo rail and the LED ring's supply. False: the
-// bus was busy and nothing was switched, so the caller tries again next check.
-inline bool scRestServos() {
-  if (scServosResting) return true;
-  // Park at the pitch floor first: with the rail off there is no torque, and
-  // from the floor the head has nowhere to fall.
-  scMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
-  delay(1300);
-  {
-    ScI2cLock lock(SC_POWER_LOCK_MS);
-    if (!lock.held) return false;
-    scChan.setServoPowerEnabled(false);
-    M5.Power.setExtOutput(false);   // the LED ring's supply
-  }
-  scTouchAskRestart(1500);   // rails were switched: fresh touch reference
-  scServosResting = true;
-  scRestSinceMs = millis();
-  return true;
-}
-
-// Servo rail and LEDs back on, head back to home. False: bus busy, still resting.
-inline bool scWakeServos() {
-  if (!scServosResting) return true;
-  {
-    ScI2cLock lock(SC_POWER_LOCK_MS);
-    if (!lock.held) return false;
-    scChan.setServoPowerEnabled(true);
-    if (sc5vWanted) M5.Power.setExtOutput(true);
-  }
-  scTouchAskRestart(1500);   // rails were switched: fresh touch reference
-  delay(500);   // servos need time to boot after power-on
-  const bool live = scWaitServosAnswer(2500);
-  scServosResting = false;
-  scServoDeadChecks = 0;
-  scNextServoCheckMs = millis() + 3000;
-  // Not answering yet: leave the head where it is. The freeze watchdog is back
-  // on duty and recovers it the usual way.
-  if (live) scGoHome(1800);
-  return true;
-}
+// Resting (park the head, cut the servo rail and the LED ring's supply) and
+// waking are MotionAO sequences: battery care posts SIG_MOTION_REST / WAKE.
 
 // A unit that started on battery never ran the boot test. The rest has just
 // cut the 5 V output: if USB shows up now where there was none a moment ago,
 // the output may have been keeping it from the charger. Test it properly and
 // save the answer. Leaves the output off either way (the unit is resting).
+// MotionAO calls this 400 ms after the cut.
 inline void sc5vLearnAtRest() {
   bool usb = false;
-  delay(400);
   if (!scUsbPresent(&usb) || !usb) return;   // still no USB: it really is on battery
   if (sc5vBlocksUsb()) {
     sc5vSave(false);
@@ -716,22 +632,22 @@ inline void scBatteryCareTick() {
       plogRow("BATT_OFF", "battery under 3.30 V and draining: switching off");
       DBGLN("Battery flat: switching off");
     }
-    if (!scRestServos()) return;   // bus busy: next check
-    delay(300);
-    ScI2cLock lock(SC_POWER_LOCK_MS);
-    if (lock.held) M5.Power.powerOff();
-    return;                        // still here: bus busy or the PMU refused; next check
+    // MotionAO parks, cuts the rails, then switches off. Asked every check
+    // until it happens: a busy AO (mid-recovery) refuses and is asked again.
+    aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_POWER, SC_REST_POWEROFF));
+    return;
   }
+  // Each ask needs a fresh run of checks (10 s): longer than a rest or wake takes.
   if (!scServosResting && low >= SC_BATT_CHECKS) {
-    if (!scRestServos()) return;
     low = good = 0;
+    const uint8_t flags = (sc5vWanted && !onUsb) ? SC_REST_LEARN_5V : 0;
+    if (!aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_POWER, flags))) return;
     plogRow("BATT_REST", "battery low: head parked, servo rail and LEDs off");
     DBGLN("Battery low: resting the servos and LEDs");
-    if (sc5vWanted && !onUsb) sc5vLearnAtRest();
   } else if (scServosResting && good >= SC_BATT_CHECKS &&
              millis() - scRestSinceMs >= SC_BATT_MIN_REST_MS) {
-    if (!scWakeServos()) return;
-    low = good = 0;   // a fresh run of checks before it may rest again
+    low = good = 0;
+    if (!aoPost(scMotionAO, aoEvt(SIG_MOTION_WAKE, SRC_POWER))) return;
     plogRow("BATT_WAKE", "battery recovered: servo rail and LEDs back on");
   }
 }
@@ -743,12 +659,6 @@ inline void scBatteryCareTick() {
 // 2=Back — identical scale to the Si12T output_e enum this used to return.
 // Our callers index the other way round (0=Back), so flip here and leave
 // stackchan_touch.h untouched.
-
-inline void scReadTouch() {
-  if (!sysStatus.scHeadTouchReady) return;
-  ScI2cLock lock;
-  scChan.TouchSensor.update();
-}
 
 inline uint8_t scGetTouchZone(uint8_t zone) {
   if (zone > 2) return 0;
@@ -771,40 +681,350 @@ inline float scGetBatteryCurrent() {
 }
 
 // ============================================================================
-// Nod / Shake gestures (blocking — shared by web presets and head touch)
+// MotionAO (stage 2, docs/ao-plans/motion.md)
 // ============================================================================
+// The one owner of the head servos, the servo rail and the servo bus. It runs
+// on the loop thread (aoDispatch) and never blocks: every wait in a gesture,
+// a rail cycle, a rest or a wake is a deadline checked on its 10 ms tick.
+//
+// Arbitration: rail cycle, rest and wake beat gestures, which beat moves.
+// A request the current state can't take is dropped and published
+// (SIG_MOTION_DROPPED), never queued behind a 4 s recovery.
+enum ScMotionState : uint8_t { SC_MS_STILL, SC_MS_GESTURE, SC_MS_RECOVER, SC_MS_REST, SC_MS_RESTED, SC_MS_WAKE };
+enum ScMotionStepId : uint8_t {
+  SC_SUB_NONE,
+  SC_SUB_DIP, SC_SUB_RAIL_OFF, SC_SUB_RAIL_BOOT, SC_SUB_WAIT, SC_SUB_GLIDE,   // recover / wake
+  SC_SUB_PARK, SC_SUB_LEARN, SC_SUB_POWEROFF,                               // rest
+};
+enum ScMotionGate : uint8_t { SC_MG_VOICE = 1 };   // the watchdog stands down in a voice turn
 
-inline void scGestureDelay(uint16_t ms, void (*pump)()) {
-  uint32_t start = millis();
-  while (millis() - start < ms) {
-    if (pump) pump();
-    delay(4);
+struct ScGestureStep { uint8_t pitch; int16_t angle; uint16_t ms; uint16_t waitMs; };
+#define SC_PITCH_HOME (SC_SERVO_Y_HOME_DEG * 10)
+// Nod "yes": dip pitch 15 degrees below home and back, 3 cycles, ending at home.
+static const ScGestureStep SC_NOD_STEPS[] = {
+  {1, SC_PITCH_HOME - 150, 250, 250}, {1, SC_PITCH_HOME, 250, 250},
+  {1, SC_PITCH_HOME - 150, 250, 250}, {1, SC_PITCH_HOME, 250, 250},
+  {1, SC_PITCH_HOME - 150, 250, 250}, {1, SC_PITCH_HOME, 250, 250},
+};
+// Shake "no": hold pitch, swing yaw +-25 degrees, 3 cycles, recenter.
+static const ScGestureStep SC_SHAKE_STEPS[] = {
+  {0, 250, 200, 200}, {0, -250, 200, 200},
+  {0, 250, 200, 200}, {0, -250, 200, 200},
+  {0, 250, 200, 200}, {0, -250, 200, 200},
+  {0, 0, 250, 250},
+};
+
+struct ScMotionCtl {
+  uint8_t  state = SC_MS_STILL;
+  uint8_t  sub = SC_SUB_NONE;
+  uint32_t atMs = 0;                 // next step is due
+  uint32_t untilMs = 0;              // WAIT gives up here
+  const ScGestureStep* seq = nullptr;
+  uint8_t  seqLen = 0, step = 0;
+  uint8_t  gates = 0;                // ScMotionGate bits, set by the loop
+  uint8_t  restFlags = 0;
+  bool     fromWatchdog = false, homeAfter = false;
+  int      yaw = 0, pitch = 0;       // recovery glides back here
+  uint32_t dropped = 0, recoveries = 0;
+};
+static ScMotionCtl scMo;
+
+inline void scMotionGate(uint8_t bit, bool on) {   // loop thread
+  if (on) scMo.gates |= bit; else scMo.gates &= ~bit;
+}
+
+inline bool scMotionDue(uint32_t now) { return (int32_t)(now - scMo.atMs) >= 0; }
+
+inline void scMotionDrop(uint8_t kind) {
+  scMo.dropped++;
+  aoPublish(SIG_MOTION_DROPPED, SRC_MOTION, kind, scMo.state);
+}
+
+inline void scMotionEnd(uint8_t kind, bool ok, uint8_t next = SC_MS_STILL) {
+  scMo.state = next;
+  scMo.sub = SC_SUB_NONE;
+  aoPublish(SIG_MOTION_END, SRC_MOTION, kind, ok ? 1 : 0);
+}
+
+// Short tries only: a camera frame can hold the I2C bus for seconds, and a
+// long wait here would stall the loop. A miss retries on the next tick.
+#define SC_MOTION_RAIL_LOCK_MS 20
+
+inline bool scMotionRail(bool on) {
+  ScI2cLock lock(SC_MOTION_RAIL_LOCK_MS);
+  if (!lock.held) return false;
+  scChan.setServoPowerEnabled(on);
+  return true;
+}
+
+// ---- Gestures ----
+inline void scMotionGestureStep(uint32_t now) {
+  if (scMo.step >= scMo.seqLen) { scMotionEnd(SC_MK_GESTURE, true); return; }
+  const ScGestureStep& g = scMo.seq[scMo.step++];
+  if (g.pitch) scRawMovePitch(g.angle, g.ms); else scRawMoveYaw(g.angle, g.ms);
+  // From the step's due time, not from now: a loop pass is up to ~50 ms, and
+  // counting from now would stretch a 1.5 s nod to 1.8 s.
+  scMo.atMs += g.waitMs;
+  if ((int32_t)(now - scMo.atMs) > 100) scMo.atMs = now;   // after a long stall, don't bunch up
+}
+
+inline void scMotionStartGesture(uint8_t which, uint32_t now) {
+  if (which == SC_G_NOD) {
+    if (!sysStatus.scServoYReady) return;
+    scMo.seq = SC_NOD_STEPS; scMo.seqLen = sizeof(SC_NOD_STEPS) / sizeof(SC_NOD_STEPS[0]);
+  } else {
+    if (!sysStatus.scServoXReady) return;
+    scMo.seq = SC_SHAKE_STEPS; scMo.seqLen = sizeof(SC_SHAKE_STEPS) / sizeof(SC_SHAKE_STEPS[0]);
+  }
+  scMo.state = SC_MS_GESTURE;
+  scMo.step = 0;
+  scMo.atMs = now;
+  scMotionGestureStep(now);
+}
+
+// ---- Rail cycle (freeze watchdog, /bot/servo/reinit) ----
+inline void scMotionStartRecover(bool fromWatchdog, bool homeAfter, uint32_t now) {
+  scMo.state = SC_MS_RECOVER;
+  scMo.fromWatchdog = fromWatchdog;
+  scMo.homeAfter = homeAfter;
+  scMo.recoveries++;
+  // Capture the pose BEFORE cutting power so the head can glide back to where
+  // it was instead of snapping to home. During a freeze the servos don't
+  // answer, so this is BSP's animation value: where the head was last told to
+  // be, which is close enough to glide back from.
+  scMo.yaw   = scChan.Motion.getCurrentYawAngle();
+  scMo.pitch = scChan.Motion.getCurrentPitchAngle();
+  scMarkHeadBusy(5000);   // the rail cycle bows and lifts the head
+  // Dip to the pitch floor BEFORE cutting power. When the rail drops, pitch
+  // torque vanishes and the head free-falls to its sag point. Parked at the
+  // floor there is nowhere left to fall. (A frozen servo ignores this.)
+  scRawMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
+  scMo.sub = SC_SUB_DIP;
+  scMo.atMs = now + 1300;
+}
+
+// After the rail comes up: wait until both servos answer. Never command a move
+// before that. Moves sent while they are still booting are lost, and BSP starts
+// a move from the servo's read position: a failed read there clamps to the
+// range floor and turns a glide into a full-torque slam. Ping rather than read
+// angles: BSP's getCurrentAngle() falls back to the animation value when a
+// read fails, so angles look fine on a dead bus.
+inline bool scMotionServosAnswer() {
+  return (!sysStatus.scServoXReady || scServoAnswersOnce(SC_SERVO_X_ID)) &&
+         (!sysStatus.scServoYReady || scServoAnswersOnce(SC_SERVO_Y_ID));
+}
+
+inline void scMotionFinishRecover(bool ok, uint32_t now) {
+  if (scMo.fromWatchdog) {
+    // A servo that's missing or broken never comes back: don't cycle the rail
+    // every 18 s forever, back off up to 5 min instead.
+    scServoBackoffMs = ok ? SC_SERVO_BACKOFF_MS
+                          : min(scServoBackoffMs * 2, (uint32_t)SC_SERVO_BACKOFF_MAX);
+    scNextServoCheckMs = now + scServoBackoffMs;
+  }
+  scMotionEnd(SC_MK_RECOVER, ok);
+}
+
+inline void scMotionRecoverTick(uint32_t now) {
+  if (!scMotionDue(now)) return;
+  switch (scMo.sub) {
+    case SC_SUB_DIP:
+      if (!scMotionRail(false)) { scMo.atMs = now + 20; return; }
+      plogRow("RAIL_CYCLE");   // if the unit dies here, this is its last row
+      scTouchAskRestart(1500);
+      scMo.sub = SC_SUB_RAIL_OFF;
+      scMo.atMs = now + 300;
+      return;
+    case SC_SUB_RAIL_OFF:
+      if (!scMotionRail(true)) { scMo.atMs = now + 20; return; }
+      scTouchAskRestart(1500);   // the rail was switched: fresh touch reference
+      scMo.sub = SC_SUB_RAIL_BOOT;
+      scMo.atMs = now + 500;     // servos boot
+      return;
+    case SC_SUB_RAIL_BOOT:
+      scMo.sub = SC_SUB_WAIT;
+      scMo.untilMs = now + 2500;
+      scMo.atMs = now;
+      return;
+    case SC_SUB_WAIT:
+      if (scMotionServosAnswer()) {
+        plogRow("RAIL_OK");
+        // Glide back to the pre-cut pose. Floor values mean that read failed
+        // too: fall back to a slow re-home.
+        const bool haveYaw = scMo.yaw > -1270, havePitch = scMo.pitch > 5;
+        const int yaw   = (scMo.homeAfter || !haveYaw) ? 0 : scMo.yaw;
+        const int pitch = (scMo.homeAfter || !havePitch) ? SC_SERVO_Y_HOME_DEG * 10 : scMo.pitch;
+        const uint16_t ms = scMo.homeAfter ? 500 : 1800;
+        scRawMoveYaw(yaw, ms);
+        scRawMovePitch(pitch, ms);
+        scMo.sub = SC_SUB_GLIDE;
+        scMo.atMs = now + ms;
+      } else if ((int32_t)(now - scMo.untilMs) >= 0) {
+        // A still head beats a half-done glide.
+        DBGLN("  reinit: bus not answering after power-up — skipping repositioning");
+        plogRow("RAIL_FAIL");
+        scMotionFinishRecover(false, now);
+      } else {
+        scMo.atMs = now + 100;
+      }
+      return;
+    case SC_SUB_GLIDE:
+      scMotionFinishRecover(true, now);
+      return;
   }
 }
 
-// Nod "yes": dip pitch 15° below home and back, 3 cycles, ending at home.
-inline void scNodGesture(void (*pump)() = nullptr) {
-  if (!sysStatus.scServoYReady) return;
-  constexpr int home = SC_SERVO_Y_HOME_DEG * 10;
-  for (int i = 0; i < 3; i++) {
-    scMovePitch(home - 150, 250);
-    scGestureDelay(250, pump);
-    scMovePitch(home, 250);
-    scGestureDelay(250, pump);
+// ---- Freeze watchdog (see above): 1 s pings while the head is free ----
+inline void scMotionWatchdog(uint32_t now) {
+  if (!sysStatus.scServoXReady && !sysStatus.scServoYReady) return;
+  // Held off in a voice turn: servo noise would keep the end-of-speech
+  // detector open, and a rail cycle mid-reply is jarring.
+  if (scMo.gates & SC_MG_VOICE) return;
+  if ((int32_t)(now - scNextServoCheckMs) < 0) return;
+  scNextServoCheckMs = now + SC_SERVO_CHECK_MS;
+
+  bool deaf = (sysStatus.scServoXReady && !scServoAnswers(SC_SERVO_X_ID)) ||
+              (sysStatus.scServoYReady && !scServoAnswers(SC_SERVO_Y_ID));
+  if (!deaf) { scServoDeadChecks = 0; return; }
+  if (++scServoDeadChecks < SC_SERVO_DEAD_CHECKS) return;
+
+  DBGLN("Servos stopped answering — cycling the rail");
+  scServoDeadChecks = 0;
+  scServoReboots++;
+  aoPublish(SIG_SERVO_DEAF, SRC_MOTION);
+  scMotionStartRecover(true, false, now);
+}
+
+// ---- Rest / wake (battery care) ----
+inline void scMotionStartRest(uint8_t flags, uint32_t now) {
+  scMo.state = SC_MS_REST;
+  scMo.restFlags = flags;
+  // Park at the pitch floor first: with the rail off there is no torque, and
+  // from the floor the head has nowhere to fall.
+  scRawMovePitch(SC_SERVO_Y_MIN_DEG * 10, 1200);
+  scMo.sub = SC_SUB_PARK;
+  scMo.atMs = now + 1300;
+}
+
+inline void scMotionRestTick(uint32_t now) {
+  if (!scMotionDue(now)) return;
+  switch (scMo.sub) {
+    case SC_SUB_PARK: {
+      ScI2cLock lock(SC_MOTION_RAIL_LOCK_MS);
+      if (!lock.held) { scMo.atMs = now + 20; return; }
+      scChan.setServoPowerEnabled(false);
+      M5.Power.setExtOutput(false);   // the LED ring's supply
+      scServosResting = true;
+      scRestSinceMs = now;
+      scTouchAskRestart(1500);        // rails were switched: fresh touch reference
+      if (scMo.restFlags & SC_REST_POWEROFF) { scMo.sub = SC_SUB_POWEROFF; scMo.atMs = now + 300; }
+      else if (scMo.restFlags & SC_REST_LEARN_5V) { scMo.sub = SC_SUB_LEARN; scMo.atMs = now + 400; }
+      else scMotionEnd(SC_MK_REST, true, SC_MS_RESTED);
+      return;
+    }
+    case SC_SUB_LEARN:
+      sc5vLearnAtRest();
+      scMotionEnd(SC_MK_REST, true, SC_MS_RESTED);
+      return;
+    case SC_SUB_POWEROFF: {
+      ScI2cLock lock(SC_MOTION_RAIL_LOCK_MS);
+      if (lock.held) M5.Power.powerOff();
+      scMo.atMs = now + 20;           // still here: bus busy or the PMU refused
+      return;
+    }
   }
 }
 
-// Shake "no": hold pitch, swing yaw ±25°, 3 cycles, recenter.
-inline void scShakeGesture(void (*pump)() = nullptr) {
-  if (!sysStatus.scServoXReady) return;
-  for (int i = 0; i < 3; i++) {
-    scMoveYaw(250, 200);
-    scGestureDelay(200, pump);
-    scMoveYaw(-250, 200);
-    scGestureDelay(200, pump);
+inline void scMotionWakeTick(uint32_t now) {
+  if (!scMotionDue(now)) return;
+  switch (scMo.sub) {
+    case SC_SUB_RAIL_OFF: {           // the rail is off: switch it and the LEDs back on
+      ScI2cLock lock(SC_MOTION_RAIL_LOCK_MS);
+      if (!lock.held) { scMo.atMs = now + 20; return; }
+      scChan.setServoPowerEnabled(true);
+      if (sc5vWanted) M5.Power.setExtOutput(true);
+      scTouchAskRestart(1500);
+      scMo.sub = SC_SUB_RAIL_BOOT;
+      scMo.atMs = now + 500;          // servos boot
+      return;
+    }
+    case SC_SUB_RAIL_BOOT:
+      scMo.sub = SC_SUB_WAIT;
+      scMo.untilMs = now + 2500;
+      scMo.atMs = now;
+      return;
+    case SC_SUB_WAIT: {
+      const bool live = scMotionServosAnswer();
+      if (!live && (int32_t)(now - scMo.untilMs) < 0) { scMo.atMs = now + 100; return; }
+      scServosResting = false;
+      scServoDeadChecks = 0;
+      scNextServoCheckMs = now + 3000;
+      // Not answering yet: leave the head where it is. The freeze watchdog is
+      // back on duty and recovers it the usual way.
+      if (live) { scRawMoveYaw(0, 1800); scRawMovePitch(SC_SERVO_Y_HOME_DEG * 10, 1800); }
+      scMotionEnd(SC_MK_WAKE, live);
+      return;
+    }
   }
-  scMoveYaw(0, 250);
 }
+
+// ---- Events ----
+inline void scMotionOnEvent(const AoEvt& e) {
+  const uint32_t now = millis();
+  const uint8_t st = scMo.state;
+  switch (e.sig) {
+    case SIG_MOTION_MOVE: {
+      const bool idle = (e.flags >> 1) == SC_MC_IDLE;
+      if (st != SC_MS_STILL) { scMotionDrop(idle ? SC_MK_IDLE : SC_MK_MOVE); return; }
+      if (e.flags & 1) scRawMovePitch(e.a, e.b); else scRawMoveYaw(e.a, e.b);
+      return;
+    }
+    case SIG_MOTION_GESTURE:
+      if (st != SC_MS_STILL) { scMotionDrop(SC_MK_GESTURE); return; }
+      scMotionStartGesture(e.a, now);
+      return;
+    case SIG_MOTION_RECOVER:
+      // Re-entry guard: one rail cycle at a time, and none while resting.
+      if (st != SC_MS_STILL && st != SC_MS_GESTURE) { scMotionDrop(SC_MK_RECOVER); return; }
+      scMotionStartRecover(e.a == 1, e.b == 1, now);
+      return;
+    case SIG_MOTION_REST:
+      if (st == SC_MS_RESTED && (e.a & SC_REST_POWEROFF)) {   // already parked: just switch off
+        scMo.state = SC_MS_REST; scMo.sub = SC_SUB_POWEROFF; scMo.atMs = now;
+        return;
+      }
+      if (st == SC_MS_REST || st == SC_MS_RESTED) return;        // already on it
+      if (st == SC_MS_RECOVER || st == SC_MS_WAKE) { scMotionDrop(SC_MK_REST); return; }  // battery care asks again
+      scMotionStartRest(e.a, now);                                // beats a gesture
+      return;
+    case SIG_MOTION_WAKE:
+      if (st != SC_MS_RESTED) return;
+      scMo.state = SC_MS_WAKE;
+      scMo.sub = SC_SUB_RAIL_OFF;
+      scMo.atMs = now;
+      return;
+    case SIG_TICK:
+      switch (st) {
+        case SC_MS_STILL:   scMotionWatchdog(now); break;
+        case SC_MS_GESTURE: if (scMotionDue(now)) scMotionGestureStep(now); break;
+        case SC_MS_RECOVER: scMotionRecoverTick(now); break;
+        case SC_MS_REST:    scMotionRestTick(now); break;
+        case SC_MS_WAKE:    scMotionWakeTick(now); break;
+        default: break;
+      }
+      return;
+  }
+}
+
+inline void scMotionAOStart() {
+  scMotionAO.name = "motion";
+  scMotionAO.onEvent = scMotionOnEvent;
+  scMotionAO.tickMs = 10;
+  aoStart(scMotionAO);
+}
+
+// True while MotionAO is in a gesture, rail cycle, rest or wake: idle drift waits.
+inline bool scMotionBusy() { return scMo.state != SC_MS_STILL; }
 
 #endif // BOARD_HAS_STACKCHAN_BASE
 #endif // STACKCHAN_BASE_H
