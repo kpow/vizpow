@@ -121,6 +121,7 @@ def poll(host, slow):
             sf = k.get("stackFree") or {}
             s["tasks"] = {
                 "heapMinFree": k.get("heapMinFree"), "heapFree": k.get("heapFree"),
+                "allocFails": k.get("allocFails"),
                 "stackMin": min(sf.values()) if sf else None,
                 "stackMinTask": min(sf, key=sf.get) if sf else None,
             }
@@ -324,8 +325,9 @@ def score(samples, events=()):
 
     hm = [s["tasks"]["heapMinFree"] for s in samples if s.get("tasks", {}).get("heapMinFree") is not None]
     if hm:
+        af = [s["tasks"]["allocFails"] for s in samples if s.get("tasks", {}).get("allocFails") is not None]
         check("Internal RAM least free", min(hm), min(hm) >= BAR["heap_min_free_floor"],
-              f">= {BAR['heap_min_free_floor']}")
+              f">= {BAR['heap_min_free_floor']}", f"{max(af)} failed allocs" if af else "")
     sm = [(s["tasks"]["stackMin"], s["tasks"]["stackMinTask"]) for s in samples
           if s.get("tasks", {}).get("stackMin") is not None]
     if sm:

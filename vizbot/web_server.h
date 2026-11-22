@@ -2567,9 +2567,13 @@ void handleDebugTouch() {
 #endif
 
 // Each time internal RAM's low-water mark drops, what was busy right then.
-// Ticked from wifi_srv's 2 ms loop, so a dip shorter than that is still caught
-// (the mark keeps it) and is tagged with whatever is running just after.
-struct RamLow { uint32_t sec; uint32_t minFree; uint32_t freeNow; char busy[40]; };
+// Ticked from wifi_srv's 2 ms loop: samples the free internal RAM and records
+// each new low with whatever is running. Not heap_caps_get_minimum_free_size():
+// that adds up each RAM region's own low, reached at different moments, so it
+// reads far below anything real (bench 2026-11-22: it said 8.4 KB while the
+// allocator tracer's true low was 34 KB). A dip shorter than 2 ms can be missed;
+// memAllocFails() says whether one ever actually ran out.
+struct RamLow { uint32_t sec; uint32_t minFree; uint32_t maxBlock; char busy[40]; };
 static RamLow ramLows[6];   // oldest first
 static uint8_t ramLowCount = 0;
 static size_t ramLowLast = SIZE_MAX;
@@ -2578,14 +2582,14 @@ static size_t ramLowLast = SIZE_MAX;
 String ramTraceJson(bool reset);   // ram_trace.cpp (bench builds)
 #endif
 void ramLowTick() {
-  size_t m = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  size_t m = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   if (m >= ramLowLast) return;
   ramLowLast = m;
   if (ramLowCount == 6) { memmove(ramLows, ramLows + 1, 5 * sizeof(RamLow)); ramLowCount = 5; }
   RamLow& r = ramLows[ramLowCount++];
   r.sec = millis() / 1000;
   r.minFree = m;
-  r.freeNow = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  r.maxBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   char* p = r.busy;
   char* end = r.busy + sizeof(r.busy);
   #ifdef VOICE_ENABLED
@@ -2692,7 +2696,10 @@ void handleDebugTasks() {
     if (h) s[n] = uxTaskGetStackHighWaterMark(h);
   }
   d["heapFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  d["heapMinFree"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  d["heapMinFree"] = ramLowLast == SIZE_MAX ? heap_caps_get_free_size(MALLOC_CAP_INTERNAL) : ramLowLast;
+  d["heapRegionMinSum"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);   // IDF's number, see ramLowTick
+  d["allocFails"] = memAllocFails(true);
+  d["allocFailsPsram"] = memAllocFails(false);
   d["heapMaxBlock"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   if (otaTrace.magic == OTA_TRACE_MAGIC) {   // the last web-panel upload (ota_update.h)
     static const char* const phases[] = { "none", "receiving", "finishing", "done", "failed" };
@@ -2711,7 +2718,7 @@ void handleDebugTasks() {
     JsonObject o = lows.add<JsonObject>();
     o["sec"] = ramLows[i].sec;
     o["minFree"] = ramLows[i].minFree;
-    o["freeNow"] = ramLows[i].freeNow;
+    o["maxBlock"] = ramLows[i].maxBlock;
     o["busy"] = ramLows[i].busy;
   }
   String out;

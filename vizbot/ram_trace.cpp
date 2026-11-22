@@ -21,6 +21,8 @@ void* __real_realloc(void*, size_t);
 void* __real_heap_caps_malloc(size_t, uint32_t);
 void* __real_heap_caps_calloc(size_t, size_t, uint32_t);
 void* __real_heap_caps_realloc(void*, size_t, uint32_t);
+void* __real_heap_caps_aligned_alloc(size_t, size_t, uint32_t);
+void* __real_heap_caps_aligned_calloc(size_t, size_t, size_t, uint32_t);
 }
 
 struct RtEntry {
@@ -38,6 +40,11 @@ static RtEntry* rtAtMin = nullptr;      // PSRAM: the ring frozen at the low
 static RtEntry* rtCopy = nullptr;       // PSRAM: for the web handler
 static volatile uint32_t rtCount = 0, rtAtMinCount = 0;
 static uint32_t rtMinFree = UINT32_MAX, rtAtMinMs = 0;
+// Free internal RAM can only drop at an allocation, so the least free seen
+// right after any traced allocation (any size) is the real simultaneous low.
+// heap_caps_get_minimum_free_size() instead sums each region's own low, taken
+// at different times, so it can read far lower than RAM ever really was.
+static volatile uint32_t rtTrueMin = UINT32_MAX, rtTrueMinMs = 0;
 static portMUX_TYPE rtMux = portMUX_INITIALIZER_UNLOCKED;
 
 void ramTraceBegin() {
@@ -48,10 +55,17 @@ void ramTraceBegin() {
 }
 
 static inline void rtNote(void* p, size_t size, uint32_t caller) {
-  if (!p || size < RT_MIN_SIZE || !rtRing || !esp_ptr_internal(p)) return;
-  if (xPortInIsrContext()) return;
+  if (!p || !rtRing || !esp_ptr_internal(p)) return;
+  if (size < RT_MIN_SIZE) {
+    const uint32_t f = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if (f < rtTrueMin) { rtTrueMin = f; rtTrueMinMs = (uint32_t)(esp_timer_get_time() / 1000); }
+    return;
+  }
+  // ISR allocations count too (the WiFi driver refills RX buffers there);
+  // reading the free size only sums counters, so it is safe in an ISR.
+  const bool isr = xPortInIsrContext();
   const uint32_t freeNow = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  const char* name = pcTaskGetName(nullptr);
+  const char* name = isr ? "ISR" : pcTaskGetName(nullptr);
   portENTER_CRITICAL_SAFE(&rtMux);
   RtEntry& e = rtRing[rtCount % RT_RING];
   e.ms = (uint32_t)(esp_timer_get_time() / 1000);
@@ -61,6 +75,7 @@ static inline void rtNote(void* p, size_t size, uint32_t caller) {
   for (int i = 0; i < 8; i++) { e.task[i] = name ? name[i] : 0; if (!e.task[i]) break; }
   e.task[7] = 0;
   rtCount++;
+  if (freeNow < rtTrueMin) { rtTrueMin = freeNow; rtTrueMinMs = e.ms; }
   if (freeNow < rtMinFree) {
     rtMinFree = freeNow;
     rtAtMinMs = e.ms;
@@ -80,19 +95,24 @@ void* __wrap_realloc(void* o, size_t s) { void* p = __real_realloc(o, s); rtNote
 void* __wrap_heap_caps_malloc(size_t s, uint32_t c) { void* p = __real_heap_caps_malloc(s, c); rtNote(p, s, RT_CALLER); return p; }
 void* __wrap_heap_caps_calloc(size_t n, size_t s, uint32_t c) { void* p = __real_heap_caps_calloc(n, s, c); rtNote(p, n * s, RT_CALLER); return p; }
 void* __wrap_heap_caps_realloc(void* o, size_t s, uint32_t c) { void* p = __real_heap_caps_realloc(o, s, c); rtNote(p, s, RT_CALLER); return p; }
+void* __wrap_heap_caps_aligned_alloc(size_t a, size_t s, uint32_t c) { void* p = __real_heap_caps_aligned_alloc(a, s, c); rtNote(p, s, RT_CALLER); return p; }
+void* __wrap_heap_caps_aligned_calloc(size_t a, size_t n, size_t s, uint32_t c) { void* p = __real_heap_caps_aligned_calloc(a, n, s, c); rtNote(p, n * s, RT_CALLER); return p; }
 }
 
 // JSON for /debug/ramtrace (?reset=1 starts a new low).
 String ramTraceJson(bool reset) {
+  heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);   // per-region lows, to serial
   String j;
   j.reserve(9000);
-  j = "{\"minFree\":" + String(rtMinFree) + ",\"atMs\":" + String(rtAtMinMs) +
+  j = "{\"trueMin\":" + String(rtTrueMin) + ",\"trueMinMs\":" + String(rtTrueMinMs) +
+      ",\"sumOfRegionMins\":" + String(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)) +
+      ",\"minFree\":" + String(rtMinFree) + ",\"atMs\":" + String(rtAtMinMs) +
       ",\"allocs\":" + String(rtCount) + ",\"atMin\":[";
   portENTER_CRITICAL(&rtMux);
   RtEntry* copy = rtCopy;
   const uint32_t n = (rtAtMin && copy) ? rtAtMinCount : 0;
   if (n) memcpy(copy, rtAtMin, n * sizeof(RtEntry));
-  if (reset) { rtMinFree = UINT32_MAX; rtAtMinCount = 0; }
+  if (reset) { rtMinFree = UINT32_MAX; rtAtMinCount = 0; rtTrueMin = UINT32_MAX; }
   portEXIT_CRITICAL(&rtMux);
   for (uint32_t i = 0; i < n; i++) {
     const RtEntry& e = copy[i];
