@@ -1948,13 +1948,8 @@ void handleTouch() {
       if (key == RK_POWEROFF) {
         uiToast("Goodbye!", UI_C_OFF, 5000);
         runBotMode();
-        delay(300);
-        scSetServoPower(false);
-        scSetAllBaseLeds(0, 0, 0);
-        scRefreshBaseLeds();
-        M5.Display.setBrightness(0);
-        delay(200);
-        M5.Power.powerOff();
+        // MotionAO parks the head, cuts the rails, then switches off.
+        aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_APP, SC_REST_POWEROFF));
       }
 #endif
 #ifdef PWR_HOLD_PIN

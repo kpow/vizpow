@@ -787,8 +787,13 @@ String botFaceRenderStatsJson() {
 }
 
 // Dev screenshot endpoint (web_server.h) pauses rendering while it reads the
-// canvas so it gets a whole frame, not a half-drawn one.
+// canvas so it gets a whole frame, not a half-drawn one. Handshake: the web
+// task raises botRenderHold, the loop answers botRenderHeld at a frame
+// boundary, and only then does the web read. (Checking botFrameInProgress
+// instead raced: the loop could pass the hold check just before the web set
+// it, then start drawing while the web was already reading.)
 volatile bool botRenderHold = false;
+volatile bool botRenderHeld = false;
 volatile bool botFrameInProgress = false;
 
 // Code mode's outputs (party_blob.h asks, this does): the face's mouth inside the
@@ -830,7 +835,8 @@ static void codeModeIo() {
 void renderBotMode() {
   if (gfx == nullptr) return;
   if (menuVisible) return;
-  if (botRenderHold) return;
+  if (botRenderHold) { botRenderHeld = true; return; }
+  botRenderHeld = false;
   unsigned long frameNow = millis();
   if (botFrameCanSkip(frameNow)) {
     botFaceRenderStats.skipped++;

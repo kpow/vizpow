@@ -1,5 +1,21 @@
 # Stage 5 plan: NetAO, budgets, task plan
 
+**Status 2026-11-22: reduced stage 5 built (fw 3.12.1.net1), bench-checked on mac.** Measured
+first, then built only what the numbers asked for:
+- **Voice goes first.** The voice task publishes `netVoiceFlags` (turn on, wake burst open;
+  `system_status.h`). The cloud task starts no request while it is set, for up to 60 s. Bench:
+  a sync due at 318 s waited for the turn and started 70 ms after it ended. `netOverlaps` on
+  `/debug/tasks` counts any voice upload or fetch that still lands inside a cloud request (0).
+- **Manual `/cloud/sync`** now asks the cloud task to sync or register on its next poll; it no
+  longer runs TLS on `wifi_srv` (table row 7).
+- **RAM:** the "41 KB dip" and the 8.4 KB "low" were the summed per-region IDF number, not
+  real (see audio.md). The true low is 34 KB at boot, ~39 KB in a voice turn, 0 failed
+  allocations; `allocFails` / `lastAllocFail` on `/debug/tasks` watch for a real one.
+- **Not built:** a NetAO task + `net_job` (no internal RAM for more stacks, and with the
+  deferral nothing overlaps), web-handler conversions beyond stages 2–4, pinning mic/spk
+  (no measured problem), power-log batching (Kevin's battery diagnostics rely on per-beat
+  rows). The soak decides whether any of these are needed.
+
 2026-11-22, read-only, from `feat/active-objects` (3.12.0). **[V]** read in source, **[I]**
 inferred. Conventions: [README.md](README.md). Tasks: `wifi_srv` (core 0, prio 1), `cloud` (0, idle), `voice` (0, 1).
 

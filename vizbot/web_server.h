@@ -2042,14 +2042,12 @@ void handleCloudServer() {
 }
 
 void handleCloudSync() {
-  // Manual sync trigger — re-register if not yet registered
-  if (!cloudMeta.registered) {
-    bool ok = cloudRegister();
-    sysStatus.cloudRegistered = ok;
-    server.send(200, "text/plain", ok ? "Registered" : "Failed");
-  } else {
-    server.send(200, "text/plain", "OK — sync happens on next poll");
-  }
+  // Manual sync: the cloud task does it on its next poll (register first if
+  // needed). This handler used to run the TLS register on the web task, where
+  // it could overlap the cloud task's own request.
+  lastSyncAttempt = millis() - 3600000UL;
+  cloudNextPollMs = 0;
+  server.send(200, "text/plain", cloudMeta.registered ? "OK — syncing now" : "OK — registering now");
 }
 #endif
 
@@ -2419,25 +2417,14 @@ void handleScChillMinutes() {
 
 // POST /bot/poweroff — graceful shutdown
 void handleScPowerOff() {
-  server.send(200, "application/json", "{\"ok\":true,\"message\":\"Powering off...\"}");
-  delay(200);  // Let response reach client
-
-  DBGLN("Power off requested — shutting down");
-
-  // Graceful shutdown: servos off, LEDs off, display off
-  scSetServoPower(false);
-  scSetAllBaseLeds(0, 0, 0);
-  scRefreshBaseLeds();
-
-  // Clear display
-  if (gfx) {
-    gfx->beginCanvas();
-    gfx->flushCanvas();
-    M5.Display.setBrightness(0);
-  }
-
-  delay(300);
-  M5.Power.powerOff();
+  // MotionAO does it on the loop thread: park the head, cut the servo rail and
+  // the LED supply, then switch the PMU off (~1.6 s). This handler used to cut
+  // the rail itself from the web task (the head dropped unparked) and draw on
+  // the canvas from core 0 while the loop was rendering.
+  DBGLN("Power off requested — MotionAO parks and switches off");
+  const bool queued = aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_WEB, SC_REST_POWEROFF));
+  server.send(queued ? 200 : 503, "application/json",
+              queued ? "{\"ok\":true,\"message\":\"Powering off...\"}" : "{\"ok\":false,\"error\":\"busy, try again\"}");
 }
 
 // GET /bot/camera/enable[?on=0|1] — saved camera switch (photos on/off), applies at once.
@@ -2504,9 +2491,10 @@ void handleDebugScreen() {
   extern const uint16_t* lcdCanvasBuffer();
   const uint16_t* buf = lcdCanvasBuffer();
   if (!buf) { server.send(503, "text/plain", "no canvas"); return; }
-  extern volatile bool botRenderHold, botFrameInProgress;
+  extern volatile bool botRenderHold, botRenderHeld;
+  botRenderHeld = false;
   botRenderHold = true;
-  for (int i = 0; i < 50 && botFrameInProgress; i++) delay(2);
+  for (int i = 0; i < 100 && !botRenderHeld; i++) delay(2);   // the loop parks at a frame boundary
   size_t len = (size_t)LCD_WIDTH * LCD_HEIGHT * 2;
   server.setContentLength(len);
   server.send(200, "application/octet-stream", "");
@@ -2528,9 +2516,10 @@ void handleDebugPanelCheck() {
   extern const uint16_t* lcdCanvasBuffer();
   const uint16_t* buf = lcdCanvasBuffer();
   if (!buf) { server.send(503, "text/plain", "no canvas"); return; }
-  extern volatile bool botRenderHold, botFrameInProgress;
+  extern volatile bool botRenderHold, botRenderHeld;
+  botRenderHeld = false;
   botRenderHold = true;
-  for (int i = 0; i < 50 && botFrameInProgress; i++) delay(2);
+  for (int i = 0; i < 100 && !botRenderHeld; i++) delay(2);   // the loop parks at a frame boundary
   delay(5);
   static uint16_t row[LCD_WIDTH];
   uint32_t same = 0, swapped = 0, badRows = 0, firstBadY = 0xFFFF, zeros = 0;
@@ -2700,6 +2689,7 @@ void handleDebugTasks() {
   d["heapRegionMinSum"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);   // IDF's number, see ramLowTick
   d["allocFails"] = memAllocFails(true);
   d["allocFailsPsram"] = memAllocFails(false);
+  d["netOverlaps"] = netOverlaps;   // voice upload/fetch during a cloud request (system_status.h)
   {
     const MemAllocFail f = memLastAllocFail();
     if (f.size) {
@@ -2717,6 +2707,12 @@ void handleDebugTasks() {
   led["unchanged"] = scLedStats.unchanged;
   led["lockMiss"] = scLedStats.lockMiss;
   led["fails"] = scLedStats.fails;
+  JsonObject pw = d["powerSnap"].to<JsonObject>();   // BusAO (stackchan_base.h)
+  pw["reads"] = scPower.reads;
+  pw["misses"] = scPower.misses;
+  pw["ageMs"] = scPower.atMs ? millis() - scPower.atMs : -1;
+  pw["volts"] = scPower.volts;
+  pw["vbusMv"] = scPower.vbusMv;
 #endif
   d["heapMaxBlock"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   if (otaTrace.magic == OTA_TRACE_MAGIC) {   // the last web-panel upload (ota_update.h)
@@ -2947,7 +2943,11 @@ void handleDebugPower() {
     #ifdef BOARD_HAS_STACKCHAN_BASE
     scTouchAskRestart(1500);   // a rail was switched: fresh touch reference
     #endif
+    // Let the rail settle without the bus lock: holding it here starved every
+    // other bus user (LEDs, touch, MotionAO) for half a second.
+    i2cRelease();
     delay(500);
+    if (!i2cAcquire(200)) { server.send(503, "text/plain", "I2C busy"); return; }
     d["ext"] = server.arg("ext") == "1";
     #ifdef BOARD_HAS_STACKCHAN_BASE
     if (server.arg("save") == "1") { sc5vSave(server.arg("ext") == "1"); d["saved"] = true; }

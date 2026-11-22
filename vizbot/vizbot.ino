@@ -186,6 +186,7 @@ static void scAoStart() {
   aoSubscribe(scAppAO, SIG_TOUCH_HOLD);
   aoSubscribe(scAppAO, SIG_TOUCH_NEED_STILL);
   scMotionAOStart();                   // after the app AO: it acts on taps by posting gestures
+  scBusAOStart();                      // power sensors: one owner, a snapshot for everyone else
   aoPublish(SIG_BOOT_READY, SRC_APP);
 }
 #endif

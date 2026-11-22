@@ -1585,6 +1585,16 @@ void pollCloudSync() {
   }
   if (now < cloudNextPollMs) return;
 
+  // Voice goes first: no cloud request while a turn or a wake burst is on,
+  // for up to 60 s (a TV keeping the wake gate busy must not stop syncs).
+  static uint32_t deferSinceMs = 0;
+  if (netVoiceFlags && (!deferSinceMs || now - deferSinceMs < 60000)) {
+    if (!deferSinceMs) deferSinceMs = now | 1;
+    cloudNextPollMs = now + 500;
+    return;
+  }
+  deferSinceMs = 0;
+
   if (cloudTokenRetry && (int32_t)(now - cloudTokenRetryAtMs) >= 0) {
     cloudTokenRetry = false;
     cloudNoTokenServer = false;

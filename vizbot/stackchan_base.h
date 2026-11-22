@@ -640,6 +640,49 @@ inline void sc5vLearnAtRest() {
   sc5vSwitch(false);
 }
 
+// ============================================================================
+// BusAO (stage 4 step 5, docs/ao-plans/bus-ui.md): the power sensors
+// ============================================================================
+// Once a second, on the loop thread, one locked pass reads the INA226 (battery
+// volts and amps) and the AXP2101 (VBUS, VSYS). Everyone else reads this
+// snapshot: /state and /bot/battery/status (the web task used to read the
+// INA226 itself on every poll), battery care, the power log, the touch UI.
+// A busy bus is retried on the next 100 ms tick, never read unlocked.
+struct ScPowerSnap {
+  float    volts, amps;
+  int      vbusMv, vsysMv;
+  uint32_t atMs;              // 0 = no reading yet
+  uint32_t reads, misses;     // samples taken; ticks the bus was busy
+};
+static ScPowerSnap scPower = {};
+static AoActive scBusAO;
+#define SC_BUS_POWER_MS 1000
+
+static void scBusSamplePower(uint32_t now) {
+  if (scPower.atMs && now - scPower.atMs < SC_BUS_POWER_MS) return;
+  ScI2cLock lock(0);
+  if (!lock.held) { scPower.misses++; return; }
+  ScPowerSnap p = scPower;
+  p.volts = scChan.getBatteryVoltage();
+  p.amps = scChan.getBatteryCurrent();
+  p.vbusMv = (int)(M5.Power.Axp2101.getVBUSVoltage() * 1000);
+  p.vsysMv = ((M5.Power.Axp2101.readRegister8(0x3A) & 0x3F) << 8) | M5.Power.Axp2101.readRegister8(0x3B);
+  p.atMs = now ? now : 1;
+  p.reads++;
+  scPower = p;   // one owner thread writes; readers on other tasks take a float at a time
+}
+
+static void scBusOnEvent(const AoEvt& e) {
+  if (e.sig == SIG_TICK && sysStatus.scBatteryMonReady) scBusSamplePower(millis());
+}
+
+inline void scBusAOStart() {
+  scBusAO.name = "bus";
+  scBusAO.onEvent = scBusOnEvent;
+  scBusAO.tickMs = 100;
+  aoStart(scBusAO);
+}
+
 // Call once per loop.
 inline void scBatteryCareTick() {
   static uint32_t nextMs = 0;
@@ -649,15 +692,9 @@ inline void scBatteryCareTick() {
   if ((int32_t)(now - nextMs) < 0) return;
   nextMs = now + SC_BATT_CHECK_MS;
 
-  float volts, amps;
-  bool onUsb;
-  {
-    ScI2cLock lock(20);
-    if (!lock.held) return;
-    volts = scChan.getBatteryVoltage();
-    amps  = scChan.getBatteryCurrent();
-    onUsb = M5.Power.Axp2101.getVBUSVoltage() > 4.0f;
-  }
+  if (!scPower.atMs || now - scPower.atMs > 3 * SC_BUS_POWER_MS) return;   // BusAO's snapshot
+  const float volts = scPower.volts, amps = scPower.amps;
+  const bool onUsb = scPower.vbusMv > 4000;
   if (volts < 2.0f) return;   // no reading (I2C not up yet, or a failed read)
 
   if (sc5vAutoOff) {
@@ -717,20 +754,9 @@ inline bool scIsTouched() {
   return (v[0] != 0 || v[1] != 0 || v[2] != 0);
 }
 
-// The last good reading when the bus is busy (never read unlocked).
-inline float scGetBatteryVoltage() {
-  static float last = 0;
-  ScI2cLock lock(20);
-  if (lock.held) last = scChan.getBatteryVoltage();
-  return last;
-}
-
-inline float scGetBatteryCurrent() {
-  static float last = 0;
-  ScI2cLock lock(20);
-  if (lock.held) last = scChan.getBatteryCurrent();
-  return last;
-}
+// BusAO's snapshot, up to ~1 s old: no bus access from any caller's task.
+inline float scGetBatteryVoltage() { return scPower.volts; }
+inline float scGetBatteryCurrent() { return scPower.amps; }
 
 // ============================================================================
 // MotionAO (stage 2, docs/ao-plans/motion.md)
@@ -1045,8 +1071,11 @@ inline void scMotionOnEvent(const AoEvt& e) {
         scMo.state = SC_MS_REST; scMo.sub = SC_SUB_POWEROFF; scMo.atMs = now;
         return;
       }
+      if (st == SC_MS_REST && (e.a & SC_REST_POWEROFF)) { scMo.restFlags |= SC_REST_POWEROFF; return; }  // finish it, then off
       if (st == SC_MS_REST || st == SC_MS_RESTED) return;        // already on it
-      if (st == SC_MS_RECOVER || st == SC_MS_WAKE) { scMotionDrop(SC_MK_REST); return; }  // battery care asks again
+      // A switch-off beats a rail cycle or a wake: it ends with every rail off
+      // anyway. A plain rest is dropped there; battery care asks again.
+      if ((st == SC_MS_RECOVER || st == SC_MS_WAKE) && !(e.a & SC_REST_POWEROFF)) { scMotionDrop(SC_MK_REST); return; }
       scMotionStartRest(e.a, now);                                // beats a gesture
       return;
     case SIG_MOTION_WAKE:

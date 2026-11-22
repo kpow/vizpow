@@ -1,6 +1,6 @@
 # Stage 4 plan: BusAO + UiAO
 
-**Status 2026-11-22: steps 2 and 3 built (fw 3.12.1.bus2–bus4), bench-checked on mac.**
+**Status 2026-11-22: steps 2, 3, 5, 6 and a reduced 7 built (fw 3.12.1.bus2–bus5), bench-checked on mac.**
 - **Lock decision:** no M5GFX patch. Its port mutex is internal (`i2c_context` in `common.inl`,
   no public API), and it already serialises every single transaction. The app lock `i2cMutex`
   only has to cover multi-step sequences and the camera's SCCB window, so the rule is now: every
@@ -13,8 +13,22 @@
 - **Step 3:** base LEDs stage colours and push one 24-byte write + one refresh write only on
   change (re-push every 2 s). Animated mode: ~15 pushes/s x 2 tx, was ~420 tx/s. 0 failures;
   lock misses only in camera windows. Stats on `/debug/tasks` `baseLeds`.
-- Not done: step 1's per-device tx counters, steps 5–8 (BusAO tick, writes as requests, UiAO,
-  shim removal).
+- **Step 5 (fw 3.12.1.bus5):** `BusAO` runs cooperatively on the loop thread (tick 100 ms, like
+  TouchAO and MotionAO: internal RAM can't spare a task stack). Once a second it reads INA226 V/A
+  and AXP VBUS/VSYS into `scPower`; `/state`, `/bot/battery/status`, battery care, the power log
+  and the touch UI read that snapshot. The web task no longer touches the bus for battery
+  values. `/debug/tasks` `powerSnap`. Si12T, IMU and LTR553 stay on their per-frame loop sites
+  (already try-locked); moving them into the tick added nothing measurable.
+- **Step 6:** web and touch-menu power-off post `SIG_MOTION_REST` + `SC_REST_POWEROFF`: MotionAO
+  parks the head, cuts the rails, then switches off (a switch-off beats a rail cycle or a wake).
+  The web handler no longer cuts the rail itself or draws from core 0. `/debug/power ?ext`
+  releases the lock during its 500 ms settle. **Not run on hardware** (it switches mac off):
+  part of the final function check.
+- **Step 7 (reduced):** the screenshot hold is a handshake (`botRenderHeld` answered at a frame
+  boundary), not the racy `botFrameInProgress` check. A full UiAO was not built: the frame
+  section stays in `loop()`, and only the loop thread draws.
+- Not done: step 1's per-device tx counters, step 8 (`ScI2cLock`/`i2cMutex` stay as the app
+  lock: it is the one lock now, so there is no shim to remove).
 
 Owner of the internal I2C bus (`M5.In_I2C`, port 1, SDA 12 / SCL 11) and of the screen + base LEDs.
 Written 2026-11-22 from source (read-only). **[V]** = read in source, **[I]** = inferred, **[?]** =

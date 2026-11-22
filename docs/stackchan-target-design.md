@@ -54,8 +54,8 @@ and the other 4 boards keep building throughout.
 | 1 ✅ | Core: event bus, timeline, AO base; `TouchAO` | cold-boot storm, chains 1–4 | about 1 day |
 | 2 ✅ | `MotionAO`; web handlers post events | loop stalls, core-0 hardware races | 1–2 days |
 | 3 ✅ | `AudioAO` | codec reset per turn, mic races | about 1 day |
-| 4 | `BusAO` + `UiAO` | lock gaps, ~400 needless I2C transactions a second | 1–2 days |
-| 5 | `NetAO` + budgets | RAM and WiFi starvation | about 1 day |
+| 4 ✅ | `BusAO` + `UiAO` (reduced: see ao-plans/bus-ui.md) | lock gaps, ~400 needless I2C transactions a second | 1–2 days |
+| 5 ✅ | `NetAO` + budgets (reduced: see ao-plans/net-budgets.md) | RAM and WiFi starvation | about 1 day |
 | Done | 24 h normal + 8 h heavy soak, function check | — | 1.5 days |
 
 Each stage is checked on the bench in about 10 minutes: flash, exercise what it

@@ -132,7 +132,13 @@ struct VoiceClient {
 VoiceClient voice;
 
 // Every state change goes through here so the render loop sees it too
-static void voiceSetState(VoiceState s) { voice.state = s; voicePhase = s; }
+static void voiceSetState(VoiceState s) {
+  voice.state = s;
+  voicePhase = s;
+  if (s != VOICE_IDLE) netVoiceFlags |= NET_VOICE_TURN;
+  else netVoiceFlags &= ~NET_VOICE_TURN;
+  if ((s == VOICE_THINKING || s == VOICE_SPEAKING) && cloudNetHeld()) netOverlaps++;
+}
 
 // Wake-word mic stream state (see "Wake-word mic stream" below).
 #define WAKE_UDP_PORT        4051
@@ -1149,6 +1155,8 @@ void voiceTask(void*) {
       voiceRunPlay();
     } else {
       // Idle: AudioAO runs the mic for the wake stream, or for FX alone.
+      if (wake.open) netVoiceFlags |= NET_VOICE_BURST;
+      else netVoiceFlags &= ~NET_VOICE_BURST;
       if (voice.enabled) voicePollSenses();
       if (voice.enabled && wakeShouldRun() && (wake.active || wakeStart())) {
         wakeStep();            // paced by the mic: no extra delay
