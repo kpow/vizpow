@@ -35,6 +35,9 @@
 
 #include "config.h"
 #include "mem.h"            // Memory owner: every runtime buffer, by name (see /debug/mem)
+#ifdef VIZ_RAM_TRACE
+void ramTraceBegin();       // ram_trace.cpp (bench builds)
+#endif
 #include "device_id.h"  // Per-device unique SSID + mDNS hostname (from eFuse MAC)
 #include "palettes.h"
 #include "loop_stats.h"     // Real loop/push timing for GET /state (must come before display_lcd.h)
@@ -444,6 +447,9 @@ void setup() {
   batteryAdc.init();
   #endif
   memInit();   // mem.h: TLS memory goes to PSRAM. Before any TLS.
+#ifdef VIZ_RAM_TRACE
+  ramTraceBegin();   // bench: internal-RAM allocation tracer (ram_trace.cpp)
+#endif
   Serial.begin(115200);
   delay(500);
 

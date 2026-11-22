@@ -169,3 +169,15 @@ only. Other boards keep `cloudTask` + `wifi_srv`. `cloudNetHeld()`, `cloudNetHol
 - Flash writes per hour, the duration of each, and none inside a motion, BULK or mic window.
 - **Touch contacts against `NET_TX` windows.** This answers whether WiFi bursts at 19.5 dBm
   cause blips (collision 1). If they do, try 15 dBm on mac as a separate experiment.
+
+## Measured 2026-11-22: the internal-RAM dips were WiFi TX buffers (fixed)
+
+The RAM tracer (`env:stackchan-ramtrace`, `vizbot/ram_trace.cpp`, `GET /debug/ramtrace`)
+wraps the allocator and freezes the allocations leading to each new internal-RAM low.
+Arduino's WiFi uses dynamic TX buffers (no `WiFi.useStaticBuffers`), so every queued
+packet holds a ~1.2 KB internal buffer until it is on the air. The wake pre-roll sent
+32 packets 1 ms apart and queued 24 of them in 70 ms: free internal RAM 51.7 → 22.2 KB
+idle, 3.8 KB when it landed in a voice turn. Fix (`voice_client.h`): the pre-roll waits
+while more than `WAKE_TX_INFLIGHT` (6) packets' worth of internal RAM is held. After:
+lowest 38.6 KB over 7 min including a full voice turn (the remaining dip is a ~2.4 KB
+String in a web handler).

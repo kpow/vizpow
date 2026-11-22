@@ -138,6 +138,7 @@ static void voiceSetState(VoiceState s) { voice.state = s; voicePhase = s; }
 #define WAKE_UDP_PORT        4051
 #define WAKE_RING_CHUNKS     40       // 1.28 s of 32 ms chunks in PSRAM
 #define WAKE_PREROLL_CHUNKS  32       // ~1 s sent ahead of the chunk that opened the gate
+#define WAKE_TX_INFLIGHT     6        // pre-roll packets the WiFi driver may hold at once (internal RAM)
 #define WAKE_HANGOVER_MS     1500     // quiet time that closes the gate
 #define WAKE_OPEN_RATIO      2.5f     // gate opens above 2.5x the noise floor
 #define WAKE_FLOOR_RMS       150.0f   // ...and never below this
@@ -992,10 +993,19 @@ static void wakeProcessChunk(uint32_t idx) {
     wake.bursts++;
     uint32_t avail = min((uint32_t)WAKE_PREROLL_CHUNKS, wake.chunks - 1);
     avail = min(avail, idx);
+    // TX budget. Every queued packet holds a ~1.2 KB WiFi TX buffer in internal
+    // RAM until it is on the air, and Arduino's WiFi uses dynamic TX buffers:
+    // sent 1 ms apart, the pre-roll queued 24 of them (29 KB) in 70 ms, measured
+    // with the RAM tracer 2026-11-22. Keep at most WAKE_TX_INFLIGHT in the driver.
+    const size_t freeAtStart = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    const size_t txFloor = freeAtStart > WAKE_TX_INFLIGHT * 1300 ? freeAtStart - WAKE_TX_INFLIGHT * 1300 : 0;
     for (uint32_t k = idx - avail; k < idx; k++) {
+      for (int w = 0; w < 50 && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < txFloor; w++) {
+        vTaskDelay(pdMS_TO_TICKS(2));                   // let the radio drain
+      }
       wakeSend(k, k == idx - avail ? WAKE_F_START : 0, wakeChunk(k), VOICE_CHUNK * sizeof(int16_t));
       if (!wake.open) return;                           // sends failed and backed off
-      vTaskDelay(1);   // ~1 s of audio at once otherwise outruns the 8 WiFi TX buffers
+      vTaskDelay(1);
     }
     wakeSend(idx, avail ? 0 : WAKE_F_START, c, VOICE_CHUNK * sizeof(int16_t));
     return;

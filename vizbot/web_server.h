@@ -2574,6 +2574,9 @@ static RamLow ramLows[6];   // oldest first
 static uint8_t ramLowCount = 0;
 static size_t ramLowLast = SIZE_MAX;
 
+#ifdef VIZ_RAM_TRACE
+String ramTraceJson(bool reset);   // ram_trace.cpp (bench builds)
+#endif
 void ramLowTick() {
   size_t m = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
   if (m >= ramLowLast) return;
@@ -3225,6 +3228,11 @@ void setupWebServer() {
   server.on("/brightness", handleBrightness);
   server.on("/debug/wifidrop", handleDebugWifiDrop);
   server.on("/debug/tasks", handleDebugTasks);
+#ifdef VIZ_RAM_TRACE
+  server.on("/debug/ramtrace", []() {
+    server.send(200, "application/json", ramTraceJson(server.hasArg("reset")));
+  });
+#endif
   server.on("/debug/mem", handleDebugMem);
   server.on("/debug/crash", handleDebugCrash);
   #ifdef TARGET_CORES3
