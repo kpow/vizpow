@@ -71,9 +71,10 @@ inline bool cloudNetHeld() {
 
 // The voice side's network use, set by the voice task (voice_client.h):
 // bit 0 = a turn is on (upload, reply fetch), bit 1 = a wake burst is open.
-// Cloud requests start only when it is clear (stage 5, docs/ao-plans/net-budgets.md):
+// Cloud requests wait for a turn to end (stage 5, docs/ao-plans/net-budgets.md):
 // a TLS sync beside a voice upload took internal RAM and TX buffers from both
 // and delayed the reply. The cloud task defers at most 60 s, then goes anyway.
+// The burst bit is for diagnostics; the stream itself yields to the cloud.
 #define NET_VOICE_TURN  1
 #define NET_VOICE_BURST 2
 volatile uint8_t netVoiceFlags = 0;
