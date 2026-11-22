@@ -1868,9 +1868,11 @@ void handleTouch() {
   // so on Stackchan it takes the same mutex as the servo/battery peripherals.
   #ifdef BOARD_HAS_STACKCHAN_BASE
   {
-    bool held = i2cAcquire(50);
-    M5.update();
-    if (held) i2cRelease();
+    // Skip a frame rather than wait (or read unlocked) when the bus is busy.
+    if (i2cTry(0)) {
+      M5.update();
+      i2cRelease();
+    }
   }
   #else
   M5.update();

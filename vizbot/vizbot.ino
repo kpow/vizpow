@@ -358,11 +358,12 @@ void introAnimation() {
 
 void readIMU() {
   #ifdef TARGET_CORES3
-  // BMI270 via M5Unified — no I2C mutex needed (M5Unified manages internally),
-  // but stay off the bus while the camera configures its sensor.
-  if (i2cInLongHold()) return;
+  // BMI270 via M5Unified: M5's bus mutex covers each transaction, but not the
+  // camera's SCCB window, which holds the app lock. Skip this frame if busy.
+  if (!i2cTry(0)) return;
   M5.Imu.getAccel(&accelX, &accelY, &accelZ);
   M5.Imu.getGyro(&gyroX, &gyroY, &gyroZ);
+  i2cRelease();
   #else
   if (!i2cAcquire()) return;  // Skip this cycle if bus is busy
   if (imu.getDataReady()) {

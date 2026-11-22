@@ -1,5 +1,21 @@
 # Stage 4 plan: BusAO + UiAO
 
+**Status 2026-11-22: steps 2 and 3 built (fw 3.12.1.bus2–bus4), bench-checked on mac.**
+- **Lock decision:** no M5GFX patch. Its port mutex is internal (`i2c_context` in `common.inl`,
+  no public API), and it already serialises every single transaction. The app lock `i2cMutex`
+  only has to cover multi-step sequences and the camera's SCCB window, so the rule is now: every
+  bus user takes `i2cMutex` or skips; nobody touches the bus after a failed lock.
+- **Step 2:** the camera holds the lock for its whole start (no lock, no start) and stop. The
+  3 s "long hold" stretch is gone. `M5.update()`, IMU and LTR553 try-lock (`i2cTry(0)`) and
+  skip the frame. Battery getters return the last good value. `scSetServoPower` reports a busy
+  bus. The voice task's codec begin/end hold the lock (it may wait up to 2 s).
+  Result: a photo stalled the loop ~370 ms; now the loop max stays at its normal 85–115 ms.
+- **Step 3:** base LEDs stage colours and push one 24-byte write + one refresh write only on
+  change (re-push every 2 s). Animated mode: ~15 pushes/s x 2 tx, was ~420 tx/s. 0 failures;
+  lock misses only in camera windows. Stats on `/debug/tasks` `baseLeds`.
+- Not done: step 1's per-device tx counters, steps 5–8 (BusAO tick, writes as requests, UiAO,
+  shim removal).
+
 Owner of the internal I2C bus (`M5.In_I2C`, port 1, SDA 12 / SCL 11) and of the screen + base LEDs.
 Written 2026-11-22 from source (read-only). **[V]** = read in source, **[I]** = inferred, **[?]** =
 not verified. Line numbers are the working tree (3.12.0 + uncommitted touch-context logging).

@@ -43,6 +43,7 @@ extern SystemStatus sysStatus;
 // not address that, so this mutex stays. (Declared here rather than included:
 // task_manager.h is pulled in after the stackchan headers in vizbot.ino.)
 bool i2cAcquire(uint32_t timeoutMs);
+bool i2cTry(uint32_t timeoutMs);
 void i2cRelease();
 
 // power_log.h (included after this header): one row in the power log.
@@ -283,27 +284,73 @@ inline bool scInitPhotoFs() {
 // Runtime API — same surface as before, now backed by BSP
 // ============================================================================
 
-inline void scSetBaseLedColor(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
-  if (!sysStatus.scBaseLedsReady) return;
-  ScI2cLock lock;
-  scChan.setRgbColor(index, r, g, b);
-}
+// Base LEDs (stage 4 step 3, docs/ao-plans/bus-ui.md). Setting a colour only
+// stages it; scRefreshBaseLeds() pushes the frame. It used to be 12 colour
+// writes + a refresh read-modify-write every frame (~420 I2C transactions a
+// second at 30 fps, most of the bus traffic). Now it is one 24-byte write to the
+// PY32's LED RAM + one refresh write, only when a colour changed, plus a re-push
+// every 2 s in case the PY32 lost its LED RAM. On a busy bus the frame is
+// skipped (the next one carries the same colours), never written unlocked.
+#define SC_PY32_ADDR        0x6F
+#define SC_PY32_LED_CFG     0x24
+#define SC_PY32_LED_RAM     0x30
+#define SC_PY32_LED_REFRESH 0x40
+#define SC_LED_REPUSH_MS    2000
+static uint16_t scLedNext[SC_BASE_LED_COUNT];     // staged frame, RGB565
+static uint16_t scLedShown[SC_BASE_LED_COUNT];    // last frame the PY32 took
+static uint32_t scLedPushedMs = 0;
+static int16_t  scLedCfg = -1;                    // LED_CFG, read once (refresh bit clear)
+struct ScLedStats { uint32_t pushes, unchanged, lockMiss, fails; };
+static ScLedStats scLedStats = {};
 
-inline void scSetAllBaseLeds(uint8_t r, uint8_t g, uint8_t b) {
-  if (!sysStatus.scBaseLedsReady) return;
-  ScI2cLock lock;
-  scChan.showRgbColor(r, g, b);   // sets all 12 and refreshes
+inline void scSetBaseLedColor(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
+  if (index >= SC_BASE_LED_COUNT) return;
+  scLedNext[index] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
 inline void scRefreshBaseLeds() {
   if (!sysStatus.scBaseLedsReady) return;
-  ScI2cLock lock;
-  scChan.refreshRgb();
+  const uint32_t now = millis();
+  if (!i2cTry(0)) { scLedStats.lockMiss++; return; }
+  if (memcmp(scLedNext, scLedShown, sizeof(scLedNext)) == 0 && now - scLedPushedMs < SC_LED_REPUSH_MS) {
+    i2cRelease();
+    scLedStats.unchanged++;
+    return;
+  }
+  uint8_t buf[SC_BASE_LED_COUNT * 2];
+  for (int i = 0; i < SC_BASE_LED_COUNT; i++) {
+    buf[i * 2] = scLedNext[i] & 0xFF;        // low byte first, as BSP's setLedColor
+    buf[i * 2 + 1] = scLedNext[i] >> 8;
+  }
+  bool ok = true;
+  if (scLedCfg < 0) {
+    uint8_t cfg = 0;
+    ok = M5.In_I2C.readRegister(SC_PY32_ADDR, SC_PY32_LED_CFG, &cfg, 1, 100000);
+    if (ok) scLedCfg = cfg & ~SC_PY32_LED_REFRESH;
+  }
+  ok = ok && M5.In_I2C.writeRegister(SC_PY32_ADDR, SC_PY32_LED_RAM, buf, sizeof(buf), 100000);
+  ok = ok && M5.In_I2C.writeRegister8(SC_PY32_ADDR, SC_PY32_LED_CFG, (uint8_t)scLedCfg | SC_PY32_LED_REFRESH, 100000);
+  i2cRelease();
+  if (ok) {
+    memcpy(scLedShown, scLedNext, sizeof(scLedNext));
+    scLedPushedMs = now;
+    scLedStats.pushes++;
+  } else {
+    scLedStats.fails++;   // retried next frame: shown != next
+  }
 }
 
-inline void scSetServoPower(bool enabled) {
-  ScI2cLock lock;
+inline void scSetAllBaseLeds(uint8_t r, uint8_t g, uint8_t b) {
+  for (int i = 0; i < SC_BASE_LED_COUNT; i++) scSetBaseLedColor(i, r, g, b);
+  scRefreshBaseLeds();
+}
+
+// False if the bus stayed busy (nothing was written).
+inline bool scSetServoPower(bool enabled) {
+  ScI2cLock lock(500);
+  if (!lock.held) return false;
   scChan.setServoPowerEnabled(enabled);
+  return true;
 }
 
 // When the head will be still again (millis). The camera's motion check skips
@@ -670,14 +717,19 @@ inline bool scIsTouched() {
   return (v[0] != 0 || v[1] != 0 || v[2] != 0);
 }
 
+// The last good reading when the bus is busy (never read unlocked).
 inline float scGetBatteryVoltage() {
-  ScI2cLock lock;
-  return scChan.getBatteryVoltage();
+  static float last = 0;
+  ScI2cLock lock(20);
+  if (lock.held) last = scChan.getBatteryVoltage();
+  return last;
 }
 
 inline float scGetBatteryCurrent() {
-  ScI2cLock lock;
-  return scChan.getBatteryCurrent();
+  static float last = 0;
+  ScI2cLock lock(20);
+  if (lock.held) last = scChan.getBatteryCurrent();
+  return last;
 }
 
 // ============================================================================

@@ -67,7 +67,6 @@ static ScCamMotion scCamMotion;
 
 extern bool i2cAcquire(uint32_t timeoutMs);   // task_manager.h
 extern void i2cRelease();
-extern void i2cSetLongHold(bool on);
 
 static bool scCamDetected = false;           // sensor answered at boot
 static volatile bool scCamRunning = false;   // driver up (only during a photo)
@@ -147,11 +146,11 @@ static esp_err_t scCameraStart() {
   // driver hands over PSRAM-mode frames unchecked and they come out as shifted
   // noise (tried with and without GDMA burst). Default mode checks each frame.
   esp_camera_set_psram_mode(false);
-  i2cSetLongHold(true);    // other I2C users wait for the sensor setup, not barge in
-  bool held = i2cAcquire(1000);
+  // The sensor setup runs with the app I2C lock held: every other bus user
+  // try-locks and skips meanwhile. No lock, no start (never SCCB unlocked).
+  if (!i2cAcquire(1000)) return ESP_ERR_TIMEOUT;
   esp_err_t err = esp_camera_init(&c);
-  if (held) i2cRelease();
-  i2cSetLongHold(false);
+  i2cRelease();
   scCamRunning = (err == ESP_OK);
   return err;
 }
@@ -160,13 +159,13 @@ static esp_err_t scCameraStart() {
 // bus; M5 keeps it.
 static void scCameraStop() {
   if (!scCamRunning) return;
-  i2cSetLongHold(true);
-  bool held = i2cAcquire(1000);
+  // Waits longer than a start: a stop that gives up would leak the driver's
+  // 32 KB internal DMA buffer. Every other holder lets go within ~1 s.
+  bool held = i2cAcquire(3000);
   esp_camera_deinit();
   scCameraReleaseDma();
   scCamRunning = false;
   if (held) i2cRelease();
-  i2cSetLongHold(false);
 }
 
 inline bool scInitCamera() {

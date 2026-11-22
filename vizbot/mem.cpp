@@ -124,11 +124,18 @@ static void  memTlsFree(void* p)                 { memFree(MEM_TLS, p); }
 // Every allocation the heap refused, anywhere in the firmware or framework:
 // the real "ran out of RAM" signal (the free-size lows only say how close).
 static volatile uint32_t memFailsInternal = 0, memFailsOther = 0;
+static MemAllocFail memLastFail = {};
 static void memOnAllocFail(size_t size, uint32_t caps, const char* fn) {
-  (void)size; (void)fn;
   if (caps & MALLOC_CAP_SPIRAM) memFailsOther++; else memFailsInternal++;
+  memLastFail.size = size;
+  memLastFail.caps = caps;
+  memLastFail.ms = (uint32_t)(esp_timer_get_time() / 1000);
+  memLastFail.fn = fn;
+  const char* t = xPortInIsrContext() ? "ISR" : pcTaskGetName(nullptr);
+  strncpy(memLastFail.task, t ? t : "?", sizeof(memLastFail.task) - 1);
 }
 uint32_t memAllocFails(bool internal) { return internal ? memFailsInternal : memFailsOther; }
+MemAllocFail memLastAllocFail() { return memLastFail; }
 
 void memInit() {
   mbedtls_platform_set_calloc_free(memTlsCalloc, memTlsFree);

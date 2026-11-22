@@ -2700,6 +2700,24 @@ void handleDebugTasks() {
   d["heapRegionMinSum"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);   // IDF's number, see ramLowTick
   d["allocFails"] = memAllocFails(true);
   d["allocFailsPsram"] = memAllocFails(false);
+  {
+    const MemAllocFail f = memLastAllocFail();
+    if (f.size) {
+      JsonObject o = d["lastAllocFail"].to<JsonObject>();
+      o["size"] = f.size;
+      o["caps"] = f.caps;
+      o["ms"] = f.ms;
+      o["fn"] = f.fn ? f.fn : "";
+      o["task"] = f.task;
+    }
+  }
+#ifdef BOARD_HAS_STACKCHAN_BASE
+  JsonObject led = d["baseLeds"].to<JsonObject>();   // base LED pushes (stackchan_base.h)
+  led["pushes"] = scLedStats.pushes;
+  led["unchanged"] = scLedStats.unchanged;
+  led["lockMiss"] = scLedStats.lockMiss;
+  led["fails"] = scLedStats.fails;
+#endif
   d["heapMaxBlock"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   if (otaTrace.magic == OTA_TRACE_MAGIC) {   // the last web-panel upload (ota_update.h)
     static const char* const phases[] = { "none", "receiving", "finishing", "done", "failed" };
