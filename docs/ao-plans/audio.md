@@ -1,5 +1,20 @@
 # Stage 3 plan: AudioAO
 
+**Status 2026-11-22: built (fw 3.12.1.ao6/ao7), bench-checked on mac.** The voice task is the
+only owner of `M5.Mic` and `M5.Speaker`. The mic starts once at boot and runs through LISTEN
+and THINK. Silent replies (Mac speaker, or volume 0) never start the bot's speaker or amp: a
+clock paces the mouth instead. The FX analyzer only reads the wake tap; it never opens the mic.
+Timeline check: one `micStart` at boot, no mic stop or amp edge in a Mac-speaker turn, the reply
+was answered, and FX on/off left the mic alone. Also fixed on the way: OTA uploads starved IDLE0
+into a watchdog reset (yield every 16 chunks), and the wake pre-roll burst queued about 24 WiFi
+TX buffers (paced, see net-budgets.md).
+
+RAM: `/debug/tasks` `heapMinFree` used to be `heap_caps_get_minimum_free_size`, which adds up
+each region's own low taken at different moments (it said 8.4 KB). An allocator tracer
+(`env:stackchan-ramtrace`, `/debug/ramtrace`) showed the real low was 34 KB at boot and about
+39–47 KB in a voice turn. `heapMinFree` is now the free RAM sampled every 2 ms. The old number
+stays as `heapRegionMinSum`, and `allocFails` counts refused allocations (0).
+
 Written 2026-11-22 from a read of `feat/active-objects` (3.12.0 + working tree) and
 M5Unified 0.2.29 in `vizbot/.pio/libdeps/stackchan`. Nothing changed or flashed.
 **[V]** = read in source. **[I]** = inferred, to measure. GitNexus (11 commits
