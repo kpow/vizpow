@@ -12,6 +12,7 @@
 #include "palettes.h"
 #include "ota_update.h"
 extern uint16_t staReconnects;   // wifi_provisioning.h (STA rejoin watchdog)
+void staProbeJson(JsonObject o);   // wifi_provisioning.h (dead-link probe)
 
 // External references to globals
 extern WebServer server;
@@ -2690,6 +2691,7 @@ void handleDebugTasks() {
   d["allocFails"] = memAllocFails(true);
   d["allocFailsPsram"] = memAllocFails(false);
   d["netOverlaps"] = netOverlaps;   // voice upload/fetch during a cloud request (system_status.h)
+  staProbeJson(d["net"].to<JsonObject>());   // WiFi dead-link probe (wifi_provisioning.h)
   {
     const MemAllocFail f = memLastAllocFail();
     if (f.size) {

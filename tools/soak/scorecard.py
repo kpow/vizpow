@@ -122,6 +122,8 @@ def poll(host, slow):
             s["tasks"] = {
                 "heapMinFree": k.get("heapMinFree"), "heapFree": k.get("heapFree"),
                 "allocFails": k.get("allocFails"),
+                "netDead": (k.get("net") or {}).get("dead"),
+                "rssi": (k.get("net") or {}).get("rssi"),
                 "stackMin": min(sf.values()) if sf else None,
                 "stackMinTask": min(sf, key=sf.get) if sf else None,
             }
@@ -334,10 +336,20 @@ def score(samples, events=()):
         lo = min(sm)
         check("Task stack least free", lo[0], lo[0] >= BAR["stack_free_floor"],
               f">= {BAR['stack_free_floor']}", lo[1])
-    ps = [s["brain"]["psramFree"] for s in samples if s.get("brain", {}).get("psramFree") is not None]
-    if len(ps) >= 2:
-        drop = ps[0] - ps[-1]
-        check("PSRAM lost", drop, drop <= BAR["psram_drop_max"], f"<= {BAR['psram_drop_max']}")
+    nd = [s for s in samples if s.get("tasks", {}).get("netDead") is not None]
+    if nd:
+        dead = counter_delta(nd, dig("tasks", "netDead"))
+        rs = [s["tasks"]["rssi"] for s in nd if s["tasks"].get("rssi")]
+        check("WiFi dead links", dead, dead <= 0, "0", f"weakest {min(rs)} dBm" if rs else "")
+    # PSRAM: the first voice turn allocates the voice buffers (~3.2 MB) and keeps
+    # them for every later turn. That is not a leak, so the drop is measured
+    # from the first poll after the first turn, when there was one.
+    bs = [s["brain"] for s in samples if s.get("brain", {}).get("psramFree") is not None]
+    if len(bs) >= 2:
+        base = next((i for i, b in enumerate(bs) if (b.get("turns") or 0) + (b.get("failures") or 0) > 0), 0)
+        drop = bs[base]["psramFree"] - bs[-1]["psramFree"]
+        check("PSRAM lost", drop, drop <= BAR["psram_drop_max"], f"<= {BAR['psram_drop_max']}",
+              "after the first voice turn" if base else "")
 
     usb = [s["power"] for s in samples if s.get("power", {}).get("batteryPct") is not None]
     if usb and all((p.get("vbusMv") or 0) > 4000 for p in usb):

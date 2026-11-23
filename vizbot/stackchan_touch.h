@@ -121,6 +121,14 @@ struct ScTouchState {
   bool chillMode = false;
   unsigned long chillEndMs = 0;
 
+  // Blips. A finger builds up over several reads and stays 300 ms or more
+  // (Kevin's taps, 22 Nov: 337-911 ms, 5-13 reads). Supply noise jumps
+  // straight to full on all pads for a single read (70-83 ms) and fired a
+  // front tap nobody made, 1 h into an idle watch. A contact shorter than
+  // this is never a tap.
+  static constexpr uint16_t SC_TAP_MIN_MS = 150;
+  uint32_t lastContactMs = 0;                    // length of the contact that just ended
+
   // Storms. Touches nobody made come on all three pads at once, in bursts or
   // as one contact that never ends. Four such undisturbed contacts inside
   // eight seconds, or one held for fifteen, mean the reference is bad: ask for
@@ -272,6 +280,7 @@ struct ScTouchState {
     const bool allPads = peak[0] >= OUTPUT_MID && peak[1] >= OUTPUT_MID && peak[2] >= OUTPUT_MID;
     if (!pressed && rawPressed) {   // contact over
       const uint32_t dur = now - contactStartMs;
+      lastContactMs = dur;
       if (tl) {
         ScTouchContact& c = tl->contacts[tl->contactCount % SC_TOUCH_LOG_CONTACTS];
         c.ms = tl->contactStartMs;
@@ -323,6 +332,7 @@ struct ScTouchState {
     if (headBtn.wasClicked()) {
       if (holdFired) { holdFired = false; return; }
       if (contactIgnored || quiet || needRef) { if (tl) tl->rejected++; return; }
+      if (lastContactMs < SC_TAP_MIN_MS) { if (tl) tl->rejected++; return; }   // a blip, not a finger
       // Require a FULL-strength hit (level 3). A real finger easily reaches it;
       // stray capacitive noise (e.g. a ceiling fan) only nudges a pad to level
       // 1, so it's rejected. Middle pad is ignored.
