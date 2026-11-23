@@ -102,6 +102,8 @@ inline ScTouchLog* scTouchLogGet() {
 enum ScRefWhy : uint8_t { SC_REF_BOOT = 1, SC_REF_RAIL, SC_REF_STORM, SC_REF_LATCH, SC_REF_ASKED };
 #define SC_TOUCH_STILL_MS      2000   // no disturbance this long before a reference
 #define SC_TOUCH_ASK_STILL_MS  4000   // how long each "hold the head still" asks for
+#define SC_FINGER_STILL_MS     1000   // a finger holds the idle drift this long past its last read...
+#define SC_FINGER_STILL_RENEW_MS 500  // ...renewed this often while it stays
 #define SC_TOUCH_CTX_IGNORED   13     // contact log ctx bit: overlapped a disturbance
 
 struct ScTouchState {
@@ -150,6 +152,7 @@ struct ScTouchState {
   bool     needRef = true;      // a chip power-up reference is never trusted
   uint8_t  refWhy = SC_REF_BOOT;
   uint32_t lastRefMs = 0, askedStillMs = 0;
+  uint32_t fingerStillMs = 0;   // last "hold the drift, a finger is on" ask
   uint32_t refs = 0, ignoredContacts = 0, lockMisses = 0;
 
   void init() {
@@ -246,6 +249,16 @@ struct ScTouchState {
     const bool quiet = (int32_t)(scTouchQuietUntilMs - now) > 0;
     const bool pressed = !quiet && (inten[0] || inten[1] || inten[2]);
     const bool ignoreNow = disturbed(now) || needRef;
+
+    // A finger on the head holds the idle drift off. A drift move that starts
+    // mid-contact makes touch ignore the whole contact: it swallowed a 3.4 s
+    // hold and a back pat in the 23 Nov suite. Renewed while pressed; b = 0
+    // marks a finger (reference asks carry their ScRefWhy, 1 and up).
+    if (!pressed) fingerStillMs = 0;
+    else if (!fingerStillMs || now - fingerStillMs >= SC_FINGER_STILL_RENEW_MS) {
+      fingerStillMs = now | 1;
+      aoPublish(SIG_TOUCH_NEED_STILL, SRC_TOUCH, SC_FINGER_STILL_MS, 0);
+    }
 
     // Pad log: counts, and a trace entry whenever any level changes.
     ScTouchLog* const tl = scTouchLogGet();
