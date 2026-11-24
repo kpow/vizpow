@@ -44,6 +44,12 @@ enum MemWhere : uint8_t {
 // Call first thing in setup(), before any TLS: routes mbedTLS through MEM_TLS.
 void memInit();
 
+// Allocations the heap refused since boot: internal RAM (or any caps without
+// SPIRAM), or ones that asked for PSRAM.
+uint32_t memAllocFails(bool internal);
+struct MemAllocFail { uint32_t size, caps, ms; const char* fn; char task[16]; };
+MemAllocFail memLastAllocFail();   // the most recent refusal (size 0 = none yet)
+
 // The one answer to "does this board have PSRAM in the heap".
 bool memHasBig();
 

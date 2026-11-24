@@ -1585,6 +1585,18 @@ void pollCloudSync() {
   }
   if (now < cloudNextPollMs) return;
 
+  // Voice goes first: no cloud request while a turn is on (upload, reply), for
+  // up to 60 s. Wake bursts don't count: the stream already holds off for a
+  // cloud request (cloudNetHeld), and a room with people talking keeps the
+  // wake gate open for half a minute at a time (bench 2026-11-22).
+  static uint32_t deferSinceMs = 0;
+  if ((netVoiceFlags & NET_VOICE_TURN) && (!deferSinceMs || now - deferSinceMs < 60000)) {
+    if (!deferSinceMs) deferSinceMs = now | 1;
+    cloudNextPollMs = now + 500;
+    return;
+  }
+  deferSinceMs = 0;
+
   if (cloudTokenRetry && (int32_t)(now - cloudTokenRetryAtMs) >= 0) {
     cloudTokenRetry = false;
     cloudNoTokenServer = false;

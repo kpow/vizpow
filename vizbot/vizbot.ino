@@ -35,6 +35,9 @@
 
 #include "config.h"
 #include "mem.h"            // Memory owner: every runtime buffer, by name (see /debug/mem)
+#ifdef VIZ_RAM_TRACE
+void ramTraceBegin();       // ram_trace.cpp (bench builds)
+#endif
 #include "device_id.h"  // Per-device unique SSID + mDNS hostname (from eFuse MAC)
 #include "palettes.h"
 #include "loop_stats.h"     // Real loop/push timing for GET /state (must come before display_lcd.h)
@@ -86,6 +89,107 @@
 #include "esp_now_mesh.h"
 #include "wifi_provisioning.h"
 #include "boot_sequence.h"
+
+#ifdef BOARD_HAS_STACKCHAN_BASE
+// Head pad log context (stackchan_touch.h): what else was busy at this moment.
+// Reads flags only; called from the loop task on every head touch read.
+uint16_t scTouchContext() {
+  uint16_t c = 0;
+  const uint32_t now = millis();
+#ifdef VOICE_ENABLED
+  if (voicePhase == 1) c |= 1u << 0;             // listening
+  if (voicePhase == 2) c |= 1u << 1;             // thinking
+  if (voicePhase == 3) c |= 1u << 2;             // speaking
+  if (wake.active)     c |= 1u << 3;             // wake mic streaming
+  if (wake.open)       c |= 1u << 4;             // ...and sending audio over WiFi
+#endif
+  if ((int32_t)(scHeadBusyUntilMs - now) > 0) c |= 1u << 5;   // a head move (plus 1.2 s settle)
+  if (scServosResting) c |= 1u << 6;                          // servo rail off
+#ifdef CLOUD_ENABLED
+  if (cloudState == CLOUD_SYNCING || cloudState == CLOUD_REGISTERING) c |= 1u << 7;
+#endif
+  if (scCamRunning)       c |= 1u << 8;
+  if (partyBlob.active)   c |= 1u << 9;
+  if (M5.Speaker.isPlaying()) c |= 1u << 10;
+  if (Update.isRunning()) c |= 1u << 11;          // firmware upload
+  if (scTouch_state.chillMode) c |= 1u << 12;
+  return c;
+}
+#endif
+
+#ifdef BOARD_HAS_STACKCHAN_BASE
+// ---- App AO (stage 1 of the Active Object move, ao_core.h) -------------------
+// Acts on what TouchAO publishes. The nod and shake still block, inside this
+// handler, until MotionAO (stage 2) turns them into stepped moves.
+static AoActive scAppAO;
+static uint32_t scIdleHoldUntilMs = 0;   // TouchAO wants the head still until then
+
+static void scAppOnEvent(const AoEvt& e) {
+  switch (e.sig) {
+    case SIG_TOUCH_TAP:
+      // Back half = shake. Front half = talk to vizbrain on voice builds (tap
+      // again to cancel), nod otherwise. Middle is never published.
+      if (e.a == SC_ZONE_BACK) scFireShake();
+      else {
+        #ifdef VOICE_ENABLED
+        voiceOnTalkTap();
+        #else
+        scFireNod();
+        #endif
+      }
+      break;
+    case SIG_TOUCH_HOLD:
+      scFireChillMode();
+      break;
+    case SIG_TOUCH_NEED_STILL: {
+      const uint32_t until = millis() + (uint32_t)e.a;
+      if ((int32_t)(until - scIdleHoldUntilMs) > 0) scIdleHoldUntilMs = until;
+      break;
+    }
+    default: break;
+  }
+}
+
+// ---- Probe: state edges nobody publishes yet -------------------------------------
+// The mic, speaker (amp), camera, cloud sync and voice phase are switched from
+// ~20 places on three tasks. Until AudioAO (stage 3) and NetAO (stage 5) own
+// them, this watches their flags once per loop pass, just before TouchAO runs,
+// and publishes each change.
+static void scProbeTick() {
+  static bool mic = false, spk = false, cam = false, cloud = false, wakeTx = false;
+  static uint8_t phase = 0;
+  const bool micNow = M5.Mic.isRunning();
+  if (micNow != mic) { mic = micNow; aoPublish(mic ? SIG_MIC_START : SIG_MIC_STOP, SRC_AUDIO); }
+  const bool spkNow = M5.Speaker.isRunning();
+  if (spkNow != spk) { spk = spkNow; aoPublish(spk ? SIG_AMP_ON : SIG_AMP_OFF, SRC_AUDIO); }
+  const bool camNow = scCamRunning;
+  if (camNow != cam) { cam = camNow; aoPublish(cam ? SIG_CAMERA_START : SIG_CAMERA_END, SRC_CAMERA); }
+#ifdef CLOUD_ENABLED
+  const bool cloudNow = cloudState == CLOUD_SYNCING || cloudState == CLOUD_REGISTERING;
+  if (cloudNow != cloud) { cloud = cloudNow; aoPublish(cloud ? SIG_NET_TX_START : SIG_NET_TX_END, SRC_NET, 2); }
+#endif
+#ifdef VOICE_ENABLED
+  if (voicePhase != phase) { phase = voicePhase; aoPublish(SIG_VOICE_PHASE, SRC_VOICE, phase); }
+  if (wake.open != wakeTx) { wakeTx = wake.open; aoPublish(wakeTx ? SIG_NET_TX_START : SIG_NET_TX_END, SRC_NET, 3); }
+#endif
+  (void)cloud; (void)phase; (void)wakeTx;
+}
+
+static void scAoStart() {
+  aoTimelineBegin();
+  scTouchAOStart();                    // dispatched first
+  scAppAO.name = "app";
+  scAppAO.onEvent = scAppOnEvent;
+  scAppAO.tickMs = 60000;              // no time work yet
+  aoStart(scAppAO);
+  aoSubscribe(scAppAO, SIG_TOUCH_TAP);
+  aoSubscribe(scAppAO, SIG_TOUCH_HOLD);
+  aoSubscribe(scAppAO, SIG_TOUCH_NEED_STILL);
+  scMotionAOStart();                   // after the app AO: it acts on taps by posting gestures
+  scBusAOStart();                      // power sensors: one owner, a snapshot for everyone else
+  aoPublish(SIG_BOOT_READY, SRC_APP);
+}
+#endif
 
 // Global objects
 CRGB leds[NUM_LEDS];
@@ -255,11 +359,12 @@ void introAnimation() {
 
 void readIMU() {
   #ifdef TARGET_CORES3
-  // BMI270 via M5Unified — no I2C mutex needed (M5Unified manages internally),
-  // but stay off the bus while the camera configures its sensor.
-  if (i2cInLongHold()) return;
+  // BMI270 via M5Unified: M5's bus mutex covers each transaction, but not the
+  // camera's SCCB window, which holds the app lock. Skip this frame if busy.
+  if (!i2cTry(0)) return;
   M5.Imu.getAccel(&accelX, &accelY, &accelZ);
   M5.Imu.getGyro(&gyroX, &gyroY, &gyroZ);
+  i2cRelease();
   #else
   if (!i2cAcquire()) return;  // Skip this cycle if bus is busy
   if (imu.getDataReady()) {
@@ -344,6 +449,9 @@ void setup() {
   batteryAdc.init();
   #endif
   memInit();   // mem.h: TLS memory goes to PSRAM. Before any TLS.
+#ifdef VIZ_RAM_TRACE
+  ramTraceBegin();   // bench: internal-RAM allocation tracer (ram_trace.cpp)
+#endif
   Serial.begin(115200);
   delay(500);
 
@@ -481,7 +589,7 @@ void setup() {
   scInitBaseLeds();
   #endif
   #ifdef BOARD_HAS_STACKCHAN_BASE
-  scTouch_state.init();
+  scAoStart();   // Active Object core + TouchAO + app AO (ao_core.h)
   scIdleServo.init();
   #endif
 
@@ -598,22 +706,9 @@ void loop() {
   // StackChan head touch (Si12T capacitive sensor)
   #ifdef BOARD_HAS_STACKCHAN_BASE
   {
-    uint8_t touchResult = scTouch_state.update();
-    if (touchResult == 1) {
-      // Single tap — back half = shake. Front half = talk to vizbrain on voice
-      // builds (tap again to cancel), nod otherwise. Middle is ignored.
-      if (scTouch_state.lastTapZone == SC_ZONE_BACK) {
-        scFireShake();
-      } else {
-        #ifdef VOICE_ENABLED
-        voiceOnTalkTap();
-        #else
-        scFireNod();
-        #endif
-      }
-    } else if (touchResult == 3) {
-      scFireChillMode();
-    }
+    if (scTouch_state.chillMode && (int32_t)(millis() - scTouch_state.chillEndMs) >= 0) scTouch_state.chillMode = false;
+    scProbeTick();   // publish mic / amp / camera / cloud edges first...
+    aoDispatch();    // ...then TouchAO reads the head, then the app AO acts on taps
   }
   #ifdef VOICE_ENABLED
   voiceSuppressEvents = scTouch_state.chillMode;
@@ -621,16 +716,17 @@ void loop() {
   #else
   const bool voiceTurn = false;
   #endif
-  // BSP's Motion task owns the bus and manages torque. The watchdog only pings
-  // the servos and cycles the rail when they stop answering (stackchan_base.h).
-  // Held off during a voice turn: servo noise would keep the end-of-speech
-  // detector open, and a rail cycle mid-reply is jarring.
-  if (!voiceTurn) scServoWatchdogTick();
+  // MotionAO's freeze watchdog stands down during a voice turn (stackchan_base.h).
+  scMotionGate(SC_MG_VOICE, voiceTurn);
   plogTick();   // power log: battery lows and a row every 15 s (power_log.h)
   scBatteryCareTick();   // rest the servos, then switch off, as the battery runs down
 
   // Idle head drift — suppressed during chill mode and voice turns
-  if (!scTouch_state.chillMode && !voiceTurn && !partyBlob.code) {   // code mode moves the head itself
+  // ...and while TouchAO waits for a still head to take its reference.
+  const bool touchWantsStill = (int32_t)(scIdleHoldUntilMs - millis()) > 0;
+  // ...and while MotionAO runs a gesture, rail cycle or rest.
+  if (!scTouch_state.chillMode && !voiceTurn && !partyBlob.code && !touchWantsStill &&   // code mode moves the head itself
+      !scMotionBusy()) {
     scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);
   }
   #endif

@@ -131,10 +131,9 @@ inline void plogTick() {
 
   if ((int32_t)(now - plogNextSampleMs) >= 0) {
     plogNextSampleMs = now + PLOG_SAMPLE_MS;
-    ScI2cLock lock(20);
-    if (lock.held) {
-      float v = scChan.getBatteryVoltage(), a = scChan.getBatteryCurrent();
-      int vsys = plogVsysMv();
+    if (scPower.atMs) {   // BusAO's once-a-second snapshot (stackchan_base.h)
+      const float v = scPower.volts, a = scPower.amps;
+      const int vsys = scPower.vsysMv;
       if (v > 0.5f && v < plogMinBattV) plogMinBattV = v;
       if (a > plogMaxBattA) plogMaxBattA = a;
       if (vsys > 500 && vsys < plogMinVsysMv) plogMinVsysMv = vsys;

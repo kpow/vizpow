@@ -224,6 +224,12 @@ static void handleOTAUpload() {
       DBGLN("OTA: Write failed");
       otaUploadError = true;
     }
+    // The whole upload runs inside one handleClient() on wifi_srv (core 0).
+    // When the data arrives steadily, WebServer never waits on the socket, so
+    // IDLE0 never runs and the task watchdog resets the board mid-upload
+    // (seen 2026-11-22, backtrace in WebServer::_uploadReadByte). One tick
+    // every 16 chunks (~23 KB) lets it run: about 100 ticks per firmware.
+    if ((otaTrace.chunks & 15) == 0) vTaskDelay(1);
 
   } else if (upload.status == UPLOAD_FILE_END) {
     if (otaUploadError) {

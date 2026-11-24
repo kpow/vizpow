@@ -88,11 +88,15 @@ struct ProxLightState {
 
   // Call each frame — rate-limited internally
   void update() {
-    extern bool i2cInLongHold();
-    if (!initialized || i2cInLongHold()) return;   // camera is configuring its sensor
+    if (!initialized) return;
 
     unsigned long now = millis();
     if (now - lastUpdateMs < PROX_UPDATE_MS) return;
+    // Skip this read if the bus is busy (the camera's SCCB window holds the lock).
+    extern bool i2cTry(uint32_t timeoutMs);
+    extern void i2cRelease();
+    if (!i2cTry(0)) return;
+    struct Rel { ~Rel() { i2cRelease(); } } rel;
     lastUpdateMs = now;
 
     // Read proximity (11-bit, 0-2047)

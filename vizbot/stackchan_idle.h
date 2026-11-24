@@ -137,8 +137,8 @@ struct ScIdleServo {
       targetPitch = pitchCenter + random(-pitchRange, pitchRange + 1);
     }
 
-    scMoveYaw(targetYaw, moveTimeMs);
-    scMovePitch(targetPitch, moveTimeMs);
+    scMoveYaw(targetYaw, moveTimeMs, SC_MC_IDLE);
+    scMovePitch(targetPitch, moveTimeMs, SC_MC_IDLE);
 
     nextMoveMs = now + random(intervalMin, intervalMax);
   }
@@ -186,8 +186,8 @@ struct ScIdleServo {
     }
 
     // Start first waypoint
-    scMoveYaw(sweepPoints[0], sweepSpeed);
-    scMovePitch(sweepPitch[0], sweepSpeed);
+    scMoveYaw(sweepPoints[0], sweepSpeed, SC_MC_IDLE);
+    scMovePitch(sweepPitch[0], sweepSpeed, SC_MC_IDLE);
     sweepNextMs = millis() + sweepSpeed + random(200, 600);  // pause at each point
   }
 
@@ -210,8 +210,8 @@ struct ScIdleServo {
       default:                 sweepSpeed = 1600; break;
     }
 
-    scMoveYaw(sweepPoints[sweepStep], sweepSpeed);
-    scMovePitch(sweepPitch[sweepStep], sweepSpeed);
+    scMoveYaw(sweepPoints[sweepStep], sweepSpeed, SC_MC_IDLE);
+    scMovePitch(sweepPitch[sweepStep], sweepSpeed, SC_MC_IDLE);
     sweepNextMs = now + sweepSpeed + random(200, 800);
   }
 
@@ -228,7 +228,7 @@ struct ScIdleServo {
     phase = IDLE_DRIFT;
     targetYaw = 0;
     targetPitch = SC_SERVO_Y_HOME_DEG * 10;
-    scGoHome(timeMs);
+    scGoHome(timeMs, SC_MC_IDLE);
   }
 };
 

@@ -508,12 +508,11 @@ void handleTouch() {
   #ifdef TARGET_CORES3
   #ifdef BOARD_HAS_STACKCHAN_BASE
   // (declared locally — task_manager.h is included after this header)
-  extern bool i2cAcquire(uint32_t timeoutMs);
+  extern bool i2cTry(uint32_t timeoutMs);
   extern void i2cRelease();
-  {
-    bool held = i2cAcquire(50);
+  if (i2cTry(0)) {   // skip a frame rather than wait (or read unlocked)
     M5.update();
-    if (held) i2cRelease();
+    i2cRelease();
   }
   #else
   M5.update();

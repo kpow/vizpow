@@ -12,6 +12,7 @@
 #include "palettes.h"
 #include "ota_update.h"
 extern uint16_t staReconnects;   // wifi_provisioning.h (STA rejoin watchdog)
+void staProbeJson(JsonObject o);   // wifi_provisioning.h (dead-link probe)
 
 // External references to globals
 extern WebServer server;
@@ -2042,14 +2043,12 @@ void handleCloudServer() {
 }
 
 void handleCloudSync() {
-  // Manual sync trigger — re-register if not yet registered
-  if (!cloudMeta.registered) {
-    bool ok = cloudRegister();
-    sysStatus.cloudRegistered = ok;
-    server.send(200, "text/plain", ok ? "Registered" : "Failed");
-  } else {
-    server.send(200, "text/plain", "OK — sync happens on next poll");
-  }
+  // Manual sync: the cloud task does it on its next poll (register first if
+  // needed). This handler used to run the TLS register on the web task, where
+  // it could overlap the cloud task's own request.
+  lastSyncAttempt = millis() - 3600000UL;
+  cloudNextPollMs = 0;
+  server.send(200, "text/plain", cloudMeta.registered ? "OK — syncing now" : "OK — registering now");
 }
 #endif
 
@@ -2353,17 +2352,17 @@ void handleScHeadRecenter() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-// POST /bot/servo/reinit — cycle VM_EN and re-ping (manual servo rail recovery)
+// POST /bot/servo/reinit — cycle VM_EN, re-ping, re-home (manual servo rail
+// recovery). MotionAO does it over ~4 s; this answers once it is queued.
 void handleScServoReinit() {
-  bool ok = scRecoverServos();
+  bool ok = scRecoverServos(true);
   String json = "{\"ok\":";
   json += ok ? "true" : "false";
-  json += ",\"servoX\":";
+  json += ",\"queued\":true,\"servoX\":";
   json += sysStatus.scServoXReady ? "true" : "false";
   json += ",\"servoY\":";
   json += sysStatus.scServoYReady ? "true" : "false";
   json += "}";
-  if (ok) scGoHome(500);
   server.send(200, "application/json", json);
 }
 
@@ -2419,25 +2418,14 @@ void handleScChillMinutes() {
 
 // POST /bot/poweroff — graceful shutdown
 void handleScPowerOff() {
-  server.send(200, "application/json", "{\"ok\":true,\"message\":\"Powering off...\"}");
-  delay(200);  // Let response reach client
-
-  DBGLN("Power off requested — shutting down");
-
-  // Graceful shutdown: servos off, LEDs off, display off
-  scSetServoPower(false);
-  scSetAllBaseLeds(0, 0, 0);
-  scRefreshBaseLeds();
-
-  // Clear display
-  if (gfx) {
-    gfx->beginCanvas();
-    gfx->flushCanvas();
-    M5.Display.setBrightness(0);
-  }
-
-  delay(300);
-  M5.Power.powerOff();
+  // MotionAO does it on the loop thread: park the head, cut the servo rail and
+  // the LED supply, then switch the PMU off (~1.6 s). This handler used to cut
+  // the rail itself from the web task (the head dropped unparked) and draw on
+  // the canvas from core 0 while the loop was rendering.
+  DBGLN("Power off requested — MotionAO parks and switches off");
+  const bool queued = aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_WEB, SC_REST_POWEROFF));
+  server.send(queued ? 200 : 503, "application/json",
+              queued ? "{\"ok\":true,\"message\":\"Powering off...\"}" : "{\"ok\":false,\"error\":\"busy, try again\"}");
 }
 
 // GET /bot/camera/enable[?on=0|1] — saved camera switch (photos on/off), applies at once.
@@ -2504,9 +2492,10 @@ void handleDebugScreen() {
   extern const uint16_t* lcdCanvasBuffer();
   const uint16_t* buf = lcdCanvasBuffer();
   if (!buf) { server.send(503, "text/plain", "no canvas"); return; }
-  extern volatile bool botRenderHold, botFrameInProgress;
+  extern volatile bool botRenderHold, botRenderHeld;
+  botRenderHeld = false;
   botRenderHold = true;
-  for (int i = 0; i < 50 && botFrameInProgress; i++) delay(2);
+  for (int i = 0; i < 100 && !botRenderHeld; i++) delay(2);   // the loop parks at a frame boundary
   size_t len = (size_t)LCD_WIDTH * LCD_HEIGHT * 2;
   server.setContentLength(len);
   server.send(200, "application/octet-stream", "");
@@ -2528,9 +2517,10 @@ void handleDebugPanelCheck() {
   extern const uint16_t* lcdCanvasBuffer();
   const uint16_t* buf = lcdCanvasBuffer();
   if (!buf) { server.send(503, "text/plain", "no canvas"); return; }
-  extern volatile bool botRenderHold, botFrameInProgress;
+  extern volatile bool botRenderHold, botRenderHeld;
+  botRenderHeld = false;
   botRenderHold = true;
-  for (int i = 0; i < 50 && botFrameInProgress; i++) delay(2);
+  for (int i = 0; i < 100 && !botRenderHeld; i++) delay(2);   // the loop parks at a frame boundary
   delay(5);
   static uint16_t row[LCD_WIDTH];
   uint32_t same = 0, swapped = 0, badRows = 0, firstBadY = 0xFFFF, zeros = 0;
@@ -2567,22 +2557,29 @@ void handleDebugTouch() {
 #endif
 
 // Each time internal RAM's low-water mark drops, what was busy right then.
-// Ticked from wifi_srv's 2 ms loop, so a dip shorter than that is still caught
-// (the mark keeps it) and is tagged with whatever is running just after.
-struct RamLow { uint32_t sec; uint32_t minFree; uint32_t freeNow; char busy[40]; };
+// Ticked from wifi_srv's 2 ms loop: samples the free internal RAM and records
+// each new low with whatever is running. Not heap_caps_get_minimum_free_size():
+// that adds up each RAM region's own low, reached at different moments, so it
+// reads far below anything real (bench 2026-11-22: it said 8.4 KB while the
+// allocator tracer's true low was 34 KB). A dip shorter than 2 ms can be missed;
+// memAllocFails() says whether one ever actually ran out.
+struct RamLow { uint32_t sec; uint32_t minFree; uint32_t maxBlock; char busy[40]; };
 static RamLow ramLows[6];   // oldest first
 static uint8_t ramLowCount = 0;
 static size_t ramLowLast = SIZE_MAX;
 
+#ifdef VIZ_RAM_TRACE
+String ramTraceJson(bool reset);   // ram_trace.cpp (bench builds)
+#endif
 void ramLowTick() {
-  size_t m = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  size_t m = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   if (m >= ramLowLast) return;
   ramLowLast = m;
   if (ramLowCount == 6) { memmove(ramLows, ramLows + 1, 5 * sizeof(RamLow)); ramLowCount = 5; }
   RamLow& r = ramLows[ramLowCount++];
   r.sec = millis() / 1000;
   r.minFree = m;
-  r.freeNow = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  r.maxBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   char* p = r.busy;
   char* end = r.busy + sizeof(r.busy);
   #ifdef VOICE_ENABLED
@@ -2689,7 +2686,36 @@ void handleDebugTasks() {
     if (h) s[n] = uxTaskGetStackHighWaterMark(h);
   }
   d["heapFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  d["heapMinFree"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  d["heapMinFree"] = ramLowLast == SIZE_MAX ? heap_caps_get_free_size(MALLOC_CAP_INTERNAL) : ramLowLast;
+  d["heapRegionMinSum"] = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);   // IDF's number, see ramLowTick
+  d["allocFails"] = memAllocFails(true);
+  d["allocFailsPsram"] = memAllocFails(false);
+  d["netOverlaps"] = netOverlaps;   // voice upload/fetch during a cloud request (system_status.h)
+  staProbeJson(d["net"].to<JsonObject>());   // WiFi dead-link probe (wifi_provisioning.h)
+  {
+    const MemAllocFail f = memLastAllocFail();
+    if (f.size) {
+      JsonObject o = d["lastAllocFail"].to<JsonObject>();
+      o["size"] = f.size;
+      o["caps"] = f.caps;
+      o["ms"] = f.ms;
+      o["fn"] = f.fn ? f.fn : "";
+      o["task"] = f.task;
+    }
+  }
+#ifdef BOARD_HAS_STACKCHAN_BASE
+  JsonObject led = d["baseLeds"].to<JsonObject>();   // base LED pushes (stackchan_base.h)
+  led["pushes"] = scLedStats.pushes;
+  led["unchanged"] = scLedStats.unchanged;
+  led["lockMiss"] = scLedStats.lockMiss;
+  led["fails"] = scLedStats.fails;
+  JsonObject pw = d["powerSnap"].to<JsonObject>();   // BusAO (stackchan_base.h)
+  pw["reads"] = scPower.reads;
+  pw["misses"] = scPower.misses;
+  pw["ageMs"] = scPower.atMs ? millis() - scPower.atMs : -1;
+  pw["volts"] = scPower.volts;
+  pw["vbusMv"] = scPower.vbusMv;
+#endif
   d["heapMaxBlock"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   if (otaTrace.magic == OTA_TRACE_MAGIC) {   // the last web-panel upload (ota_update.h)
     static const char* const phases[] = { "none", "receiving", "finishing", "done", "failed" };
@@ -2708,7 +2734,7 @@ void handleDebugTasks() {
     JsonObject o = lows.add<JsonObject>();
     o["sec"] = ramLows[i].sec;
     o["minFree"] = ramLows[i].minFree;
-    o["freeNow"] = ramLows[i].freeNow;
+    o["maxBlock"] = ramLows[i].maxBlock;
     o["busy"] = ramLows[i].busy;
   }
   String out;
@@ -2729,6 +2755,42 @@ void handleDebugTasks() {
 //   ?cold=1      brings the fault on: power-on settings, then BSP's start order
 // "chipStarts" counts chip starts this run, "heals" the ones the gesture code
 // asked for because it saw touches nobody made (stackchan_touch.h).
+// GET /debug/timeline[?n=200] — the system timeline (ao_core.h): every event
+// published, oldest first, as [ms, signal, source, a, b], plus each active
+// object's counters. Read a failure against everything that was running.
+void handleDebugTimeline() {
+  if (!aoTimeline) { server.send(503, "application/json", "{\"error\":\"no timeline (no PSRAM)\"}"); return; }
+  uint32_t want = server.hasArg("n") ? (uint32_t)server.arg("n").toInt() : 200;
+  if (want > AO_TIMELINE_SIZE) want = AO_TIMELINE_SIZE;
+  // Copy under the lock: other tasks publish while we format.
+  static AoEvt* buf = nullptr;   // PSRAM: 8 KB of internal RAM is more than the camera can spare
+  if (!buf) buf = (AoEvt*)memAlloc(MEM_DIAG, sizeof(AoEvt) * AO_TIMELINE_SIZE, MEM_BIG_ONLY);
+  if (!buf) { server.send(503, "application/json", "{\"error\":\"no buffer\"}"); return; }
+  uint32_t total, n;
+  portENTER_CRITICAL(&aoMux);
+  total = aoTimeline->count;
+  n = total < want ? total : want;
+  for (uint32_t i = 0; i < n; i++) buf[i] = aoTimeline->ring[(total - n + i) % AO_TIMELINE_SIZE];
+  portEXIT_CRITICAL(&aoMux);
+  String j;
+  j.reserve(64 + n * 40);
+  j += "{\"upMs\":" + String(millis()) + ",\"total\":" + String(total) + ",\"published\":" + String(aoPublished) +
+       ",\"dropped\":" + String(aoDropped) + ",\"aos\":[";
+  for (uint8_t i = 0; i < aoCount; i++) {
+    const AoActive& a = *aoList[i];
+    j += String(i ? "," : "") + "{\"name\":\"" + a.name + "\",\"handled\":" + String(a.handled) +
+         ",\"dropped\":" + String(a.dropped) + ",\"maxUs\":" + String(a.maxUs) + "}";
+  }
+  j += "],\"events\":[";
+  for (uint32_t i = 0; i < n; i++) {
+    const AoEvt& e = buf[i];
+    j += String(i ? "," : "") + "[" + String(e.ms) + ",\"" + (e.sig < SIG_COUNT ? AO_SIG_NAMES[e.sig] : "?") + "\",\"" +
+         (e.src < SRC_COUNT ? AO_SRC_NAMES[e.src] : "?") + "\"," + String(e.a) + "," + String(e.b) + "]";
+  }
+  j += "]}";
+  server.send(200, "application/json", j);
+}
+
 void handleDebugTouchRaw() {
   ScTouchLog* const logp = scTouchLogPtr;   // made by the loop task on its first read
   if (!logp) { server.send(503, "application/json", "{\"error\":\"no pad log (not started yet, or no PSRAM)\"}"); return; }
@@ -2745,6 +2807,7 @@ void handleDebugTouchRaw() {
     }
     if (server.hasArg("cold"))  { scTouchChipColdBspLocked(); did += "cold "; }
     if (server.hasArg("start")) { scTouchChipStartLocked(); did += "start "; }
+    if (server.hasArg("ref"))   { aoPublish(SIG_TOUCH_RESTART, SRC_WEB); did += "ref "; }   // TouchAO: when still
     scSi12tReadRegs(regs, regsOk);
   }
   if (server.hasArg("clear")) { new (logp) ScTouchLog(); did += "clear "; }   // in place: it is 1.7 KB
@@ -2763,7 +2826,10 @@ void handleDebugTouchRaw() {
   j.reserve(6000);
   j += "{\"did\":\"" + did + "\",\"regs02to12\":\"" + hexRow(regs, regsOk) + "\",\"bootRegs02to12\":\"" + hexRow(scSi12tBootRegs, scSi12tBootOk) + "\",";
   j += "\"chipStarts\":" + String(scTouchStarts) + ",\"startFails\":" + String(scTouchStartFails) +
-       ",\"heals\":" + String(scTouch_state.heals) + ",";
+       ",\"heals\":" + String(scTouch_state.heals) + ",\"refs\":" + String(scTouch_state.refs) +
+       ",\"needRef\":" + String(scTouch_state.needRef ? "true" : "false") +
+       ",\"ignoredContacts\":" + String(scTouch_state.ignoredContacts) +
+       ",\"lockMisses\":" + String(scTouch_state.lockMisses) + ",";
   j += "\"upMs\":" + String(millis()) + ",\"reads\":" + String(L.reads) + ",\"pressedReads\":" + String(L.pressedReads);
   j += ",\"now\":[" + String(L.now[0]) + "," + String(L.now[1]) + "," + String(L.now[2]) + "]";
   static const char* zn[3] = { "front", "middle", "back" };
@@ -2779,15 +2845,21 @@ void handleDebugTouchRaw() {
   for (uint32_t i = 0; i < n; i++) {
     const ScTouchContact& c = L.contacts[(L.contactCount - n + i) % SC_TOUCH_LOG_CONTACTS];
     j += String(i ? "," : "") + "[" + String(c.ms) + "," + String(c.durMs) + "," + String(c.peak[0]) + "," +
-         String(c.peak[1]) + "," + String(c.peak[2]) + "," + String(c.samples) + "]";
+         String(c.peak[1]) + "," + String(c.peak[2]) + "," + String(c.samples) + "," + String(c.ctx) + "]";
   }
   j += "],\"traceCount\":" + String(L.traceCount) + ",\"trace\":[";
   n = L.traceCount < SC_TOUCH_LOG_TRACE ? L.traceCount : SC_TOUCH_LOG_TRACE;
   for (uint32_t i = 0; i < n; i++) {
     const ScTouchSample& t = L.trace[(L.traceCount - n + i) % SC_TOUCH_LOG_TRACE];
     j += String(i ? "," : "") + "[" + String(t.ms) + "," + String(t.level[0]) + "," + String(t.level[1]) + "," +
-         String(t.level[2]) + "]";
+         String(t.level[2]) + "," + String(t.ctx) + "]";
   }
+  // contacts [ms,dur,F,M,B,reads,ctx] and trace [ms,F,M,B,ctx]: ctx bit i = ctxNames[i];
+  // ctxReads[i] = reads with that bit on, against "reads", for how often it is on anyway.
+  j += "],\"ctxNames\":[";
+  for (int b = 0; b < SC_TOUCH_CTX_BITS; b++) j += String(b ? "," : "") + "\"" + SC_TOUCH_CTX_NAMES[b] + "\"";
+  j += "],\"ctxNow\":" + String(scTouchContext()) + ",\"ctxReads\":[";
+  for (int b = 0; b < SC_TOUCH_CTX_BITS; b++) j += String(b ? "," : "") + String(L.ctxReads[b]);
   j += "]}";
   server.send(200, "application/json", j);
 }
@@ -2873,7 +2945,11 @@ void handleDebugPower() {
     #ifdef BOARD_HAS_STACKCHAN_BASE
     scTouchAskRestart(1500);   // a rail was switched: fresh touch reference
     #endif
+    // Let the rail settle without the bus lock: holding it here starved every
+    // other bus user (LEDs, touch, MotionAO) for half a second.
+    i2cRelease();
     delay(500);
+    if (!i2cAcquire(200)) { server.send(503, "text/plain", "I2C busy"); return; }
     d["ext"] = server.arg("ext") == "1";
     #ifdef BOARD_HAS_STACKCHAN_BASE
     if (server.arg("save") == "1") { sc5vSave(server.arg("ext") == "1"); d["saved"] = true; }
@@ -3179,6 +3255,11 @@ void setupWebServer() {
   server.on("/brightness", handleBrightness);
   server.on("/debug/wifidrop", handleDebugWifiDrop);
   server.on("/debug/tasks", handleDebugTasks);
+#ifdef VIZ_RAM_TRACE
+  server.on("/debug/ramtrace", []() {
+    server.send(200, "application/json", ramTraceJson(server.hasArg("reset")));
+  });
+#endif
   server.on("/debug/mem", handleDebugMem);
   server.on("/debug/crash", handleDebugCrash);
   #ifdef TARGET_CORES3
@@ -3187,6 +3268,7 @@ void setupWebServer() {
   #ifdef BOARD_HAS_STACKCHAN_BASE
   server.on("/debug/servo", handleDebugServo);
   server.on("/debug/touchraw", handleDebugTouchRaw);
+  server.on("/debug/timeline", handleDebugTimeline);
   server.on("/debug/powerlog", handleDebugPowerLog);
   #endif
 

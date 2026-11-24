@@ -132,12 +132,19 @@ struct VoiceClient {
 VoiceClient voice;
 
 // Every state change goes through here so the render loop sees it too
-static void voiceSetState(VoiceState s) { voice.state = s; voicePhase = s; }
+static void voiceSetState(VoiceState s) {
+  voice.state = s;
+  voicePhase = s;
+  if (s != VOICE_IDLE) netVoiceFlags |= NET_VOICE_TURN;
+  else netVoiceFlags &= ~NET_VOICE_TURN;
+  if ((s == VOICE_THINKING || s == VOICE_SPEAKING) && cloudNetHeld()) netOverlaps++;
+}
 
 // Wake-word mic stream state (see "Wake-word mic stream" below).
 #define WAKE_UDP_PORT        4051
 #define WAKE_RING_CHUNKS     40       // 1.28 s of 32 ms chunks in PSRAM
 #define WAKE_PREROLL_CHUNKS  32       // ~1 s sent ahead of the chunk that opened the gate
+#define WAKE_TX_INFLIGHT     6        // pre-roll packets the WiFi driver may hold at once (internal RAM)
 #define WAKE_HANGOVER_MS     1500     // quiet time that closes the gate
 #define WAKE_OPEN_RATIO      2.5f     // gate opens above 2.5x the noise floor
 #define WAKE_FLOOR_RMS       150.0f   // ...and never below this
@@ -233,43 +240,65 @@ static void voiceWriteWavHeader(uint8_t* h, uint32_t samples) {
 
 // ---- Audio hand-over ----------------------------------------------------------
 
+// Codec begin/end write the ES7210 / AW88298 over the internal I2C bus through
+// M5Unified. M5's own bus mutex covers each transaction, but the camera's SCCB
+// driver doesn't take it, only the app lock (stackchan_camera.h): so hold the
+// app lock across them. This task can wait for a camera window (up to 2 s);
+// the loop's bus users try-lock and skip instead.
+extern bool i2cAcquire(uint32_t timeoutMs);   // task_manager.h
+extern void i2cRelease();
+struct VoiceBusHold {
+  bool held;
+  VoiceBusHold() : held(i2cAcquire(2000)) {}
+  ~VoiceBusHold() { if (held) i2cRelease(); }
+};
+static void voiceMicBegin() { VoiceBusHold b; M5.Mic.begin(); }
+static void voiceMicEnd()   { VoiceBusHold b; M5.Mic.end(); }
+static void voiceSpkBegin() { VoiceBusHold b; M5.Speaker.begin(); }
+static void voiceSpkEnd()   { VoiceBusHold b; M5.Speaker.end(); }
+
+// AudioAO (stage 3): this task is the only owner of M5.Mic and M5.Speaker
+// (they share I2S_NUM_1, so only one runs at a time). The mic runs from the
+// first wake/FX use and stays up through LISTEN, THINK and silent replies; it
+// stops only for a reply on the bot's own speaker. Each begin resets the codec
+// and steps MICBIAS, so fewer of them is less power noise for the touch chip.
+// voiceRecord's garbage check still restarts a mic that delivers stale data.
 static void voiceTakeMic() {
-  voiceOwnsAudio = true;
-  vTaskDelay(pdMS_TO_TICKS(60));            // let audioSpectrum.update() see the flag
-  if (M5.Speaker.isRunning()) M5.Speaker.end();
-  // Always restart the mic. After a warm reset (e.g. a USB flash) the
-  // already-running mic can deliver replayed stale DMA buffers instead of
-  // audio; an end/begin cycle re-initialises the codec. Measured on HW.
-  if (M5.Mic.isRunning()) M5.Mic.end();
-  M5.Mic.begin();
+  voiceOwnsAudio = true;                    // FX analyzer stands aside
+  if (M5.Speaker.isRunning()) voiceSpkEnd();
+  if (!M5.Mic.isRunning()) voiceMicBegin();
 }
 
 static void voiceTakeSpeaker() {
-  if (M5.Mic.isRunning()) M5.Mic.end();
-  if (!M5.Speaker.isRunning()) M5.Speaker.begin();
+  if (M5.Mic.isRunning()) voiceMicEnd();
+  if (!M5.Speaker.isRunning()) voiceSpkBegin();
   M5.Speaker.setVolume(botSounds.volume);
 }
 
-// Put the audio hardware back the way boot left it.
+// End of a turn: the speaker goes back the way boot left it. The mic is left
+// as it is; the idle loop (voiceTask) starts or stops it for wake and FX.
 static void voiceRestoreAudio() {
-  if (M5.Mic.isRunning()) M5.Mic.end();
   if (botSounds.useMidi) {
-    if (M5.Speaker.isRunning()) M5.Speaker.end();
+    if (M5.Speaker.isRunning()) voiceSpkEnd();
   } else if (!M5.Speaker.isRunning()) {
-    M5.Speaker.begin();
+    if (M5.Mic.isRunning()) voiceMicEnd();
+    voiceSpkBegin();
     M5.Speaker.setVolume(botSounds.volume);
   }
-  if (audioSpectrum.enabled) M5.Mic.begin();
-  audioSpectrum.micRunning = M5.Mic.isRunning();
   voiceOwnsAudio = false;
 }
 
 // ---- Recording with end-of-speech detection --------------------------------
-// Returns samples kept (0 = nothing usable). Adaptive thresholds: the quietest
-// of the first ~190 ms sets the noise floor; speech starts above 3x noise and
-// ends after hangoverMs below 2x noise.
+// Returns samples kept (0 = nothing usable). Adaptive thresholds: speech starts
+// above 3x the noise floor and ends after hangoverMs below 2x it. The floor is
+// roomNoise when the caller knows it (the wake stream's running estimate);
+// otherwise the quietest of the first ~190 ms. Since the mic runs through the
+// wake word (stage 3), those first 190 ms are usually the wake word's tail or
+// the question itself: measured there, the floor came out at 1155 in a quiet
+// room (about 20) and the question never counted as speech.
 
-static size_t voiceRecord(bool& cancelled, bool& garbage, uint32_t hangoverMs = VOICE_HANGOVER_MS) {
+static size_t voiceRecord(bool& cancelled, bool& garbage, uint32_t hangoverMs = VOICE_HANGOVER_MS,
+                          float roomNoise = 0) {
   int16_t* buf = voice.recBuf + VOICE_WAV_HDR_SAMPLES;
   const size_t maxSamples = voice.recCapSamples - (voice.recCapSamples % VOICE_CHUNK);
   size_t n = 0, analyzed = 0;
@@ -304,7 +333,15 @@ static size_t voiceRecord(bool& cancelled, bool& garbage, uint32_t hangoverMs = 
       if (analyzed <= VOICE_WARMUP_CHUNKS * VOICE_CHUNK) continue;   // codec settling after begin()
       if (rms > peak) peak = rms;
 
-      if (noiseN < VOICE_NOISE_CHUNKS) {
+      if (roomNoise > 0 && noiseN < VOICE_NOISE_CHUNKS) {
+        // Known floor; a quieter start can still lower it. The mic was proven
+        // live by the wake stream, so no stale-DMA check here.
+        if (noiseN == 0) noise = roomNoise;
+        noise = fminf(noise, rms);
+        noiseN++;
+        startThr = fmaxf(VOICE_SPEECH_FLOOR, noise * 3.0f);
+        endThr   = fmaxf(VOICE_SPEECH_FLOOR * 0.6f, noise * 2.0f);
+      } else if (noiseN < VOICE_NOISE_CHUNKS) {
         noise = (noiseN == 0) ? rms : fminf(noise, rms);
         noiseN++;
         startThr = fmaxf(VOICE_SPEECH_FLOOR, noise * 3.0f);
@@ -517,9 +554,19 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
   bool eof = false;
   uint32_t clipMs = contentLen > 0 ? (uint32_t)(contentLen / 2 * 1000 / VOICE_PLAY_RATE) : 0;
 
+  // SPEAK_SILENT: the Mac plays the reply (or the volume is 0), so the bot's
+  // speaker and amp stay off and the mic keeps running. The mouth follows a
+  // clock that models the speaker's queue instead: same timing, no I2S switch,
+  // no amp current, no speaker task or DMA buffers in internal RAM.
+  const bool silent = mac || botSounds.volume == 0;
+  uint32_t silentEndMs = 0;                       // when the modelled queue runs dry
+  auto spkQueued = [&]() -> int {                 // M5.Speaker.isPlaying(0): 0, 1 or 2
+    if (!silent) return M5.Speaker.isPlaying(0);
+    int32_t left = (int32_t)(silentEndMs - millis());
+    return left <= 0 ? 0 : (left > 200 ? 2 : 1);
+  };
   uint32_t tSpk = millis();
-  voiceTakeSpeaker();
-  if (mac) M5.Speaker.setVolume(0);
+  if (!silent) voiceTakeSpeaker();
   voice.lastSpeakerMs = millis() - tSpk;
   for (;;) {
     if (voice.cancelRequested) break;
@@ -547,7 +594,7 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
     // The clip can pause mid-reply (a web search between "let me check" and the
     // answer). While the speaker sits empty, slide the lip-sync clock along so
     // the mouth lines up with the audio again when it resumes.
-    if (t0 && queued >= avail && !eof && M5.Speaker.isPlaying(0) == 0) {
+    if (t0 && queued >= avail && !eof && spkQueued() == 0) {
       uint32_t nowMs = millis();
       if (lastIdleCheckMs) voiceSpeakT0 += nowMs - lastIdleCheckMs;
       lastIdleCheckMs = nowMs;
@@ -557,8 +604,8 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
 
     // Queue pieces whenever the speaker has a free slot (never block on it).
     if (t0 || avail >= VOICE_PREROLL_SAMPLES || eof) {
-      while (M5.Speaker.isPlaying(0) < 2 && queued < avail) {
-        if (t0 && M5.Speaker.isPlaying(0) == 0) voice.lastStarved++;   // speaker ran dry mid-reply
+      while (spkQueued() < 2 && queued < avail) {
+        if (t0 && spkQueued() == 0) voice.lastStarved++;   // speaker ran dry mid-reply
         size_t seg = t0 ? VOICE_SEG_MAX_SAMPLES : VOICE_SEG_SAMPLES;
         size_t n = min(seg, avail - queued);
         if (n < VOICE_SEG_SAMPLES && !eof) break;   // wait for at least a small piece
@@ -571,7 +618,13 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
           voiceEnv = voice.env;
           voiceSpeakT0 = t0;
         }
-        M5.Speaker.playRaw(voice.playBuf + queued, n, VOICE_PLAY_RATE, false, 1, 0, false);
+        if (silent) {
+          const uint32_t nowMs = millis();
+          if ((int32_t)(silentEndMs - nowMs) < 0) silentEndMs = nowMs;
+          silentEndMs += (uint32_t)((uint64_t)n * 1000 / VOICE_PLAY_RATE);
+        } else {
+          M5.Speaker.playRaw(voice.playBuf + queued, n, VOICE_PLAY_RATE, false, 1, 0, false);
+        }
         queued += n;
       }
     }
@@ -582,12 +635,11 @@ static size_t voiceStreamSpeak(const char* id, const char* bubble, int8_t expr, 
   esp_http_client_cleanup(c);
 
   // Let the queued audio finish, mouth still moving.
-  while (t0 && M5.Speaker.isPlaying(0) && !voice.cancelRequested) {
+  while (t0 && spkQueued() && !voice.cancelRequested) {
     vTaskDelay(pdMS_TO_TICKS(15));
   }
-  if (voice.cancelRequested) M5.Speaker.stop(0);
+  if (voice.cancelRequested && !silent) M5.Speaker.stop(0);
   if (mac) {
-    M5.Speaker.setVolume(botSounds.volume);
     if (voice.cancelRequested) {          // tapped quiet: the Mac stops too
       char resp[64];
       voiceBrainRequest(true, "/v1/hush", "{}", resp, sizeof(resp));
@@ -643,17 +695,21 @@ static void voiceRunTurn() {
   vTaskDelay(pdMS_TO_TICKS(80));                       // let the render loop start it
   for (int i = 0; i < 60 && botSounds.playing; i++) vTaskDelay(pdMS_TO_TICKS(20));
   voiceTakeMic();
+  // The wake stream's floor, if it ran long enough to settle (and wasn't stale).
+  const float roomNoise = (wake.chunks > VOICE_WARMUP_CHUNKS + 30 && wake.noise > 0 &&
+                           wake.noise < VOICE_GARBAGE_NOISE) ? wake.noise : 0;
   bool cancelled = false, garbage = false;
-  size_t samples = voiceRecord(cancelled, garbage, followUp ? VOICE_FOLLOW_UP_HANGOVER_MS : VOICE_HANGOVER_MS);
+  size_t samples = voiceRecord(cancelled, garbage, followUp ? VOICE_FOLLOW_UP_HANGOVER_MS : VOICE_HANGOVER_MS,
+                               roomNoise);
   for (int retry = 0; garbage && retry < 2; retry++) {
     voice.micRestarts++;
     Serial.println("[Voice] mic delivering stale data, restarting it");
-    M5.Mic.end();
+    voiceMicEnd();
     vTaskDelay(pdMS_TO_TICKS(100));
-    M5.Mic.begin();
+    voiceMicBegin();
     samples = voiceRecord(cancelled, garbage, followUp ? VOICE_FOLLOW_UP_HANGOVER_MS : VOICE_HANGOVER_MS);
   }
-  if (M5.Mic.isRunning()) M5.Mic.end();
+  // The mic stays up through THINK: a silent reply never stops it.
 
   if (cancelled) {
     cmdPlaySequence(SEQ_DISMISS);
@@ -890,8 +946,7 @@ static bool wakeStart() {
   if (len >= sizeof(wake.host)) return false;
   memcpy(wake.host, voice.resolved, len);
   wake.host[len] = '\0';
-  if (!M5.Mic.isRunning()) M5.Mic.begin();
-  audioSpectrum.micRunning = M5.Mic.isRunning();
+  if (!M5.Mic.isRunning()) voiceMicBegin();
   wake.queued = wake.done = wake.chunks = 0;
   wake.noise = 0;
   wake.open = false;
@@ -964,9 +1019,9 @@ static void wakeProcessChunk(uint32_t idx) {
   if (wake.chunks == VOICE_WARMUP_CHUNKS + 30 && wake.noise > VOICE_GARBAGE_NOISE) {
     wake.micRestarts++;
     Serial.println("[Wake] mic delivering stale data, restarting it");
-    M5.Mic.end();
+    voiceMicEnd();
     vTaskDelay(pdMS_TO_TICKS(100));
-    M5.Mic.begin();
+    voiceMicBegin();
     wake.queued = wake.done = wake.chunks = 0;
     wake.noise = 0;
     wake.open = false;
@@ -992,10 +1047,19 @@ static void wakeProcessChunk(uint32_t idx) {
     wake.bursts++;
     uint32_t avail = min((uint32_t)WAKE_PREROLL_CHUNKS, wake.chunks - 1);
     avail = min(avail, idx);
+    // TX budget. Every queued packet holds a ~1.2 KB WiFi TX buffer in internal
+    // RAM until it is on the air, and Arduino's WiFi uses dynamic TX buffers:
+    // sent 1 ms apart, the pre-roll queued 24 of them (29 KB) in 70 ms, measured
+    // with the RAM tracer 2026-11-22. Keep at most WAKE_TX_INFLIGHT in the driver.
+    const size_t freeAtStart = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    const size_t txFloor = freeAtStart > WAKE_TX_INFLIGHT * 1300 ? freeAtStart - WAKE_TX_INFLIGHT * 1300 : 0;
     for (uint32_t k = idx - avail; k < idx; k++) {
+      for (int w = 0; w < 50 && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < txFloor; w++) {
+        vTaskDelay(pdMS_TO_TICKS(2));                   // let the radio drain
+      }
       wakeSend(k, k == idx - avail ? WAKE_F_START : 0, wakeChunk(k), VOICE_CHUNK * sizeof(int16_t));
       if (!wake.open) return;                           // sends failed and backed off
-      vTaskDelay(1);   // ~1 s of audio at once otherwise outruns the 8 WiFi TX buffers
+      vTaskDelay(1);
     }
     wakeSend(idx, avail ? 0 : WAKE_F_START, c, VOICE_CHUNK * sizeof(int16_t));
     return;
@@ -1040,6 +1104,21 @@ static void wakeStep() {
   }
 }
 
+// FX on with no wake stream (voice or wake off, brain unreachable): capture
+// for the analyzer only. One 32 ms chunk per call, published to the tap.
+static void audioTapStep() {
+  static int16_t* buf = nullptr;
+  if (!buf) buf = (int16_t*)memAlloc(MEM_WAKE, VOICE_CHUNK * sizeof(int16_t), MEM_BIG_ONLY);
+  if (!buf) { vTaskDelay(pdMS_TO_TICKS(100)); return; }
+  if (!M5.Mic.isRunning()) voiceMicBegin();
+  if (!M5.Mic.record(buf, VOICE_CHUNK, VOICE_MIC_RATE)) { vTaskDelay(pdMS_TO_TICKS(10)); return; }
+  while (M5.Mic.isRecording()) vTaskDelay(pdMS_TO_TICKS(4));   // this chunk is done
+  wakeTapSeq++;                                     // odd: copy in flight
+  memcpy(wakeTapBuf, buf, sizeof(wakeTapBuf));
+  wakeTapSeq++;
+  wakeTapActive = true;
+}
+
 // vizbrain heard "Hey vizBot": start a turn if idle. Never cancels one.
 bool voiceOnWake() {
   if (!voice.enabled || voice.busy() || voice.listenRequested || voice.playRequested) return false;
@@ -1074,17 +1153,22 @@ void voiceTask(void*) {
       wakeStop();
       voice.playRequested = false;
       voiceRunPlay();
-    } else if (voice.enabled) {
-      voicePollSenses();
-      if (wakeShouldRun()) {
+    } else {
+      // Idle: AudioAO runs the mic for the wake stream, or for FX alone.
+      if (wake.open) netVoiceFlags |= NET_VOICE_BURST;
+      else netVoiceFlags &= ~NET_VOICE_BURST;
+      if (voice.enabled) voicePollSenses();
+      if (voice.enabled && wakeShouldRun() && (wake.active || wakeStart())) {
         wakeStep();            // paced by the mic: no extra delay
         continue;
       }
-      if (wake.active) {
-        wakeStop();
-        if (!audioSpectrum.enabled && M5.Mic.isRunning()) M5.Mic.end();
-        audioSpectrum.micRunning = M5.Mic.isRunning();
+      if (wake.active) wakeStop();
+      if (audioSpectrum.enabled && voice.state == VOICE_IDLE && !M5.Speaker.isRunning()) {
+        audioTapStep();        // FX without the wake stream: paced by the mic
+        continue;
       }
+      wakeTapActive = false;
+      if (M5.Mic.isRunning() && voice.state == VOICE_IDLE) voiceMicEnd();   // nobody wants it
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }

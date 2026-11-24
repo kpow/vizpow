@@ -1868,9 +1868,11 @@ void handleTouch() {
   // so on Stackchan it takes the same mutex as the servo/battery peripherals.
   #ifdef BOARD_HAS_STACKCHAN_BASE
   {
-    bool held = i2cAcquire(50);
-    M5.update();
-    if (held) i2cRelease();
+    // Skip a frame rather than wait (or read unlocked) when the bus is busy.
+    if (i2cTry(0)) {
+      M5.update();
+      i2cRelease();
+    }
   }
   #else
   M5.update();
@@ -1946,13 +1948,8 @@ void handleTouch() {
       if (key == RK_POWEROFF) {
         uiToast("Goodbye!", UI_C_OFF, 5000);
         runBotMode();
-        delay(300);
-        scSetServoPower(false);
-        scSetAllBaseLeds(0, 0, 0);
-        scRefreshBaseLeds();
-        M5.Display.setBrightness(0);
-        delay(200);
-        M5.Power.powerOff();
+        // MotionAO parks the head, cuts the rails, then switches off.
+        aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_APP, SC_REST_POWEROFF));
       }
 #endif
 #ifdef PWR_HOLD_PIN

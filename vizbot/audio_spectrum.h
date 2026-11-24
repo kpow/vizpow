@@ -130,7 +130,7 @@ struct AudioSpectrum {
     // of `enabled`, which on a Faces base means the I2S peripheral claims
     // GPIO13 — the LED data line — from boot, and the strips show garbage
     // forever. setEnabled() owns the peripheral's lifetime now.
-#ifndef BOARD_HAS_FACES_BASE
+#if !defined(BOARD_HAS_FACES_BASE) && !defined(VOICE_ENABLED)
     M5.Mic.begin();
     micRunning = true;
 #endif
@@ -145,6 +145,13 @@ struct AudioSpectrum {
   // listening session.
   void setEnabled(bool on) {
     enabled = on;
+#ifdef VOICE_ENABLED
+    // AudioAO (voice_client.h, the voice task) is the mic's only owner: it runs
+    // the mic while FX or the wake stream wants it and hands every chunk to the
+    // analyzer through wakeTapBuf. This flag is all FX ever sets, from any task.
+    if (!on) { alive = false; bass = mid = treble = rms = beatEnv = 0.0f; }
+    return;
+#endif
     if (on) {
       if (!micRunning) {
 #ifdef BOARD_HAS_FACES_BASE
@@ -189,11 +196,15 @@ struct AudioSpectrum {
     }
 
     // --- Capture mic samples (non-blocking DMA), or take the wake stream's ---
+#ifdef VOICE_ENABLED
+    if (!wakeTapActive || !wakeTapRead(pcmBuf, tapSeq)) return;   // AudioAO feeds the tap
+#else
     if (wakeTapActive) {
       if (!wakeTapRead(pcmBuf, tapSeq)) return;
     } else if (!M5.Mic.record(pcmBuf, FFT_SIZE, FFT_SAMPLE_RATE)) {
       return;
     }
+#endif
 
     // --- Load PCM into FFT real buffer, zero imaginary ---
     for (int i = 0; i < FFT_SIZE; i++) {

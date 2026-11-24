@@ -6,6 +6,13 @@
 #include <Preferences.h>
 #include "config.h"
 #include "system_status.h"
+#include "mem.h"
+#include <ArduinoJson.h>
+#include <esp_wifi.h>
+#include <esp_heap_caps.h>
+#include "lwip/sockets.h"
+#include "lwip/icmp.h"
+#include "lwip/inet_chksum.h"
 
 // ============================================================================
 // WiFi Provisioning — STA connection + NVS credential storage
@@ -451,6 +458,169 @@ static uint32_t staNextRetryMs = 0;
 static uint32_t staRetryGapMs = STA_RETRY_FIRST_MS;
 uint16_t staReconnects = 0;          // successful rejoins since boot (shown in /state)
 
+// ---- Dead link ---------------------------------------------------------------
+// 22 Nov 2026: mac (StackChan) sat for minutes with WiFi "connected" (IP and
+// -70 dBm on his own screen) while nothing went in or out: no ping, no ARP
+// reply, no wake audio. The watchdog above only acts when WiFi.status() drops,
+// so he never came back by himself. Proof of a working link has to come from
+// the network: every STA_PROBE_MS, one ICMP echo to the gateway. After
+// STA_PROBE_DEAD_FAILS misses in a row the link is dead: what he looked like
+// is written to RTC memory (survives the reboot a hang would end in) and he
+// rejoins. Three dead links without one good reply between them: restart.
+#define STA_PROBE_MS          20000UL
+#define STA_PROBE_TIMEOUT_MS  1500
+#define STA_PROBE_DEAD_FAILS  4
+#define STA_DEAD_RESTART      3
+#define NET_DEAD_MAGIC        0x4E444544
+
+struct NetDeadRecord {          // one dead link, as it looked when it was called
+  uint32_t upSec, freeInt, maxBlockInt, allocFails, lastFailSize;
+  int8_t   rssi;
+  uint8_t  channel, bssidLast, action;   // action: 1 rejoin, 2 restart
+  int16_t  sockErr;                      // last probe's socket error (0 none)
+  uint16_t fails;
+};
+struct NetDeadLog {
+  uint32_t magic;
+  uint32_t total;               // dead links ever (across resets, until power-off)
+  uint32_t restarts;            // of those, ended in a restart
+  NetDeadRecord last;
+};
+RTC_NOINIT_ATTR NetDeadLog netDeadLog;
+
+struct StaProbe {
+  uint32_t ok = 0, fail = 0, sockFails = 0, nextMs = 0, lastOkMs = 0;
+  bool     armed = false;       // the gateway has answered since boot: some routers never do
+  uint16_t failRun = 0;
+  uint8_t  deadRun = 0;         // dead links since the last good reply
+  int16_t  sockErr = 0;
+  uint16_t seq = 0;
+  uint32_t deadThisBoot = 0;
+};
+static StaProbe staProbe;
+static bool staRejoinNow = false;   // a dead link: the first rejoin is due now, not in 30 s
+
+void netDeadLogInit() {
+  if (netDeadLog.magic != NET_DEAD_MAGIC) { memset(&netDeadLog, 0, sizeof(netDeadLog)); netDeadLog.magic = NET_DEAD_MAGIC; }
+}
+
+// One ICMP echo to the gateway. 1 = reply, 0 = none in time, -1 = no socket.
+static int staProbeGateway() {
+  const IPAddress gw = WiFi.gatewayIP();
+  if ((uint32_t)gw == 0) return 0;
+  const int s = lwip_socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+  if (s < 0) { staProbe.sockErr = (int16_t)errno; return -1; }
+  struct timeval tv = { STA_PROBE_TIMEOUT_MS / 1000, (STA_PROBE_TIMEOUT_MS % 1000) * 1000 };
+  lwip_setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  struct sockaddr_in to = {};
+  to.sin_family = AF_INET;
+  to.sin_addr.s_addr = (uint32_t)gw;
+  struct { struct icmp_echo_hdr h; uint8_t pad[8]; } req = {};
+  ICMPH_TYPE_SET(&req.h, ICMP_ECHO);
+  req.h.id = PP_HTONS(0x7662);   // "vb"
+  req.h.seqno = lwip_htons(++staProbe.seq);
+  req.h.chksum = inet_chksum(&req, sizeof(req));
+  int got = 0;
+  if (lwip_sendto(s, &req, sizeof(req), 0, (struct sockaddr*)&to, sizeof(to)) < 0) {
+    staProbe.sockErr = (int16_t)errno;
+  } else {
+    staProbe.sockErr = 0;
+    const uint32_t start = millis();
+    uint8_t buf[64];
+    while (!got && millis() - start < STA_PROBE_TIMEOUT_MS) {
+      const int n = lwip_recvfrom(s, buf, sizeof(buf), 0, nullptr, nullptr);
+      if (n <= 0) break;                                  // timed out
+      const int ihl = (buf[0] & 0x0F) * 4;
+      if (n < ihl + (int)sizeof(struct icmp_echo_hdr)) continue;
+      const struct icmp_echo_hdr* r = (const struct icmp_echo_hdr*)(buf + ihl);
+      if (ICMPH_TYPE(r) == ICMP_ER && r->id == req.h.id && r->seqno == req.h.seqno) got = 1;
+    }
+  }
+  lwip_close(s);
+  return got;
+}
+
+// The link is dead: keep what it looked like, then rejoin (or restart).
+static void staLinkDead(uint32_t now) {
+  netDeadLogInit();
+  staProbe.deadRun++;
+  staProbe.deadThisBoot++;
+  NetDeadRecord& r = netDeadLog.last;
+  r.upSec = now / 1000;
+  r.freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  r.maxBlockInt = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+  r.allocFails = memAllocFails(true);
+  r.lastFailSize = memLastAllocFail().size;
+  wifi_ap_record_t ap;
+  if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) { r.rssi = ap.rssi; r.channel = ap.primary; r.bssidLast = ap.bssid[5]; }
+  else { r.rssi = 0; r.channel = 0; r.bssidLast = 0; }
+  r.sockErr = staProbe.sockErr;
+  r.fails = staProbe.failRun;
+  r.action = staProbe.deadRun >= STA_DEAD_RESTART ? 2 : 1;
+  netDeadLog.total++;
+  Serial.printf("[WiFi] link dead: %u probes unanswered, rssi %d, internal free %u (block %u)\n",
+                staProbe.failRun, r.rssi, (unsigned)r.freeInt, (unsigned)r.maxBlockInt);
+  staProbe.failRun = 0;
+  if (r.action == 2) {
+    netDeadLog.restarts++;
+    Serial.println("[WiFi] link dead 3 times without a reply between: restarting");
+    delay(100);
+    esp_restart();
+  }
+  // Drop the association; the watchdog below sees the link down and rejoins
+  // straight away (its first retry is due now, not in 30 s).
+  staRejoinNow = true;
+  WiFi.disconnect(false, false);
+}
+
+// /debug/tasks "net": probe counts this boot, and the last dead link (kept across resets).
+void staProbeJson(JsonObject o) {
+  netDeadLogInit();
+  o["probeOk"] = staProbe.ok;
+  o["probeFail"] = staProbe.fail;
+  o["probeSockFails"] = staProbe.sockFails;
+  o["armed"] = staProbe.armed;
+  o["lastOkSecAgo"] = staProbe.lastOkMs ? (millis() - staProbe.lastOkMs) / 1000 : -1;
+  o["dead"] = staProbe.deadThisBoot;
+  o["deadEver"] = netDeadLog.total;
+  o["deadRestarts"] = netDeadLog.restarts;
+  wifi_ap_record_t ap;
+  o["rssi"] = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
+  if (netDeadLog.total) {
+    const NetDeadRecord& r = netDeadLog.last;
+    JsonObject l = o["lastDead"].to<JsonObject>();
+    l["upSec"] = r.upSec;
+    l["rssi"] = r.rssi;
+    l["channel"] = r.channel;
+    l["bssidLast"] = r.bssidLast;
+    l["freeInt"] = r.freeInt;
+    l["maxBlockInt"] = r.maxBlockInt;
+    l["allocFails"] = r.allocFails;
+    l["lastFailSize"] = r.lastFailSize;
+    l["sockErr"] = r.sockErr;
+    l["fails"] = r.fails;
+    l["action"] = r.action == 2 ? "restart" : "rejoin";
+  }
+}
+
+static void staProbeTick(uint32_t now) {
+  if ((int32_t)(now - staProbe.nextMs) < 0) return;
+  staProbe.nextMs = now + STA_PROBE_MS;
+  const int r = staProbeGateway();
+  if (r < 0) { staProbe.sockFails++; return; }   // no socket: says nothing about the link
+  if (r == 1) {
+    staProbe.ok++;
+    staProbe.lastOkMs = now;
+    staProbe.armed = true;
+    staProbe.failRun = 0;
+    staProbe.deadRun = 0;
+    return;
+  }
+  staProbe.fail++;
+  if (!staProbe.armed) return;                    // a gateway that never answers proves nothing
+  if (++staProbe.failRun >= STA_PROBE_DEAD_FAILS) staLinkDead(now);
+}
+
 void pollStaWatchdog() {
   if (wifiProv.state == PROV_CONNECT_REQUESTED || wifiProv.state == PROV_CONNECTING) return;
   uint32_t now = millis();
@@ -465,7 +635,10 @@ void pollStaWatchdog() {
       startMDNS();
       if (rejoined) staReconnects++;
       Serial.printf("[WiFi] STA %s, IP %s\n", rejoined ? "rejoined" : "up", ip.toString().c_str());
+      staProbe.nextMs = now + STA_PROBE_MS;   // a new link: let DHCP and ARP settle first
+      staProbe.failRun = 0;                   // armed stays: a rejoin that is still dead must count
     }
+    staProbeTick(now);
     staDownSinceMs = 0;
     staRetryGapMs = STA_RETRY_FIRST_MS;
     return;
@@ -473,7 +646,8 @@ void pollStaWatchdog() {
 
   if (staDownSinceMs == 0) {
     staDownSinceMs = now;
-    staNextRetryMs = now + STA_RETRY_FIRST_MS;
+    staNextRetryMs = now + (staRejoinNow ? 0 : STA_RETRY_FIRST_MS);
+    staRejoinNow = false;
     if (sysStatus.staConnected) Serial.println("[WiFi] STA lost — will rejoin");
     sysStatus.staConnected = false;
     return;

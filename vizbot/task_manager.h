@@ -32,19 +32,21 @@ void initI2CMutex() {
   }
 }
 
-// Set while the camera configures its sensor (stackchan_camera.h). Callers
-// use the bus anyway when their short wait times out, which corrupts SCCB
-// writes, so during a long hold every caller waits it out instead.
-static volatile bool i2cLongHold = false;
-#define I2C_LONG_HOLD_WAIT_MS 3000
-
-void i2cSetLongHold(bool on) { i2cLongHold = on; }
-bool i2cInLongHold() { return i2cLongHold; }   // for readers that don't take the lock
-
-// Acquire I2C bus. Returns true if acquired within timeout.
+// Acquire I2C bus. Returns true if acquired within timeout. A caller that
+// doesn't get it must skip its bus work, never do it unlocked: the camera
+// holds this lock for its whole SCCB window (stackchan_camera.h), and its
+// driver doesn't take M5's per-transaction bus mutex. (There used to be a
+// "long hold" that stretched every wait to 3 s during a camera window, which
+// stalled the loop; every caller now skips instead.)
 bool i2cAcquire(uint32_t timeoutMs = 50) {
   if (i2cMutex == nullptr) return true;  // No mutex = no protection (fallback)
-  if (i2cLongHold && timeoutMs < I2C_LONG_HOLD_WAIT_MS) timeoutMs = I2C_LONG_HOLD_WAIT_MS;
+  return xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+}
+
+// For callers that skip their work when the bus is busy: never stretched by
+// the camera's long hold, so the loop never waits out a camera window.
+bool i2cTry(uint32_t timeoutMs = 0) {
+  if (i2cMutex == nullptr) return true;
   return xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
