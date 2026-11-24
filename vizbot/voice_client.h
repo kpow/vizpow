@@ -144,7 +144,6 @@ static void voiceSetState(VoiceState s) {
 #define WAKE_UDP_PORT        4051
 #define WAKE_RING_CHUNKS     40       // 1.28 s of 32 ms chunks in PSRAM
 #define WAKE_PREROLL_CHUNKS  32       // ~1 s sent ahead of the chunk that opened the gate
-#define WAKE_TX_INFLIGHT     6        // pre-roll packets the WiFi driver may hold at once (internal RAM)
 #define WAKE_HANGOVER_MS     1500     // quiet time that closes the gate
 #define WAKE_OPEN_RATIO      2.5f     // gate opens above 2.5x the noise floor
 #define WAKE_FLOOR_RMS       150.0f   // ...and never below this
@@ -163,6 +162,7 @@ struct WakeStream {
   float    noise = 0, lastRms = 0;
   uint32_t lastLoudMs = 0, lastBeatMs = 0, lastWakeMs = 0;
   uint32_t sent = 0, sendFails = 0, bursts = 0, wakes = 0, micRestarts = 0;
+  uint32_t txDrops = 0;          // audio chunks not sent: no room in the WiFi driver (wakeTxRoom)
   char     host[64] = "";
   WiFiUDP  udp;
 };
@@ -972,8 +972,38 @@ static bool wakeSendPaused() {
   return cloudNetHeld();
 }
 
-static void wakeSend(uint32_t seq, uint8_t flags, const void* payload, size_t len) {
-  if (wakePauseUntilMs && (int32_t)(millis() - wakePauseUntilMs) < 0) return;
+// TX budget for audio chunks. Every queued chunk holds a ~1.3 KB buffer in the
+// WiFi driver, in DMA-capable internal RAM, until it is on the air (task "wifi",
+// 1214 B, caps INTERNAL|DMA). When the radio drains slower than one chunk per
+// 32 ms (weak signal, a busy channel) the stream used to keep queuing: mac
+// 2026-11-23, free RAM fell in 1284-byte steps to 12.6 KB and the driver's own
+// allocations failed 8 times (sendFails 6). So a chunk goes out only while the
+// driver holds at most WAKE_TX_INFLIGHT of them and WAKE_TX_RESERVE stays free
+// for everything else; otherwise it is dropped (vizbrain counts the gap).
+// Counted in DMA-capable RAM, not MALLOC_CAP_INTERNAL: that also counts RTC
+// fast RAM, which the radio cannot use.
+#define WAKE_TX_INFLIGHT     6        // audio packets the WiFi driver may hold at once
+#define WAKE_TX_PKT_BYTES    1300     // internal RAM one queued packet holds
+#define WAKE_TX_RESERVE      24576    // DMA RAM the stream never takes (RX buffers, TLS, web)
+#define WAKE_PREROLL_WAIT_MS 200      // longest the pre-roll waits for TX room, in all
+static size_t wakeTxBase = 0;         // DMA RAM free with nothing queued (set as a burst opens)
+
+static size_t wakeDmaFree() { return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA); }
+
+static bool wakeTxRoom() {
+  const size_t f = wakeDmaFree();
+  if (f > wakeTxBase) wakeTxBase = f;   // something else gave RAM back: the queue drained
+  const size_t budget = WAKE_TX_INFLIGHT * WAKE_TX_PKT_BYTES;
+  return f >= WAKE_TX_RESERVE && f + budget >= wakeTxBase;
+}
+
+// Returns false only when an audio chunk was dropped for lack of TX room.
+static bool wakeSend(uint32_t seq, uint8_t flags, const void* payload, size_t len) {
+  if (wakePauseUntilMs && (int32_t)(millis() - wakePauseUntilMs) < 0) return true;
+  if (len > 64 && !wakeTxRoom()) {      // audio only: START/END/beat packets are tiny
+    wake.txDrops++;
+    return false;
+  }
   uint8_t hdr[12] = {'V', 'Z', 'W', '1'};
   memcpy(hdr + 4, &seq, 4);
   hdr[8] = flags;
@@ -995,6 +1025,7 @@ static void wakeSend(uint32_t seq, uint8_t flags, const void* payload, size_t le
                     (unsigned long)wake.sendFails, (unsigned long)wakePauseMs);
     }
   }
+  return true;
 }
 
 static inline int16_t* wakeChunk(uint32_t idx) {
@@ -1047,21 +1078,29 @@ static void wakeProcessChunk(uint32_t idx) {
     wake.bursts++;
     uint32_t avail = min((uint32_t)WAKE_PREROLL_CHUNKS, wake.chunks - 1);
     avail = min(avail, idx);
-    // TX budget. Every queued packet holds a ~1.2 KB WiFi TX buffer in internal
-    // RAM until it is on the air, and Arduino's WiFi uses dynamic TX buffers:
-    // sent 1 ms apart, the pre-roll queued 24 of them (29 KB) in 70 ms, measured
-    // with the RAM tracer 2026-11-22. Keep at most WAKE_TX_INFLIGHT in the driver.
-    const size_t freeAtStart = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    const size_t txFloor = freeAtStart > WAKE_TX_INFLIGHT * 1300 ? freeAtStart - WAKE_TX_INFLIGHT * 1300 : 0;
+    // Sent 1 ms apart, the pre-roll queued 24 packets (29 KB) in 70 ms (RAM
+    // tracer 2026-11-22), so each one waits for TX room (wakeTxRoom), for
+    // WAKE_PREROLL_WAIT_MS in all. If the radio is still behind by then, the
+    // oldest pre-roll is dropped and the newest (the audio right before the
+    // gate opened, where "Hey" is) still goes. Sending it all anyway is what
+    // ran internal RAM out.
+    wakeTxBase = wakeDmaFree();
+    const uint32_t until = millis() + WAKE_PREROLL_WAIT_MS;
+    bool first = true, skipped = false;
     for (uint32_t k = idx - avail; k < idx; k++) {
-      for (int w = 0; w < 50 && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < txFloor; w++) {
+      while (!wakeTxRoom() && (int32_t)(millis() - until) < 0) {
         vTaskDelay(pdMS_TO_TICKS(2));                   // let the radio drain
       }
-      wakeSend(k, k == idx - avail ? WAKE_F_START : 0, wakeChunk(k), VOICE_CHUNK * sizeof(int16_t));
+      if (!skipped && idx - k > WAKE_TX_INFLIGHT && !wakeTxRoom()) {
+        skipped = true;                                 // out of time: keep only the newest
+        wake.txDrops += idx - WAKE_TX_INFLIGHT - k;
+        k = idx - WAKE_TX_INFLIGHT;
+      }
+      if (wakeSend(k, first ? WAKE_F_START : 0, wakeChunk(k), VOICE_CHUNK * sizeof(int16_t))) first = false;
       if (!wake.open) return;                           // sends failed and backed off
       vTaskDelay(1);
     }
-    wakeSend(idx, avail ? 0 : WAKE_F_START, c, VOICE_CHUNK * sizeof(int16_t));
+    wakeSend(idx, first ? WAKE_F_START : 0, c, VOICE_CHUNK * sizeof(int16_t));
     return;
   }
   if (wake.open) {
