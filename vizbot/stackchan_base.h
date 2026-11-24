@@ -595,8 +595,8 @@ inline bool sc5vBlocksUsb() {
   return false;
 }
 
-// Call right after M5.begin(): M5Unified has just written its own charger setup,
-// and vizbot.ino asked it to leave the 5 V output off.
+// Call right after M5.begin(): M5Unified has just written its own charger setup
+// and switched the 5 V output on (its default, kept by vizbot.ino).
 inline void scBatteryCareBegin() {
   M5.Power.Axp2101.setChargeVoltage(SC_CHARGE_MV);
   M5.Power.Axp2101.setChargeCurrent(SC_CHARGE_MA);
@@ -608,7 +608,13 @@ inline void scBatteryCareBegin() {
     nvs_close(h);
   }
   sc5vWanted = saved != 0;
-  if (!sc5vWanted) return;
+  if (!sc5vWanted) {
+    // M5.begin switched it on: honour this unit's saved choice. Without this the
+    // output stayed on, USB never reached the charger, and the unit started on
+    // battery (skunky 2026-11-24: battery rest 22 s after power-on).
+    sc5vSwitch(false);
+    return;
+  }
 
   bool usb = false;
   scUsbPresent(&usb);
