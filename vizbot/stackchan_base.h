@@ -595,8 +595,8 @@ inline bool sc5vBlocksUsb() {
   return false;
 }
 
-// Call right after M5.begin(): M5Unified has just written its own charger setup,
-// and vizbot.ino asked it to leave the 5 V output off.
+// Call right after M5.begin(): M5Unified has just written its own charger setup
+// and switched the 5 V output on (its default, kept by vizbot.ino).
 inline void scBatteryCareBegin() {
   M5.Power.Axp2101.setChargeVoltage(SC_CHARGE_MV);
   M5.Power.Axp2101.setChargeCurrent(SC_CHARGE_MA);

@@ -510,14 +510,10 @@ void setup() {
   cfg.internal_spk = false;
   cfg.internal_mic = false;
   #endif
-  #ifdef BOARD_HAS_STACKCHAN_BASE
-  // Start with the CoreS3's 5V output (BUS_OUT_EN + boost) off. scBatteryCareBegin()
-  // switches it on just below, because the base's LED ring is powered from it,
-  // unless this unit is saved as (or found to be) one where that output stops
-  // USB reaching the AXP2101: there the battery never charges and drains until
-  // the bot crash-loops. See "Battery care" in stackchan_base.h.
-  cfg.output_power = false;
-  #endif
+  // StackChan: leave cfg.output_power at M5's default (on), as M5's own firmware does.
+  // Starting with the 5 V output off (the old skunky battery-care start) brought on
+  // the cold-boot phantom head-touch storm: 1837 contacts in an hour on 2026-11-24,
+  // against 2 in 20 min with it on, same unit, same settings.
   M5.begin(cfg);
   #ifdef BOARD_HAS_STACKCHAN_BASE
   plogCaptureBoot();   // why it last switched off, before anything else touches the power chip
