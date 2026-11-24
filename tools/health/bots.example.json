@@ -1,0 +1,6 @@
+{
+  "_note": "Copy to ~/Library/Application Support/vizbot-health/config.json (healthlog.py --install makes an empty one). Never commit the real one: it holds MACs. Every vizBot on the Mac's /24 is found on its own; this file only adds nicknames, bots to skip, and an optional subnet.",
+  "names": {"aa:bb:cc:dd:ee:ff": "desk pendant"},
+  "ignore": [],
+  "subnet": null
+}

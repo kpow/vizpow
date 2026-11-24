@@ -7,10 +7,12 @@ collects, PASS or FAIL per row, against the soak scorecard's bar
 
   python3 tools/health/report.py              last 7 days, printed
   python3 tools/health/report.py --days 1     just today-ish
+  python3 tools/health/report.py --all        details for every bot, not just failing ones
   python3 tools/health/report.py --save       also write it to
                                               ~/Library/Logs/vizbot-health/reports/
 
-A bot passes when every graded row is ok. "info" rows are never graded.
+Bots are told apart by MAC address, so a renamed or reflashed bot keeps its
+history. A bot passes when every graded row is ok; "info" rows are never graded.
 Exit code 0 when every bot passes, 1 otherwise.
 """
 
@@ -137,32 +139,50 @@ def hm(t):
     return dt.datetime.fromtimestamp(t).strftime("%a %H:%M")
 
 
-def grade(bot, lines, wakes, window):
-    rows = []   # (check, value, bar, ok, note); ok None = info
+def label(lines):
+    last = lines[-1]
+    return last.get("nick") or next((d.get("name") for d in reversed(lines) if d.get("name")), last["id"])
+
+
+def grade(lines, wakes, window):
+    """Rows (check, value, bar, ok, note) for one bot; ok None = info."""
+    rows = []
 
     def check(name, value, ok, bar, note=""):
         rows.append((name, value, bar, ok, note))
 
     on = [d for d in lines if d.get("ok")]
-    pct = 100.0 * len(on) / len(lines) if lines else 0.0
-    check("Online", "%.1f%% of %d polls" % (pct, len(lines)), None, "info")
+    hours = len(on) * 5 / 60.0
+    check("On the network", "%.1f h, %d of %d runs" % (hours, len(on), len(lines)), None, "info")
     if not on:
-        return rows, None
+        return rows
     stackchan = any(d.get("board") == "stackchan" for d in on)
 
+    names = sorted({d["name"] for d in on if d.get("name")})
+    boards = sorted({d["board"] for d in on if d.get("board")})
     fws = [d["fw"] for d in on if d.get("fw")]
-    ups = [d for d in on if d.get("reboot", {}).get("update")]
-    check("Firmware", fws[-1] if fws else "?", None, "info",
-          "%d update(s): %s" % (len(ups), ", ".join("%s->%s" % (d["reboot"]["fwFrom"], d["fw"]) for d in ups))
-          if ups else "")
+    notes = []
+    if len(names) > 1:
+        notes.append("names " + ", ".join(names))
+    if len(boards) > 1:
+        notes.append("boards " + ", ".join(boards))
+    check("Firmware", fws[-1] if fws else "?", None, "info", "; ".join(notes))
 
-    rb = [d for d in on if d.get("reboot") and not d["reboot"].get("update")]
-    check("Reboots", len(rb), len(rb) <= BAR["reboots_max"], str(BAR["reboots_max"]),
-          "; ".join("%s %s" % (hm(d["t"]), d.get("capture", "")) for d in rb[:4]))
-    cr = [d for d in on if d.get("newCrash")]
-    check("New crash dumps", len(cr), len(cr) <= BAR["new_crash_max"], str(BAR["new_crash_max"]),
-          "; ".join("%s %s %s" % (hm(d["t"]), (d.get("crash") or {}).get("task"), (d.get("crash") or {}).get("pc"))
-                    for d in cr[:4]))
+    rb = [d for d in on if d.get("reboot")]
+    kinds = {}
+    for d in rb:
+        kinds.setdefault(d["reboot"].get("kind", "unknown"), []).append(d)
+    crashes = [d for d in on if d.get("newCrash") or d.get("reboot", {}).get("kind") == "crash"]
+    check("Crashes", len(crashes), len(crashes) <= BAR["new_crash_max"], str(BAR["new_crash_max"]),
+          "; ".join("%s %s %s" % (hm(d["t"]), (d.get("crash") or {}).get("task") or "",
+                                  d.get("capture", "")) for d in crashes[:3]))
+    unk = kinds.get("unknown", [])
+    check("Reboots, cause unknown", len(unk), len(unk) <= BAR["reboots_max"], str(BAR["reboots_max"]),
+          ("on WiFi before and after; a quick replug looks the same. " if unk else "") +
+          "; ".join("%s %s" % (hm(d["t"]), d.get("capture", "")) for d in unk[:3]))
+    other = ["%d %s" % (len(kinds[k]), k) for k in ("update", "power", "restart") if kinds.get(k)]
+    check("Other restarts", sum(len(kinds.get(k, [])) for k in ("update", "power", "restart")), None, "info",
+          ", ".join(other))
 
     if stackchan:
         heals = counter_delta(on, dig("touch", "heals"))
@@ -184,64 +204,108 @@ def grade(bot, lines, wakes, window):
     if lows:
         lo, t = min(lows)
         floor = BAR["heap_min_free_floor"]
-        check("Internal RAM least free", lo, lo >= floor, ">= %d" % floor, "seen %s" % hm(t))
+        rl = next(((d["tasks"]["ramLow"], d) for d in on
+                   if (d.get("tasks") or {}).get("heapMinFree") == lo and d["tasks"].get("ramLow")), None)
+        when = "first seen %s" % hm(t)
+        if rl:   # the bot's own record of the low: uptime -> wall clock
+            low, d = rl
+            if d.get("upSec") is not None and low.get("sec") is not None:
+                when = "at %s, busy: %s" % (hm(d["t"] - d["upSec"] + low["sec"]), (low.get("busy") or "-").strip() or "-")
+        check("Internal RAM least free", lo, lo >= floor, ">= %d" % floor, when)
     af = counter_delta(on, dig("tasks", "allocFails"))
     afp = counter_delta(on, dig("tasks", "allocFailsPsram"))
     check("Failed allocations", af, af <= 0, "0", "%d in PSRAM" % afp if afp else "")
 
-    if wakes is not None:
-        ips = {d.get("ip") for d in on if d.get("ip")}
-        mine = [w for ip in ips for w in wakes.get(ip, [])]
-        if mine or stackchan:
-            false = [w for w in mine if not w[1]]
-            cap = WEEK_BAR["false_wakes_per_day_max"] * max(window, 1.0)
-            check("False wakes", "%d of %d wakes" % (len(false), len(mine)), len(false) <= cap,
-                  "<= %.0f (%.0f/day)" % (cap, WEEK_BAR["false_wakes_per_day_max"]),
-                  "; ".join("%s score %.2f" % (hm(t), s) for t, _, s in false[:4]))
-
-    graded = [r for r in rows if r[3] is not None]
-    return rows, all(r[3] for r in graded)
+    if wakes is not None and (wakes or stackchan):
+        false = [w for w in wakes if not w[1]]
+        cap = WEEK_BAR["false_wakes_per_day_max"] * max(window, 1.0)
+        check("False wakes", "%d of %d wakes" % (len(false), len(wakes)), len(false) <= cap,
+              "<= %.0f (%.0f/day)" % (cap, WEEK_BAR["false_wakes_per_day_max"]),
+              "; ".join("%s score %.2f" % (hm(t), sc) for t, _, sc in false[:3]))
+    return rows
 
 
-def build(days):
+def attribute_wakes(wakes, lines):
+    """{bot id: [wake]}: each wake goes to the bot that had that IP nearest in time
+    (DHCP can move an IP between bots over a week). Returns (by_id, unmatched)."""
+    by_ip = {}
+    for d in lines:
+        if d.get("ok") and d.get("ip"):
+            by_ip.setdefault(d["ip"], []).append((d["t"], d["id"]))
+    out, unmatched = {}, 0
+    start = min((d["t"] for d in lines), default=0) - 600
+    for ip, ws in (wakes or {}).items():
+        for w in ws:
+            if w[0] < start:   # before the logger ran: nothing to match it to
+                continue
+            near = [(abs(t - w[0]), bid) for t, bid in by_ip.get(ip, []) if abs(t - w[0]) < 3600]
+            if near:
+                out.setdefault(min(near)[1], []).append(w)
+            else:
+                unmatched += 1
+    return out, unmatched
+
+
+def build(days, show_all):
     until = dt.datetime.now().timestamp()
     since = until - days * 86400
     lines = load_lines(since)
     wakes = read_wakes(since, until)
-    by_bot = {}
+    by_id = {}
     for d in lines:
-        by_bot.setdefault(d["bot"], []).append(d)
+        if d.get("id"):
+            by_id.setdefault(d["id"], []).append(d)
+    bot_wakes, unmatched = attribute_wakes(wakes, lines)
     covered = (lines[-1]["t"] - lines[0]["t"]) / 86400 if len(lines) > 1 else 0.0
+
+    results = []
+    for bid, bl in by_id.items():
+        rows = grade(bl, bot_wakes.get(bid, []) if wakes is not None else None, days)
+        graded = [r for r in rows if r[3] is not None]
+        if not graded:
+            verdict = "away"
+        else:
+            verdict = "PASS" if all(r[3] for r in graded) else "FAIL"
+        results.append((label(bl), bid, bl, rows, verdict))
+    results.sort(key=lambda r: ({"FAIL": 0, "PASS": 1, "away": 2}[r[4]], r[0].lower()))
+
     out = ["# vizBot health, last %g days" % days, "",
-           "- %s to %s, log covers %.1f of %g days, %d lines" % (
+           "- %s to %s; the log covers %.1f days, %d bots" % (
                dt.datetime.fromtimestamp(since).strftime("%Y-%m-%d %H:%M"),
-               dt.datetime.fromtimestamp(until).strftime("%Y-%m-%d %H:%M"), covered, days, len(lines))]
+               dt.datetime.fromtimestamp(until).strftime("%Y-%m-%d %H:%M"), covered, len(results))]
     if wakes is None:
         out.append("- vizbrain.log not found: false wakes not graded")
-    all_ok = bool(by_bot)
-    for bot in sorted(by_bot):
-        bl = by_bot[bot]
-        rows, ok = grade(bot, bl, wakes, days)
-        board = next((d.get("board") for d in reversed(bl) if d.get("board")), "?")
-        verdict = "OFFLINE all week" if ok is None else ("PASS" if ok else "FAIL")
-        all_ok = all_ok and bool(ok)
-        out += ["", "## %s (%s): %s" % (bot, board, verdict), "",
-                "| Check | Result | Bar | |", "|---|---|---|---|"]
-        for name, value, bar, rok, note in rows:
+    elif unmatched:
+        out.append("- %d wake(s) from an IP no logged bot had at the time" % unmatched)
+    out += ["", "| Bot | MAC | Board | Firmware | On WiFi | Verdict | Failing |", "|---|---|---|---|---|---|---|"]
+    for name, bid, bl, rows, verdict in results:
+        on = [d for d in bl if d.get("ok")]
+        last = on[-1] if on else bl[-1]
+        failing = ", ".join(r[0] for r in rows if r[3] is False)
+        out.append("| %s | %s | %s | %s | %.1f h | %s | %s |" % (
+            name, bid, last.get("board", "?"), last.get("fw", "?"), len(on) * 5 / 60.0, verdict, failing))
+
+    for name, bid, bl, rows, verdict in results:
+        if verdict == "away" or (verdict == "PASS" and not show_all):
+            continue
+        out += ["", "## %s (%s): %s" % (name, bid, verdict), "", "| Check | Result | Bar | |", "|---|---|---|---|"]
+        for cname, value, bar, rok, note in rows:
             mark = "info" if rok is None else ("ok" if rok else "FAIL")
-            out.append("| %s | %s%s | %s | %s |" % (name, value, " (%s)" % note if note else "", bar, mark))
-    if not by_bot:
+            out.append("| %s | %s%s | %s | %s |" % (cname, value, " (%s)" % note if note else "", bar, mark))
+    if not results:
         out += ["", "No log lines in this window. Is the logger running? python3 tools/health/healthlog.py --status"]
-    out += ["", "Reboot dumps are in ~/Library/Logs/vizbot-health/reboots/. Real head pats fire taps; only storms are graded."]
-    return "\n".join(out) + "\n", all_ok
+    out += ["", "Details show for failing bots (--all for every bot). Reboot dumps: ~/Library/Logs/vizbot-health/reboots/"]
+    ok = bool(results) and all(r[4] != "FAIL" for r in results)
+    return "\n".join(out) + "\n", ok
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--days", type=float, default=7.0)
+    ap.add_argument("--all", action="store_true", help="details for every bot, not just failing ones")
     ap.add_argument("--save", action="store_true", help="also write the report to the log folder")
     a = ap.parse_args()
-    text, ok = build(a.days)
+    text, ok = build(a.days, a.all)
     print(text, end="")
     if a.save:
         d = os.path.join(LOG_DIR, "reports")

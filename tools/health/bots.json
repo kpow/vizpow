@@ -1,7 +1,0 @@
-{
-  "_note": "Bots the health logger watches. Hostnames only, never IPs: the logger resolves them over mDNS and keeps its IP cache in ~/Library/Logs/vizbot-health/state.json. Any vizbot-*.local found by mDNS is added on its own.",
-  "bots": [
-    {"name": "mac", "host": "vizbot-mac.local"}
-  ],
-  "discover": "vizbot-"
-}
