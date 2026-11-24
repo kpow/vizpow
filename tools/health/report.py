@@ -267,6 +267,12 @@ def build(days, show_all):
         else:
             verdict = "PASS" if all(r[3] for r in graded) else "FAIL"
         results.append((label(bl), bid, bl, rows, verdict))
+    # Cloned bots can share a name: tag those with the end of their MAC.
+    counts = {}
+    for r in results:
+        counts[r[0]] = counts.get(r[0], 0) + 1
+    results = [(("%s #%s" % (r[0], r[1].replace(":", "")[-4:])) if counts[r[0]] > 1 else r[0],) + r[1:]
+               for r in results]
     results.sort(key=lambda r: ({"FAIL": 0, "PASS": 1, "away": 2}[r[4]], r[0].lower()))
 
     out = ["# vizBot health, last %g days" % days, "",

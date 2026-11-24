@@ -410,12 +410,17 @@ def status():
         return
     names = load_json(CONFIG, {}).get("names", {})
     now = time.time()
-    print("%-18s %-17s %-16s %-9s %s" % ("bot", "mac", "board", "fw", "last seen"))
+    print("%-18s %-17s %-16s %-12s %s" % ("bot", "mac", "board", "fw", "last seen"))
+    labels = {mac: names.get(mac) or p.get("name") or mac for mac, p in bots.items()}
+    dup = {l for l in labels.values() if list(labels.values()).count(l) > 1}
+    for mac in labels:   # cloned bots can share a name: tag with the end of the MAC
+        if labels[mac] in dup:
+            labels[mac] = "%s #%s" % (labels[mac], mac.replace(":", "")[-4:])
     for mac, p in sorted(bots.items(), key=lambda kv: -kv[1].get("t", 0)):
         ago = now - p.get("t", 0)
         when = "now" if ago < 1.6 * INTERVAL_S else ("%.0f min ago" % (ago / 60) if ago < 7200
                                                      else "%.1f h ago" % (ago / 3600))
-        print("%-18s %-17s %-16s %-9s %s" % (names.get(mac) or p.get("name"), mac, p.get("board"), p.get("fw"), when))
+        print("%-18s %-17s %-16s %-12s %s" % (labels[mac], mac, p.get("board"), p.get("fw"), when))
 
 
 def main():
