@@ -33,6 +33,11 @@ Bots come and go, get renamed and get reflashed, so there is no bot list.
 Plain GETs only: `/state`, `/debug/tasks`, `/debug/crash`, and on a StackChan
 `/debug/touchraw`. USB serial is never opened.
 
+vizMini (the C3, `vizmini/` firmware) serves only `/state`: no uptime, crash
+dump or task stats. Its reboots are seen when its least-ever free heap rises
+(that can only fall within one boot), so some are missed. Its RAM low is shown
+but not graded: the 16 KB floor was set on the StackChan.
+
 ## Where things land
 
 - `~/Library/Logs/vizbot-health/health-YYYY-MM-DD.jsonl`: one line per bot per run

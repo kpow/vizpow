@@ -138,7 +138,7 @@ def sweep(net, state, now):
 
     def check(ip):
         st = get(ip, "/state", timeout=5)
-        return st if isinstance(st, dict) and st.get("firmwareVersion") and "sys" in st else None
+        return st if isinstance(st, dict) and family(st) else None
 
     with cf.ThreadPoolExecutor(16) as ex:
         sts = list(ex.map(check, ask))
@@ -171,6 +171,37 @@ def save_json(path, obj):
 
 
 # ---- one bot -----------------------------------------------------------------
+
+def family(st):
+    """'vizbot' (vizbot/ firmware: StackChan, 1.69, 1.3...), 'vizmini' (vizmini/
+    firmware on the C3), or None for anything else."""
+    if st.get("firmwareVersion") and "sys" in st:
+        return "vizbot"
+    if st.get("fw") and st.get("name") and "minHeap" in st:
+        return "vizmini"
+    return None
+
+
+def poll_mini(mac, ip, st, prev, now, nick):
+    """vizMini serves only /state: no uptime, crash dump or task stats. A reboot
+    shows as its least-ever free heap going UP (it can only fall within a boot);
+    a reboot whose new low is already below the old one is missed."""
+    line = {"t": round(now, 1), "id": mac, "ok": True, "family": "vizmini", "name": st.get("name"), "ip": ip,
+            "fw": st.get("fw"), "board": "vizmini-c3",
+            "tasks": {"heapMinFree": st.get("minHeap"), "heapFree": st.get("heap")},
+            "net": {"rssi": st.get("rssi")}}
+    if nick:
+        line["nick"] = nick
+    lo, plo = st.get("minHeap"), prev.get("heapMinFree")
+    if lo is not None and plo is not None and lo > plo:
+        gap = now - prev["t"]
+        r = {"update": prev.get("fw") != line["fw"], "fwFrom": prev.get("fw"), "boardFrom": prev.get("board"),
+             "away": gap > 1.6 * INTERVAL_S, "gapSec": int(gap), "reason": None, "seenBy": "minHeap rose"}
+        r["kind"] = reboot_kind(r, False)
+        line["reboot"] = r
+    new = {"t": now, "fw": line["fw"], "board": "vizmini-c3", "name": line["name"], "ip": ip, "heapMinFree": lo}
+    return line, new
+
 
 CRASH_REASONS = {4: "panic", 5: "int watchdog", 6: "task watchdog", 7: "watchdog", 9: "brownout"}
 
@@ -299,7 +330,8 @@ def poll_all():
 
     lines = []
     with cf.ThreadPoolExecutor(8) as ex:
-        jobs = [ex.submit(poll_bot, mac, ip, st, per.get(mac, {}), now, names.get(mac)) for ip, mac, st in found]
+        jobs = [ex.submit(poll_mini if family(st) == "vizmini" else poll_bot,
+                          mac, ip, st, per.get(mac, {}), now, names.get(mac)) for ip, mac, st in found]
         for (ip, mac, st), j in zip(found, jobs):
             try:
                 line, per[mac] = j.result()
@@ -368,6 +400,9 @@ def install():
     shutil.copy2(os.path.join(HERE, "healthlog.py"), os.path.join(APP_DIR, "healthlog.py"))
     if not os.path.exists(CONFIG):
         save_json(CONFIG, {"names": {}, "ignore": []})
+    st = load_json(STATE, None)
+    if st and st.pop("notBot", None) is not None:   # a new version may know more kinds of bot
+        save_json(STATE, st)
     with open(PLIST, "w") as f:
         f.write(PLIST_XML.format(label=LABEL, script=os.path.join(APP_DIR, "healthlog.py"),
                                  interval=INTERVAL_S, log=os.path.join(LOG_DIR, "healthlog.log")))

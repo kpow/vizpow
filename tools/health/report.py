@@ -157,6 +157,7 @@ def grade(lines, wakes, window):
     if not on:
         return rows
     stackchan = any(d.get("board") == "stackchan" for d in on)
+    mini = any(d.get("family") == "vizmini" for d in on)
 
     names = sorted({d["name"] for d in on if d.get("name")})
     boards = sorted({d["board"] for d in on if d.get("board")})
@@ -173,11 +174,15 @@ def grade(lines, wakes, window):
     for d in rb:
         kinds.setdefault(d["reboot"].get("kind", "unknown"), []).append(d)
     crashes = [d for d in on if d.get("newCrash") or d.get("reboot", {}).get("kind") == "crash"]
-    check("Crashes", len(crashes), len(crashes) <= BAR["new_crash_max"], str(BAR["new_crash_max"]),
-          "; ".join("%s %s %s" % (hm(d["t"]), (d.get("crash") or {}).get("task") or "",
-                                  d.get("capture", "")) for d in crashes[:3]))
+    if any(d.get("crash") for d in on) or crashes:
+        check("Crashes", len(crashes), len(crashes) <= BAR["new_crash_max"], str(BAR["new_crash_max"]),
+              "; ".join("%s %s %s" % (hm(d["t"]), (d.get("crash") or {}).get("task") or "",
+                                      d.get("capture", "")) for d in crashes[:3]))
+    else:
+        check("Crashes", "n/a", None, "info", "this firmware has no crash dump page")
     unk = kinds.get("unknown", [])
     check("Reboots, cause unknown", len(unk), len(unk) <= BAR["reboots_max"], str(BAR["reboots_max"]),
+          ("seen only when its RAM low rises, so some are missed. " if mini else "") +
           ("on WiFi before and after; a quick replug looks the same. " if unk else "") +
           "; ".join("%s %s" % (hm(d["t"]), d.get("capture", "")) for d in unk[:3]))
     other = ["%d %s" % (len(kinds[k]), k) for k in ("update", "power", "restart") if kinds.get(k)]
@@ -194,7 +199,7 @@ def grade(lines, wakes, window):
         check("Phantom head touch (storms)", heals, heals <= BAR["touch_heals_max"], str(BAR["touch_heals_max"]),
               "%d taps fired, %d contacts, %d ignored" % (taps, contacts, ignored))
 
-    nets = [d for d in on if d.get("net")]
+    nets = [d for d in on if (d.get("net") or {}).get("dead") is not None]
     if nets:
         dead = max(counter_delta(nets, dig("net", "dead")), counter_delta(nets, dig("net", "deadEver")))
         rs = [d["net"]["rssi"] for d in nets if d["net"].get("rssi")]
@@ -203,7 +208,7 @@ def grade(lines, wakes, window):
     lows = [(d["tasks"]["heapMinFree"], d["t"]) for d in on if (d.get("tasks") or {}).get("heapMinFree") is not None]
     if lows:
         lo, t = min(lows)
-        floor = BAR["heap_min_free_floor"]
+        floor = None if mini else BAR["heap_min_free_floor"]
         rl = next(((d["tasks"]["ramLow"], d) for d in on
                    if (d.get("tasks") or {}).get("heapMinFree") == lo and d["tasks"].get("ramLow")), None)
         when = "first seen %s" % hm(t)
@@ -211,10 +216,14 @@ def grade(lines, wakes, window):
             low, d = rl
             if d.get("upSec") is not None and low.get("sec") is not None:
                 when = "at %s, busy: %s" % (hm(d["t"] - d["upSec"] + low["sec"]), (low.get("busy") or "-").strip() or "-")
-        check("Internal RAM least free", lo, lo >= floor, ">= %d" % floor, when)
-    af = counter_delta(on, dig("tasks", "allocFails"))
-    afp = counter_delta(on, dig("tasks", "allocFailsPsram"))
-    check("Failed allocations", af, af <= 0, "0", "%d in PSRAM" % afp if afp else "")
+        if floor is None:   # the 16 KB floor was set on the StackChan; a C3 runs lower
+            check("RAM least free", lo, None, "info", when + "; no bar for vizMini yet")
+        else:
+            check("Internal RAM least free", lo, lo >= floor, ">= %d" % floor, when)
+    if any((d.get("tasks") or {}).get("allocFails") is not None for d in on):
+        af = counter_delta(on, dig("tasks", "allocFails"))
+        afp = counter_delta(on, dig("tasks", "allocFailsPsram"))
+        check("Failed allocations", af, af <= 0, "0", "%d in PSRAM" % afp if afp else "")
 
     if wakes is not None and (wakes or stackchan):
         false = [w for w in wakes if not w[1]]
