@@ -2584,6 +2584,7 @@ void ramLowTick() {
   char* end = r.busy + sizeof(r.busy);
   #ifdef VOICE_ENABLED
   if (voice.busy()) p += snprintf(p, end - p, "voice ");
+  if (wake.open) p += snprintf(p, end - p, "wake ");     // mic stream to vizbrain, gate open
   #endif
   #ifdef BOARD_HAS_STACKCHAN_BASE
   if (scCamRunning) p += snprintf(p, end - p, "camera ");
@@ -3082,6 +3083,7 @@ void handleBrainStatus() {
   wk["host"] = wake.host;
   wk["sent"] = wake.sent;
   wk["sendFails"] = wake.sendFails;
+  wk["txDrops"] = wake.txDrops;
   wk["bursts"] = wake.bursts;
   wk["wakes"] = wake.wakes;
   wk["lastWakeSecAgo"] = wake.lastWakeMs ? (long)((millis() - wake.lastWakeMs) / 1000) : -1L;
