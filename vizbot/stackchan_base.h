@@ -608,7 +608,13 @@ inline void scBatteryCareBegin() {
     nvs_close(h);
   }
   sc5vWanted = saved != 0;
-  if (!sc5vWanted) return;
+  if (!sc5vWanted) {
+    // M5.begin switched it on: honour this unit's saved choice. Without this the
+    // output stayed on, USB never reached the charger, and the unit started on
+    // battery (skunky 2026-11-24: battery rest 22 s after power-on).
+    sc5vSwitch(false);
+    return;
+  }
 
   bool usb = false;
   scUsbPresent(&usb);
