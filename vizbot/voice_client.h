@@ -985,6 +985,7 @@ static bool wakeSendPaused() {
 #define WAKE_TX_INFLIGHT     6        // audio packets the WiFi driver may hold at once
 #define WAKE_TX_PKT_BYTES    1300     // internal RAM one queued packet holds
 #define WAKE_TX_RESERVE      24576    // DMA RAM the stream never takes (RX buffers, TLS, web)
+#define WAKE_PREROLL_WAIT_MS 200      // longest the pre-roll waits for TX room, in all
 static size_t wakeTxBase = 0;         // DMA RAM free with nothing queued (set as a burst opens)
 
 static size_t wakeDmaFree() { return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA); }
@@ -1078,20 +1079,24 @@ static void wakeProcessChunk(uint32_t idx) {
     uint32_t avail = min((uint32_t)WAKE_PREROLL_CHUNKS, wake.chunks - 1);
     avail = min(avail, idx);
     // Sent 1 ms apart, the pre-roll queued 24 packets (29 KB) in 70 ms (RAM
-    // tracer 2026-11-22), so each one waits up to 100 ms for TX room
-    // (wakeTxRoom). If the radio has not drained by then, the rest of the
-    // pre-roll is dropped: sending it anyway is what ran internal RAM out.
+    // tracer 2026-11-22), so each one waits for TX room (wakeTxRoom), for
+    // WAKE_PREROLL_WAIT_MS in all. If the radio is still behind by then, the
+    // oldest pre-roll is dropped and the newest (the audio right before the
+    // gate opened, where "Hey" is) still goes. Sending it all anyway is what
+    // ran internal RAM out.
     wakeTxBase = wakeDmaFree();
-    bool first = true;
+    const uint32_t until = millis() + WAKE_PREROLL_WAIT_MS;
+    bool first = true, skipped = false;
     for (uint32_t k = idx - avail; k < idx; k++) {
-      for (int w = 0; w < 50 && !wakeTxRoom(); w++) {
+      while (!wakeTxRoom() && (int32_t)(millis() - until) < 0) {
         vTaskDelay(pdMS_TO_TICKS(2));                   // let the radio drain
       }
-      if (!wakeSend(k, first ? WAKE_F_START : 0, wakeChunk(k), VOICE_CHUNK * sizeof(int16_t))) {
-        wake.txDrops += idx - k - 1;                    // this one is counted in wakeSend
-        break;
+      if (!skipped && idx - k > WAKE_TX_INFLIGHT && !wakeTxRoom()) {
+        skipped = true;                                 // out of time: keep only the newest
+        wake.txDrops += idx - WAKE_TX_INFLIGHT - k;
+        k = idx - WAKE_TX_INFLIGHT;
       }
-      first = false;
+      if (wakeSend(k, first ? WAKE_F_START : 0, wakeChunk(k), VOICE_CHUNK * sizeof(int16_t))) first = false;
       if (!wake.open) return;                           // sends failed and backed off
       vTaskDelay(1);
     }
