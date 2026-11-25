@@ -129,6 +129,8 @@ static uint32_t scIdleHoldUntilMs = 0;   // TouchAO wants the head still until t
 static void scAppOnEvent(const AoEvt& e) {
   switch (e.sig) {
     case SIG_TOUCH_TAP:
+      // Asleep, a pat only opens his eyes for a moment (holding wakes him).
+      if (botMode.asleep()) { botMode.peek(); break; }
       // Back half = shake. Front half = talk to vizbrain on voice builds (tap
       // again to cancel), nod otherwise. Middle is never published.
       if (e.a == SC_ZONE_BACK) scFireShake();
@@ -141,6 +143,7 @@ static void scAppOnEvent(const AoEvt& e) {
       }
       break;
     case SIG_TOUCH_HOLD:
+      if (botSleepAsleep()) { aoPost(scSleepAO, aoEvt(SIG_SLEEP_WAKE, SRC_APP)); break; }   // hold to wake
       scFireChillMode();
       break;
     case SIG_TOUCH_NEED_STILL: {
@@ -189,6 +192,7 @@ static void scAoStart() {
   aoSubscribe(scAppAO, SIG_TOUCH_NEED_STILL);
   scMotionAOStart();                   // after the app AO: it acts on taps by posting gestures
   scBusAOStart();                      // power sensors: one owner, a snapshot for everyone else
+  scSleepAOStart();                    // the sleep schedule; asks MotionAO to rest the head
   aoPublish(SIG_BOOT_READY, SRC_APP);
 }
 #endif
@@ -714,7 +718,7 @@ void loop() {
     aoDispatch();    // ...then TouchAO reads the head, then the app AO acts on taps
   }
   #ifdef VOICE_ENABLED
-  voiceSuppressEvents = scTouch_state.chillMode;
+  voiceSuppressEvents = scTouch_state.chillMode || botMode.asleep();
   const bool voiceTurn = voice.busy();
   #else
   const bool voiceTurn = false;
@@ -728,7 +732,7 @@ void loop() {
   // ...and while TouchAO waits for a still head to take its reference.
   const bool touchWantsStill = (int32_t)(scIdleHoldUntilMs - millis()) > 0;
   // ...and while MotionAO runs a gesture, rail cycle or rest.
-  if (!scTouch_state.chillMode && !voiceTurn && !partyBlob.code && !touchWantsStill &&   // code mode moves the head itself
+  if (!scTouch_state.chillMode && !botMode.asleep() && !voiceTurn && !partyBlob.code && !touchWantsStill &&   // code mode moves the head itself
       !scMotionBusy()) {
     scIdleServo.update(botMode.personalityIndex, botMode.shakeReacting);
   }
@@ -773,8 +777,8 @@ void loop() {
   // Apply queued commands from WiFi/touch before rendering
   drainCommandQueue();
 
-  #ifdef HAS_SLEEP_SCHEDULE
-  botSleepTick();   // after the queue, so a web "wake" lands this frame
+  #if defined(HAS_SLEEP_SCHEDULE) && !defined(BOARD_HAS_STACKCHAN_BASE)
+  botSleepTick();   // after the queue, so a web "wake" lands this frame (StackChan: SleepAO)
   #endif
 
   // Sync local palette to WLED when bot sends DDP frames

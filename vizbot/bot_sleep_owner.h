@@ -1,18 +1,21 @@
 #pragma once
 // ============================================================================
-// Sleep owner — the 1.69's side of the sleep schedule (docs/plan-sleep.md)
+// Sleep owner — vizbot's side of the sleep schedule (docs/plan-sleep.md)
 // API and notes for callers: bot_sleep.h.
 // ============================================================================
 // sleep_schedule.h decides WHEN (pure logic, host-tested). This file is the
 // only code that puts the bot to sleep or wakes him, and it runs on the loop
 // thread only:
-//   - botSleepTick() every frame reads the clock (rate-limited) and applies
-//     the transition the schedule reports.
+//   - botSleepTick() reads the clock (rate-limited), applies the transition
+//     the schedule reports and reconciles the effects. The 1.69 calls it every
+//     frame; on StackChan it is SleepAO's tick (end of this file).
 //   - Web and cloud reach it through the command queue (task_manager.h); the
 //     web task reads only the snapshot below.
 // Effects while asleep: bot state SLEEPING (eyes shut, Zzz, no sayings or
-// chirps), backlight dimmed, ring LEDs off, sound hushed, any UI sheet closed.
-// None of them touch a saved setting, so the morning puts everything back.
+// chirps), backlight dimmed, LEDs off, sound hushed, any UI sheet closed.
+// StackChan also: head rested through MotionAO (servo rail and 5 V off), wake
+// stream and Audio FX mic paused, chill ended. None of them touch a saved
+// setting, so the morning puts everything back.
 // ============================================================================
 
 #include "bot_sleep.h"
@@ -29,6 +32,11 @@ static int16_t  botSleepMod = sleepsched::kTimeUnknown;   // last minute-of-day 
 static uint32_t botSleepClockAt = 0;                      // millis() of that read
 static bool     botSleepClockRead = false;
 static unsigned long botSleepSeenHuman = 0;               // botMode.lastHumanMs last passed on
+static bool     botSleepBlPending = false;                // backlight change still to apply
+#ifdef BOARD_HAS_STACKCHAN_BASE
+static uint32_t botSleepRestAskAt = 0;                    // last rest/wake ask to MotionAO
+static bool     botSleepRestAsked = false;
+#endif
 
 // ---- Snapshot for the web task (GET /bot/sleep, /state) -----------------------
 static BotSleepSnapshot botSleepSnap = { sleepsched::kDefaults, false, sleepsched::Cause::None, false };
@@ -60,6 +68,35 @@ static int16_t botSleepReadClock() {
 }
 
 // ---- Effects -------------------------------------------------------------------
+// The backlight follows lcdSleepDim (display_lcd.h). On CoreS3 it is a PMU
+// write on the shared bus: lock or skip (rule 3), and the tick tries again.
+static void botSleepApplyBacklight() {
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  if (!i2cTry(0)) { botSleepBlPending = true; return; }
+  setLCDBacklight(lcdBrightness);
+  i2cRelease();
+  #else
+  setLCDBacklight(lcdBrightness);
+  #endif
+  botSleepBlPending = false;
+}
+
+#ifdef BOARD_HAS_STACKCHAN_BASE
+// Asleep, the head rests for SC_RR_SLEEP; awake, that reason is cleared.
+// MotionAO owns the rest (rule 1) and may refuse mid-recovery, so this asks
+// again every SLEEP_REST_ASK_MS until scRestReasons agrees. A transition asks
+// at once.
+static void botSleepReconcileRest(uint32_t now, bool changed) {
+  const bool want = botSleep.asleep();
+  const bool has = (scRestReasons & SC_RR_SLEEP) != 0;
+  if (want == has) { botSleepRestAsked = false; return; }
+  if (botSleepRestAsked && !changed && now - botSleepRestAskAt < SLEEP_REST_ASK_MS) return;
+  aoPost(scMotionAO, aoEvt(want ? SIG_MOTION_REST : SIG_MOTION_WAKE, SRC_APP, 0, SC_RR_SLEEP));
+  botSleepRestAsked = true;
+  botSleepRestAskAt = now;
+}
+#endif
+
 static void botSleepApply(sleepsched::Change c) {
   if (c == sleepsched::Change::FellAsleep) {
     if (infoMode.active) infoMode.beginExitTransition();
@@ -71,12 +108,25 @@ static void botSleepApply(sleepsched::Change c) {
     #ifdef HAS_BASE_LEDS
     scLeds.asleep = true;
     #endif
+    #ifdef BOARD_HAS_STACKCHAN_BASE
+    scEndChillQuietly();
+    aoPublish(SIG_SLEEP_START, SRC_APP, botSleep.cause() == sleepsched::Cause::Manual ? 2 : 1);
+    #endif
+    #ifdef VOICE_ENABLED
+    voiceSleeping = true;          // the voice task stops the wake stream and FX mic
+    #endif
     lcdSleepDim = true;
-    setLCDBacklight(lcdBrightness);
+    botSleepApplyBacklight();
     DBGLN("Sleep: asleep");
   } else if (c == sleepsched::Change::WokeUp) {
+    #ifdef BOARD_HAS_STACKCHAN_BASE
+    aoPublish(SIG_SLEEP_END, SRC_APP);
+    #endif
+    #ifdef VOICE_ENABLED
+    voiceSleeping = false;
+    #endif
     lcdSleepDim = false;
-    setLCDBacklight(lcdBrightness);
+    botSleepApplyBacklight();
     #ifdef HAS_BASE_LEDS
     scLeds.asleep = false;
     #endif
@@ -131,6 +181,10 @@ void botSleepTick() {
   }
   const sleepsched::Change c = botSleep.update(botSleepMod, now);
   botSleepApply(c);
+  if (botSleepBlPending) botSleepApplyBacklight();
+  #ifdef BOARD_HAS_STACKCHAN_BASE
+  botSleepReconcileRest(now, c != sleepsched::Change::None);
+  #endif
   if (reread || c != sleepsched::Change::None) botSleepPublish();
 }
 
@@ -155,5 +209,33 @@ const char* botSleepCauseName(sleepsched::Cause c) {
     default:                          return "none";
   }
 }
+
+#ifdef BOARD_HAS_STACKCHAN_BASE
+// ---- SleepAO (StackChan) ---------------------------------------------------------
+// Owns the schedule on StackChan (firmware rules: a subsystem is an owner with
+// its own events). Ticks the schedule; SIG_SLEEP_WAKE is the head hold, posted
+// by the app AO.
+static AoActive scSleepAO;
+
+static void scSleepOnEvent(const AoEvt& e) {
+  switch (e.sig) {
+    case SIG_TICK:
+      botSleepTick();
+      break;
+    case SIG_SLEEP_WAKE:
+      botSleepRequest(false);
+      botSleepTick();              // at once, not on the next tick
+      break;
+    default: break;
+  }
+}
+
+inline void scSleepAOStart() {
+  scSleepAO.name = "sleep";
+  scSleepAO.onEvent = scSleepOnEvent;
+  scSleepAO.tickMs = SLEEP_AO_TICK_MS;
+  aoStart(scSleepAO);
+}
+#endif
 
 #endif  // HAS_SLEEP_SCHEDULE

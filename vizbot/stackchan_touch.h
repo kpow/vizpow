@@ -567,6 +567,15 @@ inline void scFireRecenter(uint8_t personalityIndex) {
 // Long-Press Chill — hold head 2s → quiet mode for scChillMinutes
 // ============================================================================
 
+// Sleep ends a chill without its "I'm up!" (bot_sleep_owner.h). LEDs go back
+// the way scFireChillMode()'s own exit sets them.
+inline void scEndChillQuietly() {
+  if (!scTouch_state.chillMode) return;
+  scTouch_state.chillMode = false;
+  scLeds.mode = SC_LED_MODE_RAINBOW;
+  scLeds.speed = 128;
+}
+
 // durationMs=0 means the chosen length (scChillMinutes). /bot/chill?minutes=N
 // overrides — long chills (e.g. 480 min) double as the idle-drift-off soak
 // experiment.

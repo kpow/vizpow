@@ -592,7 +592,7 @@ void updateBotMode() {
 
   // ---- Core S3: Proximity-reactive expressions ----
   #ifdef TARGET_CORES3
-  if (sysStatus.proxLightReady && !botMode.shakeReacting && !voiceHoldsFace &&
+  if (sysStatus.proxLightReady && !botMode.asleep() && !botMode.shakeReacting && !voiceHoldsFace &&
       (now - botMode.lastProxReactionMs > 2000)) {
 
     bool nearNow = proxLight.nearDetected;
@@ -657,7 +657,7 @@ void updateBotMode() {
 
   // ---- Voice: bubble hand-off from Core 0, and stay awake during a turn ----
   if (voiceBubblePending) {
-    botMode.speechBubble.show(voiceBubbleText, voiceBubbleMs, true, true);
+    if (!botMode.asleep()) botMode.speechBubble.show(voiceBubbleText, voiceBubbleMs, true, true);
     voiceBubblePending = false;
   }
   if (voiceHoldsFace) botMode.registerInteraction();
