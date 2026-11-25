@@ -55,6 +55,7 @@ void ramTraceBegin();       // ram_trace.cpp (bench builds)
 #include "album_art.h"      // Covers from vizbrain drawn instead of the face (must come before bot_mode.h)
 #include "bot_mode.h"
 #include "info_mode.h"
+#include "bot_sleep.h"      // Sleep API (owner: bot_sleep_owner.h); before the touch UI and web server
 #include "wled_display.h"
 #include "wled_weather_view.h"
 #include "wled_scheduled_content.h"
@@ -85,6 +86,7 @@ void ramTraceBegin();       // ram_trace.cpp (bench builds)
 #endif
 #include "power_button.h"   // 1.69 PWR button hold-to-power-off; no-op without PWR_HOLD_PIN
 #include "pendant_shake.h" // low power shake reactions; no-op without HAS_LOW_POWER_MODE
+#include "bot_sleep_owner.h" // Sleep schedule owner; no-op without HAS_SLEEP_SCHEDULE
 #include "task_manager.h"
 #include "esp_now_mesh.h"
 #include "wifi_provisioning.h"
@@ -640,6 +642,11 @@ void loop() {
       if (!shakeSustainedTriggered && shakeAboveCount >= 8 &&
           (millis() - shakeStartTime) >= SUSTAINED_SHAKE_DURATION_MS) {
         shakeSustainedTriggered = true;
+        if (botMode.asleep()) {
+          // Asleep, a long shake is a jolt, not a gesture: he peeks and sleeps on
+          // (holding the screen is what wakes him).
+          botMode.peek();
+        } else
         #ifdef HAS_LOW_POWER_MODE
         if (lowPowerMode) {
           // Radio off: there is no weather for info mode to show, and a pendant
@@ -765,6 +772,10 @@ void loop() {
 
   // Apply queued commands from WiFi/touch before rendering
   drainCommandQueue();
+
+  #ifdef HAS_SLEEP_SCHEDULE
+  botSleepTick();   // after the queue, so a web "wake" lands this frame
+  #endif
 
   // Sync local palette to WLED when bot sends DDP frames
   int8_t wledPal = wledConsumePalSync();

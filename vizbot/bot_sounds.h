@@ -797,6 +797,7 @@ struct ActiveNote {
 
 struct BotSounds {
   bool enabled;
+  bool hushed = false;   // asleep (bot_sleep.h): silent without touching the saved setting
   bool useMidi;          // true = SAM2695, false = M5.Speaker / piezo fallback
   uint8_t volume;        // 0-255 (firmware scale)
   bool playing;          // true while sequence active (mic mutes on this)
@@ -891,7 +892,7 @@ struct BotSounds {
   // --- Play a built-in or cloud sequence by ID ---
 
   void play(MidiSequenceId seqId) {
-    if (!enabled || seqId == SEQ_NONE) return;
+    if (!enabled || hushed || seqId == SEQ_NONE) return;
 
     const MidiSequenceDef* def = lookupSequence(seqId);
     if (!def || def->eventCount == 0) return;
@@ -902,7 +903,7 @@ struct BotSounds {
   // --- Play an arbitrary sequence definition (for cloud sequences) ---
 
   void playDef(const MidiSequenceDef* def, MidiSequenceId id = SEQ_NONE) {
-    if (!enabled || !def || def->eventCount == 0) return;
+    if (!enabled || hushed || !def || def->eventCount == 0) return;
 
     // Stop current playback
     stop();
@@ -948,7 +949,7 @@ struct BotSounds {
   // --- Play a single arbitrary tone (legacy web API: freq + duration) ---
 
   void playTone(uint16_t freq, uint16_t durationMs) {
-    if (!enabled) return;
+    if (!enabled || hushed) return;
     stop();
 
     singleTone = true;

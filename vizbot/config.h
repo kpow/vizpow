@@ -283,6 +283,17 @@
   #define LOW_POWER_BL_PERCENT  60   // backlight runs at this % of the brightness setting
 #endif
 
+// Sleep schedule (bot_sleep.h, docs/plan-sleep.md). The window maths live in
+// sleep_schedule.h; these are the board's effects. 1.69 only for now: StackChan
+// gets its own owner (MotionAO rest) in a later PR.
+#ifdef BOARD_ESP32S3_LCD_169
+  #define HAS_SLEEP_SCHEDULE
+  #define SLEEP_BL_PERCENT      8    // asleep, the backlight runs at this % of the setting
+  #define SLEEP_STEP_MIN       30    // touch UI bedtime/wake steps
+  #define SLEEP_CLOCK_POLL_MS 1000   // how often the local time is re-read
+#endif
+#define SLEEP_PEEK_MS        1200   // asleep, a tap opens his eyes this long (bot_mode.h)
+
 // Pendant shake reactions (pendant_shake.h) — low power mode only.
 // With the radio off there is no weather, so the sustained shake that normally
 // opens info mode gets a random reaction instead. A 1.69 worn as a pendant

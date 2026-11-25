@@ -476,8 +476,18 @@ uint16_t* lcdCanvasPixels() {
   return (uint16_t*)_dp_canvas->getBuffer();
 }
 
+#ifdef HAS_SLEEP_SCHEDULE
+// Set by the sleep owner (bot_sleep.h), which then re-applies the backlight.
+// Every caller passes the user's setting; asleep, it is scaled down here, so a
+// brightness change made while he sleeps stays dim and is right once he wakes.
+bool lcdSleepDim = false;
+#endif
+
 // Set LCD backlight brightness (0-255)
 void setLCDBacklight(uint8_t b) {
+  #ifdef HAS_SLEEP_SCHEDULE
+  if (lcdSleepDim && b) b = (uint8_t)max(1, (int)b * SLEEP_BL_PERCENT / 100);   // 0 (power off) stays 0
+  #endif
   #ifdef TARGET_CORES3
     M5.Display.setBrightness(b);
   #else

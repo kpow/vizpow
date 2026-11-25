@@ -115,6 +115,7 @@ inline ScRgb scHsvToRgb(uint8_t h, uint8_t s, uint8_t v) {
 // ============================================================================
 struct ScBaseLeds {
   uint8_t mode = SC_LED_MODE_RAINBOW;  // default: rainbow
+  bool asleep = false;                 // set by the sleep owner (bot_sleep.h): forces off
   uint8_t brightness = 80;             // 0-255 global brightness
   uint8_t speed = 128;                 // 0-255 effect speed multiplier
 
@@ -221,11 +222,14 @@ struct ScBaseLeds {
     float dt = (now - lastUpdate) / 1000.0f;
     lastUpdate = now;
 
+    // Asleep: dark, with the saved mode left alone for the morning.
+    const uint8_t live = asleep ? (uint8_t)SC_LED_MODE_OFF : mode;
+
     // Speed factor: 0.25x at speed=0, 1x at speed=128, 2x at speed=255
     float speedFactor = 0.25f + (speed / 128.0f) * 0.875f;
 
     // Run the active effect
-    switch (mode) {
+    switch (live) {
       case SC_LED_MODE_OFF:       effectOff(); break;
       case SC_LED_MODE_BREATHING: effectBreathing(dt, speedFactor); break;
       case SC_LED_MODE_RAINBOW:   effectRainbow(dt, speedFactor); break;
@@ -239,14 +243,14 @@ struct ScBaseLeds {
       case SC_LED_MODE_SCREEN:    effectScreen(dt, speedFactor); break;
       default:                    effectOff(); break;
     }
-    if (codeBeat && mode != SC_LED_MODE_OFF) effectCode(now);
+    if (codeBeat && live != SC_LED_MODE_OFF) effectCode(now);
 
     // Audio overlay — when AudioFX is enabled (and we're not on OFF or the
     // dedicated AUDIO mode which already does its own thing), modulate the
     // ring brightness with rms and flash on beats so every base LED pattern
     // visibly reacts to music. Honors the global audioDrama setting.
     #ifdef TARGET_CORES3
-    if (mode != SC_LED_MODE_OFF && mode != SC_LED_MODE_AUDIO) {
+    if (live != SC_LED_MODE_OFF && live != SC_LED_MODE_AUDIO) {
       extern struct AudioSpectrum audioSpectrum;
       extern uint8_t audioDrama;
       if (audioSpectrum.alive && audioDrama > 0) {
@@ -276,7 +280,7 @@ struct ScBaseLeds {
     // mode off stays dark.
     uint8_t flashMix = 0;   // 255 = all flash
     if (flashing) {
-      if (now - flashStart < flashDurationMs && mode != SC_LED_MODE_OFF) {
+      if (now - flashStart < flashDurationMs && live != SC_LED_MODE_OFF) {
         flashMix = 255 - (uint8_t)((now - flashStart) * 255 / flashDurationMs);
       } else {
         flashing = false;

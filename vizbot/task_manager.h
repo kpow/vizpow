@@ -84,6 +84,8 @@ enum CommandType : uint8_t {
   CMD_SET_PERSONALITY_LIST,
   CMD_PLAY_SEQUENCE,
   CMD_SET_PARTY,
+  CMD_SLEEP_CONFIG,     // sleep schedule settings (bot_sleep.h)
+  CMD_SLEEP_REQUEST,    // u8val 1 = sleep now, 0 = wake
 };
 
 // ~100-byte command payload — fits all command types including a full MAX_SAY_LEN phrase
@@ -106,6 +108,9 @@ struct Command {
       uint8_t  count;
       uint32_t intervalMs;
     } plist;
+#ifdef HAS_SLEEP_SCHEDULE
+    BotSleepPatch sleepPatch;
+#endif
   };
 };
 
@@ -256,6 +261,22 @@ void cmdSleep(uint32_t durationMs) {
   pushCommand(cmd);
 }
 
+#ifdef HAS_SLEEP_SCHEDULE
+void cmdSleepConfig(const BotSleepPatch& p) {
+  Command cmd;
+  cmd.type = CMD_SLEEP_CONFIG;
+  cmd.sleepPatch = p;
+  pushCommand(cmd);
+}
+
+void cmdSleepRequest(bool sleep) {
+  Command cmd;
+  cmd.type = CMD_SLEEP_REQUEST;
+  cmd.u8val = sleep ? 1 : 0;
+  pushCommand(cmd);
+}
+#endif
+
 void cmdMeshScan() {
   Command cmd;
   cmd.type = CMD_MESH_SCAN;
@@ -363,6 +384,7 @@ void drainCommandQueue() {
         break;
       case CMD_TOGGLE_INFO_MODE: {
         extern struct InfoModeData infoMode;
+        if (botMode.asleep()) break;   // no weather in his sleep
         if (infoMode.active) {
           infoMode.beginExitTransition();
         } else {
@@ -434,6 +456,14 @@ void drainCommandQueue() {
           meshScanRequested = true;
         }
         break;
+#ifdef HAS_SLEEP_SCHEDULE
+      case CMD_SLEEP_CONFIG:
+        botSleepApplyPatch(cmd.sleepPatch);
+        break;
+      case CMD_SLEEP_REQUEST:
+        botSleepRequest(cmd.u8val == 1);
+        break;
+#endif
     }
   }
 }
