@@ -36,6 +36,12 @@
 // Everything the web page sets is saved in NVS.
 // A "spark" is a short rainbow burst laid over either mode.
 //
+// Body map: the strip is his body, so the newer motions are drawn per body
+// part, in wiring order (LED n = strip[n-1]): 1 his left hand, 2-3 that arm,
+// 4 + 5 his head, 6-7 the other arm, 8 his right hand, 9 + 12 legs, 10 + 11
+// belly. Every LED stays at least LED_BODY_FLOOR lit, so a pattern lights a
+// part up over a glowing body instead of leaving the rest dark.
+//
 // Each tick renders a target frame, then the shown frame eases toward it, so
 // mood changes cross-fade instead of snapping.
 // ============================================================================
@@ -45,8 +51,18 @@ enum LedMode : uint8_t { LEDS_MOOD = 0, LEDS_AMBIENT, LEDS_OFF, LEDS_SOLID, LEDS
 
 enum LedMotion : uint8_t {
   LM_STEADY, LM_BREATHE, LM_PULSE, LM_HEART, LM_WAVE, LM_CHASE,
-  LM_SPARKLE, LM_RAINBOW, LM_FLICKER, LM_STROBE, LM_GLITCH, LM_DUAL
+  LM_SPARKLE, LM_RAINBOW, LM_FLICKER, LM_STROBE, LM_GLITCH, LM_DUAL,
+  // Body motions (see the body map above); these stay put instead of swapping to companions
+  LM_BRAIN,    // head glows (thinking)
+  LM_HELLO,    // his right hand waves (happy)
+  LM_HEARTB,   // lub-dub in the belly, beats climb the arms (love)
+  LM_FISTS,    // hot hands, heat up the arms, steam puffs from the head (angry)
+  LM_JOLT,     // a flash from the belly out to head, hands and feet (surprised)
+  LM_DRAIN,    // glow drips from the head down to the belly (sad)
+  LM_JAZZ,     // colour-flashing hands (excited)
+  LM_BODYBREATH // breath fills from the feet up to the head and back (neutral)
 };
+#define LM_BODY_FIRST LM_BRAIN
 
 struct LedMood {
   uint8_t hue, sat, val;   // base colour (FastLED hue: 0 red, 64 yellow, 96 green, 160 blue, 224 pink)
@@ -57,47 +73,76 @@ struct LedMood {
 
 // One row per expression, in EXPR_* order
 static const LedMood ledMoods[BOT_NUM_EXPRESSIONS] = {
-  /* NEUTRAL   */ { 130, 220, 150, LM_BREATHE, 2, 130 },
-  /* HAPPY     */ {  42, 240, 230, LM_WAVE,    4,  64 },
-  /* SAD       */ { 160, 255,  90, LM_BREATHE, 1, 170 },
-  /* SURPRISED */ {   0,   0, 255, LM_PULSE,   8,   0 },
-  /* CHILL     */ { 118, 230, 140, LM_WAVE,    1, 150 },
-  /* ANGRY     */ {   0, 255, 255, LM_FLICKER, 8,  10 },
-  /* LOVE      */ { 236, 230, 230, LM_HEART,   5, 250 },
-  /* DIZZY     */ {   0, 255, 220, LM_RAINBOW, 9,   0 },
-  /* THINKING  */ { 190, 230, 170, LM_CHASE,   3, 160 },
-  /* EXCITED   */ {  20, 255, 255, LM_SPARKLE, 9,  64 },
-  /* MISCHIEF  */ {  90, 255, 200, LM_SPARKLE, 5, 200 },
-  /* SKEPTICAL */ {  30, 230, 120, LM_STEADY,  1,  30 },
-  /* WORRIED   */ { 180, 160, 140, LM_FLICKER, 3, 160 },
-  /* CONFUSED  */ { 210, 220, 180, LM_DUAL,    3, 120 },
-  /* PROUD     */ {  48, 220, 240, LM_SPARKLE, 3,  40 },
-  /* SHY       */ { 232, 150, 100, LM_BREATHE, 2, 232 },
-  /* ANNOYED   */ {  12, 255, 210, LM_PULSE,   5,  12 },
-  /* FOCUSED   */ { 150,  90, 200, LM_STEADY,  1, 150 },
-  /* WINKING   */ {  56, 240, 220, LM_DUAL,    5, 240 },
-  /* DEVIOUS   */ { 200, 255, 190, LM_FLICKER, 4,  96 },
-  /* SHOCKED   */ {   0,   0, 255, LM_STROBE,  9,   0 },
-  /* KISSING   */ { 242, 220, 230, LM_HEART,   6, 224 },
-  /* NERVOUS   */ {  72, 230, 180, LM_FLICKER, 7,  72 },
-  /* GLITCHING */ { 128, 255, 230, LM_GLITCH,  9, 224 },
-  /* SASSY     */ { 214, 255, 230, LM_CHASE,   7, 236 },
+  /* NEUTRAL   */ { 130, 220, 150, LM_BODYBREATH, 2, 130 },
+  /* HAPPY     */ {  42, 240, 230, LM_HELLO,      4,  64 },
+  /* SAD       */ { 160, 255,  90, LM_DRAIN,      1, 170 },
+  /* SURPRISED */ {   0,   0, 255, LM_JOLT,       8,   0 },
+  /* CHILL     */ { 118, 230, 140, LM_WAVE,       1, 150 },
+  /* ANGRY     */ {   0, 255, 255, LM_FISTS,      8,  10 },
+  /* LOVE      */ { 236, 230, 230, LM_HEARTB,     5, 250 },
+  /* DIZZY     */ {   0, 255, 220, LM_RAINBOW,    9,   0 },
+  /* THINKING  */ { 190, 230, 170, LM_BRAIN,      3, 160 },
+  /* EXCITED   */ {  20, 255, 255, LM_JAZZ,       9,  64 },
+  /* MISCHIEF  */ {  90, 255, 200, LM_SPARKLE,    5, 200 },
+  /* SKEPTICAL */ {  30, 230, 120, LM_STEADY,     1,  30 },
+  /* WORRIED   */ { 180, 160, 140, LM_DRAIN,      3, 160 },
+  /* CONFUSED  */ { 210, 220, 180, LM_DUAL,       3, 120 },
+  /* PROUD     */ {  48, 220, 240, LM_SPARKLE,    3,  40 },
+  /* SHY       */ { 232, 150, 100, LM_BREATHE,    2, 232 },
+  /* ANNOYED   */ {  12, 255, 210, LM_FISTS,      5,  12 },
+  /* FOCUSED   */ { 150,  90, 200, LM_BRAIN,      1, 150 },
+  /* WINKING   */ {  56, 240, 220, LM_HELLO,      5, 240 },
+  /* DEVIOUS   */ { 200, 255, 190, LM_FLICKER,    4,  96 },
+  /* SHOCKED   */ {   0,   0, 255, LM_JOLT,       9,   0 },
+  /* KISSING   */ { 242, 220, 230, LM_HEARTB,     6, 224 },
+  /* NERVOUS   */ {  72, 230, 180, LM_FLICKER,    7,  72 },
+  /* GLITCHING */ { 128, 255, 230, LM_GLITCH,     9, 224 },
+  /* SASSY     */ { 214, 255, 230, LM_CHASE,      7, 236 },
+};
+
+// The classic (whole-strip) motion for each mood, in EXPR_* order. A body
+// mood shows it now and then: one LED_MOOD_CYCLE_MS turn in LED_CLASSIC_EVERY
+static const uint8_t ledMoodClassic[BOT_NUM_EXPRESSIONS] = {
+  LM_BREATHE, LM_WAVE, LM_BREATHE, LM_PULSE, LM_WAVE, LM_FLICKER, LM_HEART, LM_RAINBOW,
+  LM_CHASE, LM_SPARKLE, LM_SPARKLE, LM_STEADY, LM_FLICKER, LM_DUAL, LM_SPARKLE, LM_BREATHE,
+  LM_PULSE, LM_STEADY, LM_DUAL, LM_FLICKER, LM_STROBE, LM_HEART, LM_FLICKER, LM_GLITCH, LM_CHASE
 };
 
 static const char *const ledModeNames[LEDS_NUM_MODES] = { "mood", "ambient", "off", "solid" };
 
-#define LED_PATTERNS   10
+#define LED_PATTERNS   15
 #define LED_PALETTES   17              // 16 built in + custom (c1..c3)
 #define LED_PAL_CUSTOM 16
 #define LED_AUTO       255             // pattern / palette selection: cycle
+#define LED_BODY_PAT   10              // patterns from here on are the body ones
 static const char *const ledPatternNames[LED_PATTERNS] = {
-  "drift", "comet", "twinkle", "swell", "bounce", "mirror", "lava", "confetti", "rise", "sides"
+  "drift", "comet", "twinkle", "swell", "bounce", "mirror", "lava", "confetti", "rise", "sides",
+  "walk", "juggle", "charge", "clap", "halo"            // body patterns (see the body map)
 };
 static const char *const ledPaletteNames[LED_PALETTES] = {
   "rainbow", "lava", "ocean", "forest", "party", "heat", "sunset", "neon",
   "ice", "candy", "matrix", "fire", "aurora", "cyber", "pastel", "mono", "custom"
 };
 static const char *const ledPaceNames[3] = { "chill", "normal", "fast" };
+
+// Body geometry, in wiring order (index = LED number - 1)
+static const int8_t  bodyArm[LED_STRIP_COUNT]  = { 0, 1, 2, 3, 3, 2, 1, 0, -1, -1, -1, -1 };  // hand 0 .. head 3
+static const uint8_t bodyUp[LED_STRIP_COUNT]   = { 1, 2, 3, 4, 4, 3, 2, 1,  0,  0,  0,  0 };  // feet 0 .. head 4
+static const uint8_t bodyOut[LED_STRIP_COUNT]  = { 2, 3, 4, 5, 5, 4, 3, 2,  1,  0,  0,  1 };  // belly 0 .. head 5
+static const uint8_t bodyDown[LED_STRIP_COUNT] = { 3, 2, 1, 0, 0, 1, 2, 3,  4,  5,  5,  4 };  // head 0 .. belly 5
+enum : uint8_t { B_HAND_L = 0, B_HEAD_A = 3, B_HEAD_B = 4, B_HAND_R = 7, B_LEG_R = 8, B_BELLY_A = 9, B_BELLY_B = 10, B_LEG_L = 11 };
+
+// One body frame: per LED, how lit (v, 0..1 over the floor), how far toward the
+// accent colour (k), a hue shift (hs) and how white (w)
+struct BodyFrame {
+  float v[LED_STRIP_COUNT];
+  uint8_t k[LED_STRIP_COUNT], hs[LED_STRIP_COUNT], w[LED_STRIP_COUNT];
+  void clear(float v0 = 0) { for (uint8_t i = 0; i < LED_STRIP_COUNT; i++) { v[i] = v0; k[i] = hs[i] = w[i] = 0; } }
+  void set(uint8_t i, float val, uint8_t kk) { v[i] = val; k[i] = kk; }
+};
+static inline float bodyClamp(float x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+static inline float bodyBump(float x, float w) { return expf(-(x * x) / w); }   // 1 at x = 0
+static inline float bodyRand() { return random8() / 255.0f; }
 
 class StripLeds {
 public:
@@ -144,8 +189,7 @@ public:
   // A single click: the ambient show jumps to a new pattern and palette now.
   // A locked choice moves to the new one for this session; the saved lock stays
   void shuffle() {
-    uint8_t p = random8(LED_PATTERNS);
-    ambPat = p == ambPat ? (p + 1) % LED_PATTERNS : p;
+    ambPat = pickPattern(ambPat);
     uint8_t q = random8(LED_PALETTES - 2);                   // like auto: skips custom and mono
     palIdx = q == palIdx ? (q + 1) % (LED_PALETTES - 2) : q;
     palTarget = paletteN(palIdx);
@@ -275,7 +319,13 @@ private:
     LedMood m = ledMoods[moodExpr];
     unsigned long t = now - moodStart;
     uint32_t step = t / LED_MOOD_CYCLE_MS;
-    if (step % 3) {
+    if (m.motion >= LM_BODY_FIRST && step % LED_CLASSIC_EVERY == LED_CLASSIC_EVERY - 1) {
+      m.motion = ledMoodClassic[moodExpr];                 // now and then, the classic look
+    } else if (m.motion >= LM_BODY_FIRST) {
+      // A body motion is the point of the mood, so it stays; the colours still trade the lead
+      if (abs((int)m.hue2 - (int)m.hue) < 16) m.hue2 = m.hue + 32;
+      if (step & 1) { uint8_t h = m.hue; m.hue = m.hue2; m.hue2 = h; }
+    } else if (step % 3) {
       static const uint8_t calm[3] = { LM_WAVE, LM_CHASE, LM_BREATHE };
       static const uint8_t lively[4] = { LM_SPARKLE, LM_CHASE, LM_WAVE, LM_DUAL };
       bool hot = m.speed >= 5 || m.motion == LM_STROBE || m.motion == LM_GLITCH || m.motion == LM_RAINBOW;
@@ -290,6 +340,9 @@ private:
     int16_t drift = ((int16_t)sin8((uint8_t)(now / 120)) - 128) * 20 / 128;
     m.hue += drift; m.hue2 += drift;
     renderMotion(m, out, t);
+    // The whole body stays lit: nothing drops below the floor in the mood's colour
+    CRGB floorC = CHSV(m.hue, m.sat, scale8(m.val, LED_BODY_FLOOR));
+    for (uint8_t i = 0; i < LED_STRIP_COUNT; i++) out[i] |= floorC;
 
     // Blinks dim the glow, so the body "blinks" with the eyes
     if (blinkAmt > 0.02f) {
@@ -369,6 +422,157 @@ private:
           out[i] = CHSV(first ? m.hue : m.hue2, m.sat, m.val);
         }
         break;
+      default: {         // body motions
+        BodyFrame f;
+        bodyMood(m.motion, f, t / 1000.0f);
+        for (uint8_t u = 0; u < N; u++) {
+          uint8_t i = physOf(u);
+          uint8_t bri = scale8(m.val, LED_BODY_FLOOR + scale8((uint8_t)(f.v[i] * 255), 255 - LED_BODY_FLOOR));
+          CRGB c = blend(CRGB(CHSV(m.hue + f.hs[i], m.sat, bri)), CRGB(CHSV(m.hue2 + f.hs[i], m.sat, bri)), f.k[i]);
+          if (f.w[i]) c = blend(c, CRGB(bri, bri, bri), f.w[i]);
+          out[u] = c;
+        }
+        break;
+      }
+    }
+  }
+
+  // ---- Body motions (mood), drawn in wiring order; ts in seconds ----
+  static void bodyMood(uint8_t motion, BodyFrame &f, float ts) {
+    const uint8_t N = LED_STRIP_COUNT;
+    switch (motion) {
+      case LM_BRAIN: {               // head glows, the shoulders catch a little of it
+        f.clear();
+        float s = sinf(ts * 2.2f);
+        f.set(B_HEAD_A, 0.55f + 0.45f * s, 255); f.set(B_HEAD_B, 0.55f + 0.45f * s, 255);
+        float sh = 0.18f + 0.12f * sinf(ts * 2.2f - 0.7f);
+        f.set(2, sh, 140); f.set(5, sh, 140);
+        break;
+      }
+      case LM_HELLO: {               // his right hand waves: three flicks, a rest
+        f.clear(0.15f);
+        float u = fmodf(ts, 2.4f);
+        float w = u < 1.2f ? 0.3f + 0.7f * fabsf(sinf(u * PI * 2.5f)) : 0.35f;
+        f.set(B_HAND_R, w, 255); f.set(6, 0.4f * w, 160); f.set(B_HAND_L, 0.3f, 80);
+        break;
+      }
+      case LM_HEARTB: {              // lub-dub in the belly; each beat climbs the arms
+        f.clear();
+        auto beat = [](float p) { return max(bodyBump(p - 0.05f, 0.002f), 0.7f * bodyBump(p - 0.24f, 0.002f)); };
+        float p = fmodf(ts, 1.2f) / 1.2f;
+        float b = 0.25f + 0.75f * beat(p);
+        f.set(B_BELLY_A, b, 255); f.set(B_BELLY_B, b, 255);
+        f.set(B_LEG_R, 0.6f * b, 200); f.set(B_LEG_L, 0.6f * b, 200);
+        for (uint8_t i = 0; i < 8; i++) {
+          float v = (0.55f - 0.12f * bodyArm[i]) * beat(p - 0.08f * (bodyArm[i] + 1));
+          f.set(i, v, (uint8_t)(v * 255));
+        }
+        break;
+      }
+      case LM_FISTS: {               // hot hands, heat up the arms, steam puffs off the head
+        f.clear(0.1f);
+        f.set(B_HAND_L, 0.7f + 0.3f * bodyRand(), 255); f.set(B_HAND_R, 0.7f + 0.3f * bodyRand(), 255);
+        f.hs[B_HAND_L] = random8(8); f.hs[B_HAND_R] = random8(8);
+        f.set(1, 0.4f + 0.2f * bodyRand(), 180); f.set(6, 0.4f + 0.2f * bodyRand(), 180);
+        f.set(2, 0.22f, 100); f.set(5, 0.22f, 100);
+        float puff = expf(-fmodf(ts, 2.2f) / 0.25f);
+        for (uint8_t i : { B_HEAD_A, B_HEAD_B }) { f.set(i, 0.1f + 0.9f * puff, 60); f.w[i] = (uint8_t)(puff * 180); }
+        break;
+      }
+      case LM_JOLT: {                // a white flash from the belly out to every tip; the tips hold it
+        f.clear();
+        float u = fmodf(ts, 2.6f);
+        for (uint8_t i = 0; i < N; i++) {
+          float d = bodyOut[i];
+          float v = bodyBump(u * 7 - d, 0.8f);
+          if (d >= 2 && bodyArm[i] == 0 && u * 7 > d) v = max(v, 0.6f * expf(-(u - d / 7) * 2.5f));   // hands
+          if (d == 5 && u * 7 > d) v = max(v, 0.8f * expf(-(u - d / 7) * 1.8f));                       // head
+          f.v[i] = v; f.w[i] = (uint8_t)(v * 220);
+        }
+        break;
+      }
+      case LM_DRAIN: {               // glow drips from the head, down the arms, into the belly
+        f.clear();
+        float pos = fmodf(ts, 4.5f) / 4.5f * 7 - 0.5f;
+        for (uint8_t i = 0; i < N; i++) {
+          float d = pos - bodyDown[i];
+          float v = max(0.85f * bodyBump(d, 0.5f), d > 0 ? 0.25f * expf(-d * 1.2f) : 0.0f);
+          f.set(i, v, (uint8_t)(v * 255));
+        }
+        break;
+      }
+      case LM_JAZZ:                  // hands flash through colours, the arms catch sparks
+        f.clear(0.25f);
+        for (uint8_t i : { B_HAND_L, B_HAND_R }) { f.set(i, random8() > 100 ? 1 : 0.35f, 255); f.hs[i] = random8(); }
+        for (uint8_t i : { 1, 6 }) if (random8() < 50) { f.set(i, 0.7f, 255); f.hs[i] = random8(); }
+        break;
+      default: {                     // LM_BODYBREATH: breath fills from the feet to the head and back
+        f.clear();
+        float fill = (1 - cosf(2 * PI * ts / 5)) / 2 * 5;
+        for (uint8_t i = 0; i < N; i++) { float v = 0.9f * bodyClamp(fill - bodyUp[i]); f.set(i, v, (uint8_t)(v * 200)); }
+        break;
+      }
+    }
+  }
+
+  // ---- Body patterns (ambient), wiring order; ts in seconds at speed 3 = 1x ----
+  static void bodyAmbient(uint8_t pat, BodyFrame &f, float ts) {
+    const uint8_t N = LED_STRIP_COUNT;
+    switch (pat) {
+      case 10: {                     // walk: legs step, the opposite hand swings with each leg
+        f.clear(0.1f);
+        float ph = sinf(2 * PI * ts / 0.9f);
+        float a = max(0.0f, ph), b = max(0.0f, -ph);
+        f.set(B_LEG_R, a, (uint8_t)(a * 255)); f.set(B_HAND_L, a, (uint8_t)(a * 255)); f.set(1, 0.5f * a, 100);
+        f.set(B_LEG_L, b, (uint8_t)(b * 255)); f.set(B_HAND_R, b, (uint8_t)(b * 255)); f.set(6, 0.5f * b, 100);
+        f.set(B_HEAD_A, 0.3f + 0.2f * fabsf(ph), 60); f.set(B_HEAD_B, 0.3f + 0.2f * fabsf(ph), 60);
+        break;
+      }
+      case 11: {                     // juggle: hand, up over the head (hangs at the top), catch, roll back under
+        const float T = 2.5f;
+        float u = fmodf(ts, T), p, katch = 0;
+        uint8_t lap = (uint8_t)(ts / T);
+        if (u < 1.3f)       { float x = 2 * u / 1.3f - 1; p = 3.5f + 3.5f * x * x * x; }
+        else if (u < 1.55f) { p = 7; katch = 1 - (u - 1.3f) / 0.25f; }
+        else                p = 7 + (u - 1.55f) / 0.95f * 5;
+        f.clear();
+        for (uint8_t i = 0; i < N; i++) {
+          float d = fabsf(i - p); d = min(d, N - d);
+          float v = bodyBump(d, 0.45f);
+          f.set(i, v, (uint8_t)(v * 255)); f.hs[i] = lap * 50;
+        }
+        f.v[B_HAND_R] = max(f.v[B_HAND_R], katch);
+        break;
+      }
+      case 12: {                     // charge: fills from the feet to the head, flashes, lets go
+        float u = fmodf(ts, 3.2f);
+        f.clear();
+        if (u < 2.2f) { float fill = u / 2.2f * 5; for (uint8_t i = 0; i < N; i++) f.set(i, 0.7f * bodyClamp(fill - bodyUp[i]), bodyUp[i] * 50); }
+        else if (u < 2.6f) { f.clear(0.85f); for (uint8_t i : { B_HEAD_A, B_HEAD_B }) { f.v[i] = 1; f.w[i] = 255; } }
+        else f.clear(0.8f * (1 - (u - 2.6f) / 0.6f));
+        break;
+      }
+      case 13: {                     // clap: two claps at the hands, each rings up the arms to the head
+        f.clear();
+        float u = fmodf(ts, 1.8f);
+        for (float c : { u, u - 0.32f }) {
+          if (c < 0) continue;
+          for (uint8_t i = 0; i < 8; i++) {
+            float v = bodyBump(c * 6 - bodyArm[i], 0.35f) * (bodyArm[i] == 0 ? 1 : 0.8f);
+            if (bodyArm[i] == 3 && c * 6 > 3) v = max(v, expf(-(c - 0.5f) * 2));
+            if (v > f.v[i]) { f.v[i] = v; f.k[i] = (uint8_t)(v * 255); }
+          }
+        }
+        for (uint8_t i : { B_HAND_L, B_HAND_R }) f.w[i] = (uint8_t)(f.v[i] * 120);
+        break;
+      }
+      default: {                     // halo: a bright head over a slow drifting body
+        f.clear();
+        for (uint8_t i = 0; i < N; i++) f.hs[i] = (uint8_t)(int)(40 * sinf(ts * 0.3f + i * 0.5f));
+        for (uint8_t i : { B_HEAD_A, B_HEAD_B }) { f.set(i, 0.88f + 0.08f * sinf(ts * 1.3f), 255); f.w[i] = 120; }
+        f.set(2, 0.3f, 120); f.set(5, 0.3f, 120);
+        break;
+      }
     }
   }
 
@@ -377,6 +581,16 @@ private:
   CRGBPalette16 pal, palTarget;
   uint8_t ambPat = 0, palIdx = 0;
   unsigned long nextPat = 0, nextPal = 0;
+
+  // Auto's next pattern: mostly a body one, a classic only LED_CLASSIC_PCT of the time
+  static uint8_t pickPattern(uint8_t cur) {
+    for (;;) {
+      uint32_t r = esp_random();                       // hardware RNG, independent of the per-frame random8() draws
+      uint8_t p = r % 100 < LED_CLASSIC_PCT ? (r >> 8) % LED_BODY_PAT
+                                            : LED_BODY_PAT + (r >> 8) % (LED_PATTERNS - LED_BODY_PAT);
+      if (p != cur) return p;
+    }
+  }
 
   uint32_t patternMs() const { static const uint16_t ms[3] = { 20000, 10000, 5000 }; return ms[pace]; }
   uint32_t paletteMs() const { static const uint16_t ms[3] = { 12000, 7000, 3500 }; return ms[pace]; }
@@ -406,8 +620,7 @@ private:
   void renderAmbient(CRGB *out, unsigned long now) {
     const uint8_t N = LED_STRIP_COUNT;
     if (patSel == LED_AUTO && (long)(now - nextPat) >= 0) {
-      uint8_t p = random8(LED_PATTERNS);
-      ambPat = p == ambPat ? (p + 1) % LED_PATTERNS : p;
+      ambPat = pickPattern(ambPat);
       nextPat = now + patternMs() + random16(patternMs() / 3);
     }
     if (palSel == LED_AUTO && (long)(now - nextPal) >= 0) {   // auto skips custom and mono
@@ -488,7 +701,19 @@ private:
         }
         break;
       }
-      default: { // sides: the two sides trade brightness while a dot carries it across the bottom
+      case 10: case 11: case 12: case 13: case 14: {   // body patterns, palette coloured
+        BodyFrame f;
+        bodyAmbient(ambPat, f, t / 1000.0f * speed / 3.0f);
+        for (uint8_t u = 0; u < N; u++) {
+          uint8_t i = physOf(u);
+          uint8_t bri = LED_BODY_FLOOR + scale8((uint8_t)(f.v[i] * 255), 255 - LED_BODY_FLOOR);
+          CRGB c = ColorFromPalette(pal, ph / 2 + scale8(f.k[i], 128) + f.hs[i], bri);
+          if (f.w[i]) c = blend(c, CRGB(bri, bri, bri), f.w[i]);
+          out[u] = c;
+        }
+        break;
+      }
+      case 9: { // sides: the two sides trade brightness while a dot carries it across the bottom
         uint8_t s = sin8(ph * 3);                                   // 255 = left side bright
         uint8_t dot = ((uint16_t)(255 - s) * LED_RUN) >> 8;        // bottom slot nearest the bright side
         for (uint8_t i = 0; i < N; i++) {
@@ -502,6 +727,8 @@ private:
         break;
       }
     }
+    // The whole body stays lit: the older patterns' dark gaps fill with the palette
+    for (uint8_t i = 0; i < N; i++) out[i] |= ColorFromPalette(pal, ph + i * 16, LED_BODY_FLOOR);
   }
 
   void renderSpark(CRGB *out, unsigned long now) {
