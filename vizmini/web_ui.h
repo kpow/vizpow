@@ -13,6 +13,7 @@
 #include "device_name.h" // hotspot SSID, mDNS name
 #include "weather.h"     // the network lock (an upload waits out a cloud call)
 #include "cloud_client.h"
+#include "sleep_schedule.h" // /bot/sleep argument checks
 #include "esp_app_format.h"
 
 // ---- Control hooks implemented in vizmini.ino ------------------------------
@@ -31,6 +32,8 @@ extern void   ctlFerroSetting(const String &v);
 extern void   ctlFerroVisit();
 extern void   ctlPartyStack(const String &v);
 extern String ctlStateJson();
+extern void   ctlSleep(int on, int atMin, int wakeMin, int nap, int act);   // -1 = leave unchanged
+extern String sleepJson();
 
 // ============================================================================
 // Network state
@@ -197,6 +200,50 @@ inline void handleInfo() {
 inline void handleContrast()   { ctlSetContrast(argU8("v", DEFAULT_CONTRAST)); server.send(200, "text/plain", "ok"); }
 inline void handleSnow()       { ctlSetSnow(argU8("v", 1) != 0);            server.send(200, "text/plain", "ok"); }
 inline void handleSpark()      { ctlSpark();                                server.send(200, "text/plain", "ok"); }
+
+// "HH:MM" -> minute-of-day, or -1
+inline int parseHHMM(const String &v) {
+  int h = -1, m = -1;
+  char tail = 0;
+  if (sscanf(v.c_str(), "%d:%d%c", &h, &m, &tail) != 2) return -1;
+  return sleepsched::minuteOfDay(h, m);
+}
+// GET /bot/sleep                                 -> state JSON
+//     ?on=0|1 &at=HH:MM &wake=HH:MM &nap=0..120   (any subset) -> sets them
+//     ?do=sleep | ?do=wake                         -> sleep now / wake now
+// Every argument is checked first: one bad value and nothing changes (400).
+inline void handleSleep() {
+  int on = -1, at = -1, wake = -1, nap = -1, act = -1;
+  if (server.hasArg("on")) {
+    const String v = server.arg("on");
+    if (v != "0" && v != "1") { server.send(400, "text/plain", "on must be 0 or 1"); return; }
+    on = v == "1";
+  }
+  if (server.hasArg("at") && (at = parseHHMM(server.arg("at"))) < 0) {
+    server.send(400, "text/plain", "at must be HH:MM"); return;
+  }
+  if (server.hasArg("wake") && (wake = parseHHMM(server.arg("wake"))) < 0) {
+    server.send(400, "text/plain", "wake must be HH:MM"); return;
+  }
+  if (server.hasArg("nap")) {
+    const String v = server.arg("nap");
+    bool digits = v.length() > 0 && v.length() <= 3;
+    for (unsigned i = 0; digits && i < v.length(); i++) digits = isDigit(v[i]);
+    const long n = digits ? v.toInt() : -1;
+    if (n < 0 || n > sleepsched::kNapMaxMin) {
+      server.send(400, "text/plain", "nap must be 0-120"); return;
+    }
+    nap = (int)n;
+  }
+  if (server.hasArg("do")) {
+    const String v = server.arg("do");
+    if (v == "sleep") act = 1;
+    else if (v == "wake") act = 0;
+    else { server.send(400, "text/plain", "do must be sleep or wake"); return; }
+  }
+  ctlSleep(on, at, wake, nap, act);
+  server.send(200, "application/json", sleepJson());
+}
 // /bot/motion?level=off|rare|often (or 0-2)  &  ?move=tilt|wobble|pendulum|drift|spin|spin2|flip
 inline void handleMotion() {
   int level = -1, move = 0;
@@ -360,6 +407,7 @@ inline void registerRoutes() {
   server.on("/bot/info", handleInfo);
   server.on("/bot/snow", handleSnow);
   server.on("/bot/spark", handleSpark);
+  server.on("/bot/sleep", handleSleep);
   server.on("/bot/leds", handleLeds);
   server.on("/bot/motion", handleMotion);
   server.on("/bot/party", handleParty);

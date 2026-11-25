@@ -124,6 +124,13 @@
 // ---- Touch gestures --------------------------------------------------------
 #define DOUBLE_TAP_MS  450      // two touches within this window = double-tap
 
+// ---- Sleep (sleep_schedule.h, docs/plan-sleep.md) ---------------------------
+// Default on, 23:00 -> 08:00 (sleepsched::kDefaults). Long-press wakes him;
+// a press while asleep only opens his eyes for a moment.
+#define SLEEP_CONTRAST       1          // panel contrast asleep (eases there like ferro)
+#define SLEEP_PEEK_MS        1200       // a press while asleep opens his eyes this long
+#define SLEEP_CLOCK_POLL_MS  1000       // how often the local time is re-read
+
 // ---- Time + Weather (info) mode --------------------------------------------
 // Clock via NTP; weather via Open-Meteo (free, no API key, plain HTTP) — the
 // same source the full vizbot uses. Set your location below.

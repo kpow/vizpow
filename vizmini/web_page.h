@@ -114,6 +114,14 @@ input[type=color]::-webkit-color-swatch-wrapper{padding:0}input[type=color]::-we
 <span class=lbl>Pattern stacking</span><div class=seg id=gK></div>
 <div class=hint>Auto visits: 60 s of party every 8&ndash;15 min. Always: he stays a party drop. Stacking: how many patterns layer at once.</div></div></div>
 
+<div class=card><h2 class=shdr onclick="tg('sZ')">Sleep <span class=chv>&#9662;</span></h2><div class=sbody id=sZ>
+<div class=trow><span>Sleep schedule</span><div class=tog id=zo onclick=zon()></div></div>
+<div class=trow><span>Bedtime</span><input type=time id=za class=inp onfocus="D.za=1" onblur="D.za=0" onchange="g('/bot/sleep?at='+this.value)"></div>
+<div class=trow><span>Wake up</span><input type=time id=zw class=inp onfocus="D.zw=1" onblur="D.zw=0" onchange="g('/bot/sleep?wake='+this.value)"></div>
+<span class=lbl>Nods off again after</span><div class=seg id=gZ></div>
+<div class=g3 style="margin-top:12px"><button onclick="g('/bot/sleep?do=sleep')">Sleep now</button><button onclick="g('/bot/sleep?do=wake')">Wake up</button><span></span></div>
+<div class=hint id=zh></div></div></div>
+
 <div class=card><h2 class=shdr onclick="tg('sS')">Screen <span class=chv>&#9662;</span></h2><div class=sbody id=sS>
 <div class=seg id=gS></div>
 <div class=hint id=shh></div>
@@ -197,6 +205,8 @@ function ago(n){return n<0?'never':n<90?n+' s ago':n<5400?Math.round(n/60)+' min
 var CST={approved:'Approved',pending:'Waiting for approval in the admin',disabled:'Switched off in the admin',forgotten:'Forgotten in the admin · registering again',new:'Registering…',auth:'Key refused · re-pairing in up to an hour',error:'Can\'t reach the server',offline:'Not on WiFi',off:'Not in this build'};
 function say(){var e=$('t'),v=e.value.trim();if(!v)return;g('/bot/say?text='+encodeURIComponent(v));$('sh').textContent='Said: “'+v+'”';e.value=''}
 function snow(){set('snow',!S.snow);g('/bot/snow?v='+(S.snow?1:0))}
+function zon(){var z=S.sleep||{};z.on=!z.on;set('sleep',z);g('/bot/sleep?on='+(z.on?1:0))}
+mk('gZ',[0,5,10,20,30,60],function(v){g('/bot/sleep?nap='+v)},['never','5m','10m','20m','30m','60m']);
 function tg(id){var b=$(id),sh=b.classList.toggle('shut');b.previousElementSibling.classList.toggle('shut',sh);
  try{var o=JSON.parse(localStorage.vm||'{}');o[id]=sh;localStorage.vm=JSON.stringify(o)}catch(e){}}
 try{var o=JSON.parse(localStorage.vm||'{}');for(var k in o){var b=$(k);if(b){b.classList.toggle('shut',o[k]);b.previousElementSibling.classList.toggle('shut',o[k])}}}catch(e){}
@@ -219,6 +229,8 @@ function up(){var s=S;if(!T0)return;
  hi('ex',s.expr);hi('gL',s.leds);hi('gM',s.motion);hi('gF',s.partySet);hi('gK',s.partyStack);hi('gS',s.mode);hi('fp',s.mode=='party'?s.partyPat:'');hi('mv',s.move);
  hi('lp',s.ledPatSel);hi('lq',s.ledPalSel);hi('gP',s.ledPace);hi('lw',hx(s.ledC1));
  $('sn').className='tog'+(s.snow?' on':'');
+ if(s.sleep){var z=s.sleep;$('zo').className='tog'+(z.on?' on':'');hi('gZ',z.nap);if(!D.za)$('za').value=z.at;if(!D.zw)$('zw').value=z.wake;
+  $('zh').textContent=(z.asleep?'Asleep ('+z.cause+'). Long-press his button to wake him.':'Awake. Asleep '+z.at+'–'+z.wake+(z.on?'':' (schedule off)')+'.')+(z.clock?'':' No clock yet, so the schedule waits.')}
  if(!D.lb)$('lb').value=s.ledBri;if(!D.co)$('co').value=s.contrast;if(!D.ls&&s.ledSpeed)$('ls').value=s.ledSpeed;
  $('lbv').textContent=pc($('lb').value);$('cov').textContent=pc($('co').value);$('lsv').textContent=$('ls').value;
  ['k0','k1','k2','k3'].forEach(function(id,i){if(!D[id])$(id).value='#'+hx(s['ledC'+(i||1)])});

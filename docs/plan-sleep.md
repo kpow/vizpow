@@ -52,13 +52,15 @@ Touch UI (1.69): Info page rows Sleep / Bedtime / Wake up (30-minute steps) / Sl
 
 1. **PR 1 — core + 1.69** (`feat/sleep-169`). Re-enables `BOT_SLEEPING` in `bot_mode.h`.
    Asleep: backlight to `SLEEP_BL_PERCENT`, ring LEDs off, buzzer silent. Hold on the screen wakes.
-2. **PR 2 — vizMini** (`feat/sleep-mini`). Adds a runtime timezone (it has none). Asleep:
-   eyes shut, OLED contrast to minimum, strip off (without writing the user's LED setting),
-   no party visits. Long-press wakes.
+2. **PR 2 — vizMini** (`feat/sleep-mini`). Uses its compile-time zone (`TZ_POSIX`, US
+   Eastern); a runtime timezone is a separate change. Asleep: eyes shut, OLED contrast eased
+   to `SLEEP_CONTRAST`, strip off (without writing the user's LED setting), no party visits,
+   moves, sayings or info screens. Long-press wakes; a press peeks.
 3. **PR 3 — StackChan** (`feat/sleep-stackchan`). New `scSleepAO` owns the schedule and posts
    `SIG_MOTION_REST` / `SIG_MOTION_WAKE` (rule 1). Publishes `SIG_SLEEP_START/END` (rule 4).
-   Battery care must not wake a sleeping head: rest gets a reason. Mic: wake stream paused.
-   `SIG_TOUCH_HOLD` wakes. Interaction suite passes from a cold boot (rule 5), and the suite
-   learns to wake him first.
+   Battery care must not wake a sleeping head: `SIG_MOTION_REST/WAKE` carry a reason and
+   MotionAO wakes only when none is left. Mic: wake stream and FX paused. `SIG_TOUCH_HOLD`
+   (or a screen hold) wakes. Interaction suite passes from a cold boot (rule 5); it switches
+   the schedule off for the run and has a sleep test.
 
 Not in scope now: voice "go to sleep" through vizbrain, per-weekday schedules.
