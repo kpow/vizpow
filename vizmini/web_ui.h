@@ -227,8 +227,10 @@ inline void handleSleep() {
   }
   if (server.hasArg("nap")) {
     const String v = server.arg("nap");
-    const long n = v.toInt();
-    if ((n == 0 && v != "0") || n < 0 || n > sleepsched::kNapMaxMin) {
+    bool digits = v.length() > 0 && v.length() <= 3;
+    for (unsigned i = 0; digits && i < v.length(); i++) digits = isDigit(v[i]);
+    const long n = digits ? v.toInt() : -1;
+    if (n < 0 || n > sleepsched::kNapMaxMin) {
       server.send(400, "text/plain", "nap must be 0-120"); return;
     }
     nap = (int)n;

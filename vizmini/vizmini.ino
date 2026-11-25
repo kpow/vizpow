@@ -64,7 +64,9 @@ unsigned long g_frameMs     = 0;      // last frame-to-frame time
 // too; bedtime is held off only by a person at the button (g_lastHumanMs).
 sleepsched::Machine g_sleep;
 unsigned long g_lastHumanMs = 0;
-unsigned long g_peekUntil   = 0;      // asleep: eyes open until then
+unsigned long g_peekAt      = 0;      // asleep: when the last peek started
+bool          g_peeking     = false;  // ...and it is still open (a duration: no stamp ages)
+unsigned long g_sleepSeenHuman = 0;   // g_lastHumanMs last passed to the schedule
 inline bool asleep() { return g_sleep.asleep(); }
 unsigned long g_prevFrameAt = 0;
 
@@ -262,7 +264,7 @@ void setFerroSetting(uint8_t v) {
   p.begin(NVS_NAMESPACE, false);
   p.putUChar("ferro", v);
   p.end();
-  if (v == FERRO_SET_ON) enterFerro();
+  if (v == FERRO_SET_ON) { if (!asleep()) enterFerro(); }   // asleep: he goes to party on waking
   else if (v == FERRO_SET_OFF) exitFerro();
   else { if (g_mode == MODE_FERRO && !g_visitEndAt) g_visitEndAt = millis() + FERRO_VISIT_MS; scheduleVisit(); }
 }
@@ -398,7 +400,7 @@ static void sleepApply(sleepsched::Change c) {
     exitFerroNow();
     g_startleUntil = 0;
     g_sayText[0] = 0;
-    g_peekUntil = 0;
+    g_peeking = false;
     face.transitionTo(EXPR_CHILL, 800);
     leds.asleep = true;
     Serial.println("[sleep] asleep");
@@ -420,7 +422,12 @@ void sleepTick() {
     g_sleepClockAt = now;
     g_sleepClockRead = true;
   }
-  g_sleep.noteActivity(g_lastHumanMs);
+  // Activity is an event for the schedule: a new press is passed on once,
+  // never the old stamp again (millis() comparisons go wrong weeks later).
+  if (g_lastHumanMs != g_sleepSeenHuman) {
+    g_sleepSeenHuman = g_lastHumanMs;
+    g_sleep.noteActivity(g_sleepSeenHuman);
+  }
   sleepApply(g_sleep.update(g_sleepMod, now));
 }
 
@@ -661,7 +668,7 @@ void loop() {
 
     if (asleep()) {
       if (ev == TOUCH_LONG_PRESS) { g_sleep.wakeNow(); sleepTick(); }   // hold to wake
-      else if (ev == TOUCH_PRESS) g_peekUntil = now + SLEEP_PEEK_MS;     // a press is a peek
+      else if (ev == TOUCH_PRESS) { g_peekAt = now; g_peeking = true; }  // a press is a peek
     } else {
       g_lastInputMs = now;
       g_lastHumanMs = now;
@@ -744,7 +751,8 @@ void loop() {
   tweenManager.update();
   face.update();
   botEyes.lastInteractMs = g_lastInputMs;   // the yawn waits for 5 quiet minutes
-  botEyes.sleeping = asleep() && (long)(millis() - g_peekUntil) >= 0;   // shut; a press peeks
+  if (g_peeking && millis() - g_peekAt >= SLEEP_PEEK_MS) g_peeking = false;
+  botEyes.sleeping = asleep() && !g_peeking;   // shut; a press peeks
   botEyes.step(millis());                   // blinks, gaze, fidgets, face springs
   leds.setBlink(botEyes.b);
   motion.step(millis());
