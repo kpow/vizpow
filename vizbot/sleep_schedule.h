@@ -20,8 +20,14 @@
 //     bedtime the same way, so a bot being played with is not put down mid-game.
 //   - sleepNow() lasts until wakeNow() or the next wake time (window close).
 //   - The window closing clears every override: morning is a clean slate.
-//   - setConfig() is not an edge: the window is taken as found (disable mid-
-//     night wakes it, re-enable puts it straight back to sleep).
+//   - setConfig() is not a morning: no clean slate. If it puts "now" inside the
+//     window it is treated like a bedtime (deferred while played with), so a
+//     setting changed on the bot itself does not put him down mid-edit; from
+//     afar (no recent activity) he sleeps at once. Disabling wakes him.
+//
+// millis() wraps every 49.7 days and a signed difference flips after 24.8, so
+// no stamp is ever compared with "now" after its nap span has passed: the
+// span is latched off (napLive_) on the first update() past it.
 //
 // Commands (sleepNow / wakeNow / setConfig) take effect at the next update(),
 // which is the only place a transition is reported. Call update() every tick.
@@ -87,17 +93,17 @@ class Machine {
  public:
   void begin(const Config& c, uint32_t nowMs) {
     cfg_ = sanitize(c);
-    primed_ = prevWin_ = false;
+    primed_ = prevWin_ = cfgChanged_ = false;
     manual_ = heldAwake_ = asleep_ = false;
     sleepReq_ = wakeReq_ = false;
-    lastActivityMs_ = nowMs;
+    noteActivity(nowMs);           // booting counts: no bedtime in the first nap span
   }
 
-  // A new config is not a bedtime or a morning: the next update() takes the
-  // window as it finds it, with no edge (so no deferral and no clean slate).
+  // Applied by the next update(): no edges from the change itself (see Rules).
   void setConfig(const Config& c) {
     cfg_ = sanitize(c);
     primed_ = false;
+    cfgChanged_ = true;
   }
   const Config& config() const { return cfg_; }
 
@@ -105,22 +111,23 @@ class Machine {
   void sleepNow() { sleepReq_ = true; wakeReq_ = false; }
   void wakeNow()  { wakeReq_ = true;  sleepReq_ = false; }
 
-  // The time of the latest real interaction. Restarts the nap span. Only ever
-  // moves forward: callers may pass a stamp older than a wakeNow() (a bot's
-  // "last touched" time from before it slept) without cutting the nap short.
+  // A person interacted, at atMs (normally now). An event, not a level: call it
+  // when an interaction happens, never with an old "last touched" stamp.
   void noteActivity(uint32_t atMs) {
-    if (static_cast<int32_t>(atMs - lastActivityMs_) > 0) lastActivityMs_ = atMs;
+    lastActivityMs_ = atMs;
+    napLive_ = true;
   }
 
   Change update(int16_t mod, uint32_t nowMs) {
     const bool known = mod >= 0 && mod < static_cast<int16_t>(kMinutesPerDay);
     const bool win = inWindow(cfg_, mod);
+    latchNap(nowMs);
 
     if (wakeReq_) {            // hold-to-wake, web "wake"
       wakeReq_ = false;
       manual_ = false;
       heldAwake_ = true;
-      lastActivityMs_ = nowMs;
+      noteActivity(nowMs);
     }
     if (sleepReq_) {           // "sleep now"
       sleepReq_ = false;
@@ -133,13 +140,16 @@ class Machine {
         manual_ = false;
         heldAwake_ = false;
       } else if (primed_ && !prevWin_ && win) {   // bedtime: defer while played with
-        heldAwake_ = napRunning(nowMs);
+        heldAwake_ = napLive_;
+      } else if (!primed_ && cfgChanged_ && win && !asleep_ && !manual_) {
+        heldAwake_ = heldAwake_ || napLive_;      // a new config: like a bedtime
       }
+      if (!primed_) cfgChanged_ = false;
       prevWin_ = win;
       primed_ = true;
     }
 
-    if (heldAwake_ && win && cfg_.napMin != 0 && !napRunning(nowMs)) heldAwake_ = false;
+    if (heldAwake_ && win && cfg_.napMin != 0 && !napLive_) heldAwake_ = false;
     if (!win && !manual_) heldAwake_ = false;   // outside the window there is nothing to hold off
 
     const bool want = manual_ || (win && !heldAwake_);
@@ -155,15 +165,19 @@ class Machine {
   }
 
  private:
-  // True while the last activity is younger than the nap span. Unsigned
-  // subtraction keeps it right across the 49-day millis() wrap.
-  bool napRunning(uint32_t nowMs) const {
-    if (cfg_.napMin == 0) return false;
-    return (nowMs - lastActivityMs_) < static_cast<uint32_t>(cfg_.napMin) * 60000UL;
+  // napLive_: the last activity is younger than the nap span. Latched off the
+  // first update() past the span, while the unsigned difference is still small,
+  // so it stays right however long the bot then runs.
+  void latchNap(uint32_t nowMs) {
+    if (!napLive_) return;
+    if (cfg_.napMin == 0 ||
+        (nowMs - lastActivityMs_) >= static_cast<uint32_t>(cfg_.napMin) * 60000UL) napLive_ = false;
   }
 
   Config   cfg_ = kDefaults;
   bool     primed_ = false;      // seen a known time since begin()
+  bool     cfgChanged_ = false;  // setConfig() since the last known time
+  bool     napLive_ = false;     // inside the nap span of the last activity
   bool     prevWin_ = false;     // window state at the last known time
   bool     manual_ = false;      // sleepNow() in force
   bool     heldAwake_ = false;   // woken (or bedtime deferred) inside the window

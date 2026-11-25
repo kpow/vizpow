@@ -486,7 +486,7 @@ bool lcdSleepDim = false;
 // Set LCD backlight brightness (0-255)
 void setLCDBacklight(uint8_t b) {
   #ifdef HAS_SLEEP_SCHEDULE
-  if (lcdSleepDim) b = (uint8_t)max(1, (int)b * SLEEP_BL_PERCENT / 100);
+  if (lcdSleepDim && b) b = (uint8_t)max(1, (int)b * SLEEP_BL_PERCENT / 100);   // 0 (power off) stays 0
   #endif
   #ifdef TARGET_CORES3
     M5.Display.setBrightness(b);

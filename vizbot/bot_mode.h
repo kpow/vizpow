@@ -184,7 +184,8 @@ struct BotModeState {
   // Timing
   unsigned long lastInteraction;     // Last touch/shake event
   unsigned long lastHumanMs;         // Last interaction a person made (not cloud, web or timers)
-  unsigned long peekUntil;           // asleep: eyes open until then (a tap gets a peek)
+  unsigned long peekAt;              // asleep: when the last peek started (a tap gets a peek)
+  bool peeking;                      // ...and it is still open (a duration, so no stamp ages)
   unsigned long lastFrameTime;
   unsigned long nextRandomExpr;      // Next random idle expression change
   unsigned long nextIdleSaying;      // Next random idle saying
@@ -248,7 +249,8 @@ struct BotModeState {
     lastPersonalityRotMs = millis();
     lastInteraction = millis();
     lastHumanMs = lastInteraction;
-    peekUntil = 0;
+    peekAt = 0;
+    peeking = false;
     nextIdleChirp = lastInteraction + IDLE_CHIRP_AFTER_MS + random(IDLE_CHIRP_JITTER_MS);
     lastFrameTime = millis();
     nextRandomExpr = millis() + random(personality->exprMinMs, personality->exprMaxMs);
@@ -290,7 +292,8 @@ struct BotModeState {
 
   // Asleep: a tap or a jolt opens his eyes for a moment, silently.
   void peek() {
-    peekUntil = millis() + SLEEP_PEEK_MS;
+    peekAt = millis();
+    peeking = true;
   }
 
   // Asleep: called by the sleep owner only (bot_sleep.h). Plays the descend
@@ -302,7 +305,7 @@ struct BotModeState {
     speechBubble.show(buf, 2500);
     pendingSayAt = 0;
     shakeReacting = false;
-    peekUntil = 0;
+    peeking = false;
     face.transitionTo(EXPR_CHILL, 800);
     #ifdef HAS_SOUND
     botSounds.play(SEQ_SLEEP_DESCEND);
@@ -462,7 +465,8 @@ void voiceShowBubble(const char* text, uint32_t ms) {
 
 void botStepEyes(unsigned long now) {
   // Shut via the model, no blinks; a peek opens them for a moment
-  botEyes.sleeping = botMode.asleep() && (long)(now - botMode.peekUntil) >= 0;
+  if (botMode.peeking && now - botMode.peekAt >= SLEEP_PEEK_MS) botMode.peeking = false;
+  botEyes.sleeping = botMode.asleep() && !botMode.peeking;
   #ifdef HAS_LOW_POWER_MODE
   botEyes.pendant = lowPowerMode;
   #endif

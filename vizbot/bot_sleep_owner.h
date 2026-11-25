@@ -28,6 +28,7 @@ static sleepsched::Machine botSleep;
 static int16_t  botSleepMod = sleepsched::kTimeUnknown;   // last minute-of-day read
 static uint32_t botSleepClockAt = 0;                      // millis() of that read
 static bool     botSleepClockRead = false;
+static unsigned long botSleepSeenHuman = 0;               // botMode.lastHumanMs last passed on
 
 // ---- Snapshot for the web task (GET /bot/sleep, /state) -----------------------
 static BotSleepSnapshot botSleepSnap = { sleepsched::kDefaults, false, sleepsched::Cause::None, false };
@@ -122,7 +123,12 @@ void botSleepTick() {
     botSleepClockAt = now;
     botSleepClockRead = true;
   }
-  botSleep.noteActivity(botMode.lastHumanMs);
+  // Activity is an event for the schedule: pass a new touch on once, never the
+  // old stamp again (millis() comparisons go wrong on stamps weeks old).
+  if (botMode.lastHumanMs != botSleepSeenHuman) {
+    botSleepSeenHuman = botMode.lastHumanMs;
+    botSleep.noteActivity(botSleepSeenHuman);
+  }
   const sleepsched::Change c = botSleep.update(botSleepMod, now);
   botSleepApply(c);
   if (reread || c != sleepsched::Change::None) botSleepPublish();

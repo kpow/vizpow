@@ -138,21 +138,43 @@ static void test_hand_wake_then_nod_off() {
   CHECK(s.advance(1) == Change::FellAsleep);              // 10th
 }
 
-static void test_stale_activity_does_not_cut_nap() {
-  // The firmware feeds its "last touched" stamp every tick; after a hold-wake
-  // that stamp is from before he slept. It must not end the nap at once.
-  Sim s(kDefaults, hm(1, 0));
-  const uint32_t touchedBeforeSleep = s.ms;
-  s.tick();
-  s.advance(60);
-  s.m.wakeNow();
-  CHECK(s.tick() == Change::WokeUp);
-  for (int i = 0; i < 9; ++i) {
-    s.m.noteActivity(touchedBeforeSleep);
-    CHECK(s.advance(1) == Change::None);
-  }
-  s.m.noteActivity(touchedBeforeSleep);
-  CHECK(s.advance(1) == Change::FellAsleep);       // still exactly 10 min
+static void test_hand_wake_after_long_uptime() {
+  // Review finding: 25 days up with no touch, then a hand wake at 02:00. The
+  // nap must still run its full 10 minutes (no stale stamp compared).
+  Machine m;
+  uint32_t ms = 1000;
+  m.begin(kDefaults, ms);
+  m.update(hm(12, 0), ms);
+  ms += 2200000000UL;                              // ~25.5 days later
+  CHECK(m.update(hm(2, 0), ms) == Change::FellAsleep);
+  m.wakeNow();
+  CHECK(m.update(hm(2, 0), ms) == Change::WokeUp);
+  for (int i = 1; i < 10; ++i) CHECK(m.update(hm(2, i), ms + static_cast<uint32_t>(i) * kMin) == Change::None);
+  CHECK(m.update(hm(2, 10), ms + 10 * kMin) == Change::FellAsleep);
+}
+
+static void test_old_activity_never_defers_bedtime() {
+  // Activity 49.7 days ago lands "inside the nap span" by unsigned wrap; the
+  // latch must have closed it long before.
+  Machine m;
+  uint32_t ms = 1000;
+  m.begin(kDefaults, ms);
+  m.update(hm(12, 0), ms);
+  m.update(hm(12, 30), ms + 30 * kMin);             // latch closes here
+  ms += 0xFFFFFFFFUL - 2 * kMin;                     // wraps to just before the stamp
+  m.update(hm(22, 59), ms);
+  CHECK(m.update(hm(23, 0), ms + kMin) == Change::FellAsleep);
+}
+
+static void test_wrap_window_peek_math() {
+  // Bedtime deferral measured across the 2^31 boundary (a signed compare flips there).
+  Machine m;
+  uint32_t ms = 0x7FFFFFFFUL - 3 * kMin;
+  m.begin(kDefaults, ms);                           // boot counts as activity
+  CHECK(m.update(hm(22, 55), ms) == Change::None);
+  CHECK(m.update(hm(23, 0), ms + 5 * kMin) == Change::None);       // deferred
+  CHECK(m.update(hm(23, 4), ms + 9 * kMin) == Change::None);
+  CHECK(m.update(hm(23, 5), ms + 10 * kMin) == Change::FellAsleep);
 }
 
 static void test_activity_extends_nap() {
@@ -267,6 +289,7 @@ static void test_last_command_wins() {
 static void test_disable_mid_window_wakes() {
   Sim s(kDefaults, hm(1, 0));
   s.tick();
+  s.advance(15);                                   // past boot's nap span
   Config off = kDefaults; off.enabled = false;
   s.m.setConfig(off);
   CHECK(s.tick() == Change::WokeUp);
@@ -274,15 +297,37 @@ static void test_disable_mid_window_wakes() {
   CHECK(s.tick() == Change::FellAsleep);
 }
 
-static void test_config_change_is_not_bedtime() {
-  // Moving bedtime earlier past "now" while being played with sleeps at once:
-  // the user asked for it, it is not a window opening.
-  Sim s(kDefaults, hm(22, 30));
+static void test_config_change_defers_while_played_with() {
+  // Moving bedtime earlier past "now" on the bot itself (someone is using it):
+  // like a bedtime, he waits for 10 quiet minutes instead of sleeping mid-edit.
+  Sim s(kDefaults, hm(22, 0));
   s.tick();
+  s.advance(30);
   s.m.noteActivity(s.ms);
   Config early = kDefaults; early.sleepMin = 22 * 60;
   s.m.setConfig(early);
+  CHECK(s.tick() == Change::None);
+  CHECK(s.advance(10) == Change::FellAsleep);
+}
+
+static void test_config_change_from_afar_sleeps_now() {
+  Sim s(kDefaults, hm(22, 0));
+  s.tick();
+  s.advance(30);                                   // nobody near for 30 min
+  Config early = kDefaults; early.sleepMin = 22 * 60;
+  s.m.setConfig(early);
   CHECK(s.tick() == Change::FellAsleep);
+}
+
+static void test_config_change_keeps_morning_edge() {
+  // A config change mid-night is no morning: a manual sleep survives it.
+  Sim s(kDefaults, hm(15, 0));
+  s.tick();
+  s.m.sleepNow();
+  s.tick();
+  Config c = kDefaults; c.napMin = 20;
+  s.m.setConfig(c);
+  CHECK(s.tick() == Change::None && s.m.asleep());
 }
 
 static void test_disable_keeps_manual_sleep() {
@@ -351,7 +396,9 @@ int main() {
   test_boot_inside_window_sleeps();
   test_unknown_time_never_sleeps();
   test_hand_wake_then_nod_off();
-  test_stale_activity_does_not_cut_nap();
+  test_hand_wake_after_long_uptime();
+  test_old_activity_never_defers_bedtime();
+  test_wrap_window_peek_math();
   test_activity_extends_nap();
   test_nap_zero_stays_up_till_morning();
   test_bedtime_waits_for_play();
@@ -363,7 +410,9 @@ int main() {
   test_wake_now_while_awake_is_harmless();
   test_last_command_wins();
   test_disable_mid_window_wakes();
-  test_config_change_is_not_bedtime();
+  test_config_change_defers_while_played_with();
+  test_config_change_from_afar_sleeps_now();
+  test_config_change_keeps_morning_edge();
   test_disable_keeps_manual_sleep();
   test_dst_spring_forward();
   test_dst_fall_back();
