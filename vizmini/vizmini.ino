@@ -29,6 +29,7 @@ uint8_t    botBackgroundStyle = 0;                 // 0 = no ambient stroke
 #include "ink_time.h"          // Ink Time: the clock and weather as ferrofluid
 #include "device_name.h"       // his name: hotspot, <name>.local, VizCloud
 #include "web_ui.h"            // also brings in cloud_client.h (VizCloud)
+#include "sleep_schedule.h"    // when he sleeps (shared with vizbot, host-tested)
 #include <time.h>
 
 // Top-level interaction mode
@@ -58,6 +59,13 @@ unsigned long g_lastFrame   = 0;
 uint32_t      g_faceUs      = 0;      // last face render time, shown in /state
 uint32_t      g_sendUs      = 0;      // last OLED transfer time
 unsigned long g_frameMs     = 0;      // last frame-to-frame time
+
+// Sleep (owner: the "Sleep" section below). g_lastInputMs counts web and cloud
+// too; bedtime is held off only by a person at the button (g_lastHumanMs).
+sleepsched::Machine g_sleep;
+unsigned long g_lastHumanMs = 0;
+unsigned long g_peekUntil   = 0;      // asleep: eyes open until then
+inline bool asleep() { return g_sleep.asleep(); }
 unsigned long g_prevFrameAt = 0;
 
 // ---- snow particles --------------------------------------------------------
@@ -189,6 +197,7 @@ uint8_t g_panelContrast = DEFAULT_CONTRAST;   // what the panel is set to right 
 
 // Brightness follows the morph: lerp(face, ferro, P) (art direction §6.1)
 uint8_t panelContrastTarget() {
+  if (asleep()) return SLEEP_CONTRAST;
   if (g_mode == MODE_INFO) {                            // the ink screens' white lightbox
     float inkC = constrain(g_contrast * FERRO_CONTRAST_K, (float)FERRO_CONTRAST_MIN, (float)FERRO_CONTRAST_MAX);
     return (uint8_t)lroundf(g_contrast + (inkC - g_contrast) * ink.brightP(millis()));
@@ -258,15 +267,16 @@ void setFerroSetting(uint8_t v) {
   else { if (g_mode == MODE_FERRO && !g_visitEndAt) g_visitEndAt = millis() + FERRO_VISIT_MS; scheduleVisit(); }
 }
 
-void ctlSetFerro(bool on) { g_lastInputMs = millis(); if (on) enterFerro(); else exitFerro(); }
+void ctlSetFerro(bool on) { if (asleep()) return; g_lastInputMs = millis(); if (on) enterFerro(); else exitFerro(); }
 void ctlFerroSetting(const String &v) {
   g_lastInputMs = millis();
   for (uint8_t i = 0; i < 3; i++) if (v == ferroSetNames[i]) setFerroSetting(i);
 }
-void ctlFerroVisit() { g_lastInputMs = millis(); enterFerro(FERRO_VISIT_MS); }
+void ctlFerroVisit() { if (asleep()) return; g_lastInputMs = millis(); enterFerro(FERRO_VISIT_MS); }
 // Party patterns and tentacle moves, by vizMini name or the nearest vizBot
 // name (breath, crown, calm, feelers, long, big)
 void ctlFerroPlay(const String &pat, const String &tent) {
+  if (asleep()) return;
   g_lastInputMs = millis();
   if (g_mode != MODE_FERRO) enterFerro();
   String p = pat, t = tent;
@@ -286,8 +296,9 @@ void ctlPartyStack(const String &v) {
     p.end();
   }
 }
-void ctlSetExpression(uint8_t v) { g_lastInputMs = millis(); if (g_mode == MODE_INFO) exitInfo(); applyExpression(v); }
+void ctlSetExpression(uint8_t v) { if (asleep()) return; g_lastInputMs = millis(); if (g_mode == MODE_INFO) exitInfo(); applyExpression(v); }
 void ctlSetInfo(bool on) {
+  if (asleep()) return;
   g_lastInputMs = millis();
   if (g_mode == MODE_FERRO) exitFerroNow();
   if (on) {
@@ -301,18 +312,18 @@ void ctlInfoSky(const String &v) {
   static const char *const names[SKY_NUM] = { "clear", "cloudy", "rain", "snow", "storm", "fog", "wind" };
   ink.forceSky = 0xFF;
   for (uint8_t i = 0; i < SKY_NUM; i++) if (v == names[i]) ink.forceSky = i;
-  if (ink.forceSky != 0xFF) {
+  if (ink.forceSky != 0xFF && !asleep()) {
     if (g_mode != MODE_INFO) enterInfo(true);
     else if (g_infoView != VIEW_WEATHER) toggleInfoView();
     g_viewSwitchMs = millis();
   }
 }
 void ctlSetSnow(bool on)         { g_lastInputMs = millis(); g_snow = on; }
-void ctlSpark()                  { g_lastInputMs = millis(); leds.spark(); }
+void ctlSpark()                  { if (asleep()) return; g_lastInputMs = millis(); leds.spark(); }
 void ctlMotion(int level, int move) {
   g_lastInputMs = millis();
   if (level >= 0) motion.setLevel((uint8_t)level);
-  if (move > 0) {
+  if (move > 0 && !asleep()) {
     if (g_mode == MODE_INFO) exitInfoNow();
     if (g_mode == MODE_FERRO) exitFerroNow();   // stance moves for ferro are phase F3
     motion.start((uint8_t)move, /*force=*/true);
@@ -330,11 +341,119 @@ void ctlSetContrast(uint8_t c) {
   gfxDev.setContrast(g_panelContrast);
 }
 void ctlSay(const char* text) {
+  if (asleep()) return;   // no words in his sleep
   g_lastInputMs = millis();
   strncpy(g_sayText, text, sizeof(g_sayText) - 1);
   g_sayText[sizeof(g_sayText) - 1] = 0;
   g_sayUntil = millis() + SAY_DEFAULT_MS;
 }
+// ============================================================================
+// Sleep — the only code that puts him to sleep or wakes him (docs/plan-sleep.md)
+// ============================================================================
+// sleep_schedule.h decides when. Here: the clock, persistence and effects.
+// Asleep: eyes shut (a press peeks), panel eased to SLEEP_CONTRAST, strip dark,
+// no party visits, moves, sayings or info screens. Saved settings stay as they
+// are, so the morning puts everything back. Loop thread only (the web server
+// runs from webLoop() on it too).
+static int16_t  g_sleepMod = sleepsched::kTimeUnknown;   // last minute-of-day read
+static uint32_t g_sleepClockAt = 0;
+static bool     g_sleepClockRead = false;
+
+// Local minute-of-day, or unknown before NTP (the hotspot never gets one).
+// time() directly, as clockDigits() does: getLocalTime(&t, 0) can miss a set clock.
+static int16_t sleepReadClock() {
+  time_t now = time(nullptr);
+  struct tm t;
+  if (localtime_r(&now, &t) == nullptr || t.tm_year < (2024 - 1900)) return sleepsched::kTimeUnknown;
+  return sleepsched::minuteOfDay(t.tm_hour, t.tm_min);
+}
+
+static void sleepSave() {
+  const sleepsched::Config& c = g_sleep.config();
+  Preferences p;
+  p.begin(NVS_NAMESPACE, false);
+  p.putBool  ("slpOn",   c.enabled);
+  p.putUShort("slpAt",   c.sleepMin);
+  p.putUShort("slpWake", c.wakeMin);
+  p.putUChar ("slpNap",  c.napMin);
+  p.end();
+}
+
+static void sleepLoad() {
+  sleepsched::Config c = sleepsched::kDefaults;
+  Preferences p;
+  p.begin(NVS_NAMESPACE, true);
+  c.enabled  = p.getBool  ("slpOn",   c.enabled);
+  c.sleepMin = p.getUShort("slpAt",   c.sleepMin);
+  c.wakeMin  = p.getUShort("slpWake", c.wakeMin);
+  c.napMin   = p.getUChar ("slpNap",  c.napMin);
+  p.end();
+  g_sleep.begin(c, millis());   // sanitizes anything out of range
+}
+
+static void sleepApply(sleepsched::Change c) {
+  if (c == sleepsched::Change::FellAsleep) {
+    motion.paused = true;                    // first: the exits below re-apply his expression
+    exitInfoNow();
+    exitFerroNow();
+    g_startleUntil = 0;
+    g_sayText[0] = 0;
+    g_peekUntil = 0;
+    face.transitionTo(EXPR_CHILL, 800);
+    leds.asleep = true;
+    Serial.println("[sleep] asleep");
+  } else if (c == sleepsched::Change::WokeUp) {
+    leds.asleep = false;
+    motion.paused = false;
+    g_lastInputMs = millis();
+    startle();                               // a little "oh!" on waking, then his face back
+    if (g_ferroSet == FERRO_SET_ON) enterFerro();
+    else if (g_ferroSet == FERRO_SET_AUTO) scheduleVisit();
+    Serial.println("[sleep] awake");
+  }
+}
+
+void sleepTick() {
+  const uint32_t now = millis();
+  if (!g_sleepClockRead || now - g_sleepClockAt >= SLEEP_CLOCK_POLL_MS) {
+    g_sleepMod = sleepReadClock();
+    g_sleepClockAt = now;
+    g_sleepClockRead = true;
+  }
+  g_sleep.noteActivity(g_lastHumanMs);
+  sleepApply(g_sleep.update(g_sleepMod, now));
+}
+
+// Web/cloud: fields < 0 are left as they are; act 1 = sleep now, 0 = wake, -1 = none.
+// The handler has validated every value.
+void ctlSleep(int on, int atMin, int wakeMin, int nap, int act) {
+  if (on >= 0 || atMin >= 0 || wakeMin >= 0 || nap >= 0) {
+    sleepsched::Config c = g_sleep.config();
+    if (on >= 0)      c.enabled  = on != 0;
+    if (atMin >= 0)   c.sleepMin = (uint16_t)atMin;
+    if (wakeMin >= 0) c.wakeMin  = (uint16_t)wakeMin;
+    if (nap >= 0)     c.napMin   = (uint8_t)nap;
+    g_sleep.setConfig(c);
+    sleepSave();
+  }
+  if (act == 1) g_sleep.sleepNow();
+  else if (act == 0) g_sleep.wakeNow();
+  sleepTick();   // apply now, so the reply shows the new state
+}
+
+String sleepJson() {
+  const sleepsched::Config& c = g_sleep.config();
+  char buf[128];
+  const sleepsched::Cause cause = g_sleep.cause();
+  snprintf(buf, sizeof(buf),
+           "{\"on\":%s,\"at\":\"%02u:%02u\",\"wake\":\"%02u:%02u\",\"nap\":%u,\"asleep\":%s,\"cause\":\"%s\",\"clock\":%s}",
+           c.enabled ? "true" : "false", c.sleepMin / 60u, c.sleepMin % 60u, c.wakeMin / 60u, c.wakeMin % 60u,
+           (unsigned)c.napMin, asleep() ? "true" : "false",
+           cause == sleepsched::Cause::Manual ? "manual" : cause == sleepsched::Cause::Schedule ? "schedule" : "none",
+           g_sleepMod != sleepsched::kTimeUnknown ? "true" : "false");
+  return String(buf);
+}
+
 String ctlStateJson() {
   String s = "{";
   s += "\"fw\":\"" FIRMWARE_VERSION "\",";
@@ -356,6 +475,7 @@ String ctlStateJson() {
   s += "\"nextVisitS\":" + String(g_ferroSet == FERRO_SET_AUTO && g_mode == MODE_FACE ? (long)(g_nextVisitAt - millis()) / 1000 : -1) + ",";
   s += "\"visitLeftS\":" + String(g_mode == MODE_FERRO && g_visitEndAt ? (long)(g_visitEndAt - millis()) / 1000 : -1) + ",";
   s += "\"panel\":" + String(g_panelContrast) + ",";
+  s += "\"sleep\":" + sleepJson() + ",";
   ferro.sumUs = ferro.cnt = ferro.maxUs = 0;
   s += "\"snow\":" + String(g_snow ? "true" : "false") + ",";
   s += "\"contrast\":" + String(g_contrast) + ",";
@@ -472,6 +592,7 @@ void setup() {
   snowInit();
 
   leds.begin();                      // strip + onboard pixel, mode/brightness from NVS
+  sleepLoad();                       // schedule from NVS; no clock yet, so awake
 
   String where;
 #if WIFI_ENABLED
@@ -505,6 +626,7 @@ void loop() {
   if (WIFI_ENABLED) webLoop();        // keep web control responsive every pass
   leds.update();                      // inside lights, 50 Hz
   cloudLoop();                        // run what VizCloud asked for (cheap when idle)
+  sleepTick();                        // after web + cloud, so their commands land this pass
 
   // ---- WiFi signal readout (gated; rssi also lives in /state) ----
 #if WIFI_RSSI_LOG
@@ -534,20 +656,26 @@ void loop() {
     Serial.printf("[touch] event=%d\n", (int)ev);
 #endif
     unsigned long now = millis();
-    g_lastInputMs = now;
     bool isDouble = (ev == TOUCH_PRESS) && (now - g_lastPressMs < DOUBLE_TAP_MS);
     if (ev == TOUCH_PRESS) g_lastPressMs = now;
 
-    if (g_mode == MODE_INFO) {
-      if (ev == TOUCH_PRESS) toggleInfoView();        // single touch flips view
-      else if (ev == TOUCH_LONG_PRESS) exitInfo();    // hold to leave
-    } else if (ev == TOUCH_LONG_PRESS) {
-      enterInfo();                                    // hold -> time/weather
-    } else if (ev == TOUCH_PRESS) {
-      if (isDouble) enterInfo();                      // double-tap -> time/weather
-      else {                                          // single -> cycle mood, new light show
-        applyExpression((g_expr + 1) % BOT_NUM_EXPRESSIONS);
-        leds.shuffle();
+    if (asleep()) {
+      if (ev == TOUCH_LONG_PRESS) { g_sleep.wakeNow(); sleepTick(); }   // hold to wake
+      else if (ev == TOUCH_PRESS) g_peekUntil = now + SLEEP_PEEK_MS;     // a press is a peek
+    } else {
+      g_lastInputMs = now;
+      g_lastHumanMs = now;
+      if (g_mode == MODE_INFO) {
+        if (ev == TOUCH_PRESS) toggleInfoView();        // single touch flips view
+        else if (ev == TOUCH_LONG_PRESS) exitInfo();    // hold to leave
+      } else if (ev == TOUCH_LONG_PRESS) {
+        enterInfo();                                    // hold -> time/weather
+      } else if (ev == TOUCH_PRESS) {
+        if (isDouble) enterInfo();                      // double-tap -> time/weather
+        else {                                          // single -> cycle mood, new light show
+          applyExpression((g_expr + 1) % BOT_NUM_EXPRESSIONS);
+          leds.shuffle();
+        }
       }
     }
   }
@@ -597,7 +725,7 @@ void loop() {
   }
 
   // ---- auto ferro visit (waits out info mode and any rotation move) ----
-  if (g_ferroSet == FERRO_SET_AUTO && g_nextVisitAt && (long)(millis() - g_nextVisitAt) >= 0 && !motion.turned()) {
+  if (g_ferroSet == FERRO_SET_AUTO && g_nextVisitAt && (long)(millis() - g_nextVisitAt) >= 0 && !motion.turned() && !asleep()) {
     g_nextVisitAt = 0;
     enterFerro(FERRO_VISIT_MS);
     return;
@@ -616,6 +744,7 @@ void loop() {
   tweenManager.update();
   face.update();
   botEyes.lastInteractMs = g_lastInputMs;   // the yawn waits for 5 quiet minutes
+  botEyes.sleeping = asleep() && (long)(millis() - g_peekUntil) >= 0;   // shut; a press peeks
   botEyes.step(millis());                   // blinks, gaze, fidgets, face springs
   leds.setBlink(botEyes.b);
   motion.step(millis());
@@ -623,7 +752,7 @@ void loop() {
 
   u8g2.clearBuffer();
   // Snow stays upright, so it sits out the (rare, short) moves
-  if (g_snow && !motion.turned()) snowDrawAndStep();
+  if (g_snow && !motion.turned() && !asleep()) snowDrawAndStep();
   uint32_t t0 = micros();
   renderMiniFace();
   motion.apply();                           // turn + fit the frame (no-op when upright)

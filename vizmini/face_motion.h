@@ -69,6 +69,7 @@ public:
   const char *moveName() const { return faceMoveNames[move]; }
   float angle() const { return ang.x; }
   bool turned() const { return fabsf(ang.x) > 0.3f || fabsf(ang.v) > 1.0f; }
+  bool paused = false;   // asleep: no new moves; one already running finishes upright
 
   // Start a move now (web buttons, mood reactions). Ignored while one runs,
   // except from the web (force), which replaces it.
@@ -118,7 +119,7 @@ public:
 
   // A new expression may add a lean (leaning moods only, chance by level)
   void onExpression(uint8_t e) {
-    if (level == MOTION_OFF || move != MOVE_NONE) return;
+    if (level == MOTION_OFF || paused || move != MOVE_NONE) return;
     float chance = level == MOTION_OFTEN ? 0.7f : 0.25f;
     float lean = 0;
     switch (e) {
@@ -148,7 +149,7 @@ public:
     if (dt > 0.1f) dt = 0.1f;
 
     if (move == MOVE_NONE) {
-      if (level != MOTION_OFF && eyeReached(now, nextAt)) {
+      if (level != MOTION_OFF && !paused && eyeReached(now, nextAt)) {
         start(pickMove());
         scheduleNext(now);
       }

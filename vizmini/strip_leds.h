@@ -138,6 +138,9 @@ public:
   void setMood(uint8_t expr) { if (expr < BOT_NUM_EXPRESSIONS && expr != moodExpr) { moodExpr = expr; moodStart = millis(); } }
   void setBlink(float b) { blinkAmt = b; }
   void spark() { sparkStart = millis(); sparking = true; }
+  // Set by the sleep owner (vizmini.ino): dark without touching the saved mode.
+  // identify() still shows, so a sleeping bot can be found.
+  bool asleep = false;
   // A single click: the ambient show jumps to a new pattern and palette now.
   // A locked choice moves to the new one for this session; the saved lock stays
   void shuffle() {
@@ -198,12 +201,13 @@ public:
     lastTick = now;
 
     CRGB target[LED_STRIP_COUNT];
-    if (mode == LEDS_MOOD)         renderMood(target, now);
+    if (asleep)                    fill_solid(target, LED_STRIP_COUNT, CRGB::Black);   // fades out
+    else if (mode == LEDS_MOOD)    renderMood(target, now);
     else if (mode == LEDS_AMBIENT) renderAmbient(target, now);
     else if (mode == LEDS_SOLID)   fill_solid(target, LED_STRIP_COUNT, c[0]);
     else                           fill_solid(target, LED_STRIP_COUNT, CRGB::Black);
 
-    if (sparking) renderSpark(target, now);
+    if (sparking && !asleep) renderSpark(target, now);
     if ((long)(idUntil - now) > 0) { renderIdentify(now); FastLED.show(); return; }
 
     // Ease toward the target: ~120 ms cross-fade, fast enough to keep strobes crisp.
