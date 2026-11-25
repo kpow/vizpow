@@ -450,6 +450,13 @@ static float uiFaceAnimValue() {
   return ui.faceFrom + (ui.faceTo - ui.faceFrom) * uiSmooth((float)dt / UI_FACE_ANIM_MS);
 }
 
+static void uiGo(UiScreen s);
+
+#ifdef HAS_SLEEP_SCHEDULE
+// The sleep owner (bot_sleep_owner.h) closes any sheet as he falls asleep.
+void uiSleepClose() { uiGo(UI_HOME); }
+#endif
+
 static void uiGo(UiScreen s) {
   if (s == ui.screen) return;
   if (s == UI_HOME) uiSound(SEQ_DISMISS);
@@ -924,6 +931,7 @@ enum UiRowKey : uint8_t {
   RK_BASE_LEDS, RK_LED_MODE, RK_SOUND, RK_VOLUME, RK_AUDIOFX, RK_REACT,
   RK_CHILL, RK_CHILL_TIME, RK_NOD, RK_SHAKE, RK_LOOKUP, RK_LOOKDOWN, RK_CENTER,
   RK_BATTERY, RK_GAMES, RK_POWEROFF, RK_LOWPOWER,
+  RK_SLEEP, RK_BEDTIME, RK_WAKETIME, RK_SLEEP_NOW,
 };
 struct UiRow {
   const char* label;
@@ -990,6 +998,18 @@ static void uiBuildRows(uint8_t cat) {
       int8_t ti = uiTzIndex();
       uiAddRow("Time zone", ROW_STEP, RK_TZ, ti >= 0 ? UI_TZ_NAME[ti] : "Custom");
       if (wledData.enabled) uiAddRow("Scheduled", ROW_TOGGLE, RK_SCHEDULE, "", schedContent.enabled);
+#ifdef HAS_SLEEP_SCHEDULE
+      {
+        const sleepsched::Config& sc = botSleepConfig();
+        char t[8];
+        uiAddRow("Sleep", ROW_TOGGLE, RK_SLEEP, "", sc.enabled);
+        botSleepFormatHHMM(sc.sleepMin, t, sizeof(t));
+        uiAddRow("Bedtime", ROW_STEP, RK_BEDTIME, t);
+        botSleepFormatHHMM(sc.wakeMin, t, sizeof(t));
+        uiAddRow("Wake up", ROW_STEP, RK_WAKETIME, t);
+        uiAddRow("Sleep now", ROW_NAV, RK_SLEEP_NOW);
+      }
+#endif
       break;
     }
     case CAT_LIGHT:
@@ -1542,6 +1562,27 @@ static void uiRowAction(uint8_t i, int16_t x) {
       markSettingsDirty();
       break;
 #endif
+#ifdef HAS_SLEEP_SCHEDULE
+    case RK_SLEEP: {
+      sleepsched::Config sc = botSleepConfig();
+      sc.enabled = !sc.enabled;
+      botSleepSetConfig(sc);
+      break;
+    }
+    case RK_BEDTIME: {
+      sleepsched::Config sc = botSleepConfig();
+      sc.sleepMin = sleepsched::stepMinute(sc.sleepMin, dir, SLEEP_STEP_MIN);
+      botSleepSetConfig(sc);
+      break;
+    }
+    case RK_WAKETIME: {
+      sleepsched::Config sc = botSleepConfig();
+      sc.wakeMin = sleepsched::stepMinute(sc.wakeMin, dir, SLEEP_STEP_MIN);
+      botSleepSetConfig(sc);
+      break;
+    }
+    case RK_SLEEP_NOW: botSleepRequest(true); break;   // the owner closes this sheet
+#endif
 #ifdef BOARD_HAS_STACKCHAN_BASE
     case RK_CHILL: scFireChillMode(); break;
     case RK_CHILL_TIME: {
@@ -1742,6 +1783,7 @@ static void uiOnTap(int16_t x, int16_t y) {
   if (infoMode.active) { infoMode.nextPage(); return; }
 
   if (ui.screen == UI_HOME) {
+    if (botMode.asleep()) { botMode.peek(); return; }   // hold wakes him, a tap is a peek
     // Party mode: tap the blob and he dashes to another corner; tap anywhere else and he reaches for it
     if (partyBlob.active) {
       if (partyBlob.contains(x, y)) {
@@ -1778,6 +1820,9 @@ static void uiOnTap(int16_t x, int16_t y) {
 }
 
 static void uiOnLongPress(int16_t x, int16_t y) {
+#ifdef HAS_SLEEP_SCHEDULE
+  if (botSleepAsleep()) { botSleepRequest(false); return; }   // hold to wake
+#endif
   if (infoMode.active) {
     infoMode.beginExitTransition();
     uiGo(UI_DOCK);
@@ -1795,6 +1840,7 @@ static void uiOnSwipe(uint8_t dir) {
   }
   switch (ui.screen) {
     case UI_HOME:
+      if (botMode.asleep()) { botMode.peek(); break; }   // no menus in his sleep
       if (dir == UI_SWIPE_UP) uiGo(UI_DOCK);
       else if (dir == UI_SWIPE_LEFT) uiStepScene(1);
       else if (dir == UI_SWIPE_RIGHT) uiStepScene(-1);

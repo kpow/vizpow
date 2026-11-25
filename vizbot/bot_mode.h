@@ -183,6 +183,8 @@ struct BotModeState {
 
   // Timing
   unsigned long lastInteraction;     // Last touch/shake event
+  unsigned long lastHumanMs;         // Last interaction a person made (not cloud, web or timers)
+  unsigned long peekUntil;           // asleep: eyes open until then (a tap gets a peek)
   unsigned long lastFrameTime;
   unsigned long nextRandomExpr;      // Next random idle expression change
   unsigned long nextIdleSaying;      // Next random idle saying
@@ -245,6 +247,8 @@ struct BotModeState {
     personalityRotIntervalMs = 300000;  // 5 min default
     lastPersonalityRotMs = millis();
     lastInteraction = millis();
+    lastHumanMs = lastInteraction;
+    peekUntil = 0;
     nextIdleChirp = lastInteraction + IDLE_CHIRP_AFTER_MS + random(IDLE_CHIRP_JITTER_MS);
     lastFrameTime = millis();
     nextRandomExpr = millis() + random(personality->exprMinMs, personality->exprMaxMs);
@@ -268,13 +272,43 @@ struct BotModeState {
     initialized = true;
   }
 
-  // Register an interaction (resets idle timers)
-  void registerInteraction() {
+  bool asleep() const { return state == BOT_SLEEPING; }
+
+  // Register an interaction (resets idle timers). human=false for things no
+  // person did right now (cloud sayings, web expressions, personality rotation):
+  // they wake him from idle but do not hold off bedtime (bot_sleep.h).
+  // Asleep, nothing here wakes him: only the sleep owner does (hold to wake).
+  void registerInteraction(bool human = true) {
+    if (asleep()) return;
     lastInteraction = millis();
+    if (human) lastHumanMs = lastInteraction;
     nextIdleChirp = lastInteraction + IDLE_CHIRP_AFTER_MS + random(IDLE_CHIRP_JITTER_MS);
     if (state != BOT_ACTIVE) {
       wake();
     }
+  }
+
+  // Asleep: a tap or a jolt opens his eyes for a moment, silently.
+  void peek() {
+    peekUntil = millis() + SLEEP_PEEK_MS;
+  }
+
+  // Asleep: called by the sleep owner only (bot_sleep.h). Plays the descend
+  // before the owner hushes the sound.
+  void fallAsleep() {
+    if (asleep()) return;
+    char buf[MAX_SAY_LEN];
+    getRandomSayingText(SAY_SLEEP, buf, sizeof(buf));
+    speechBubble.show(buf, 2500);
+    pendingSayAt = 0;
+    shakeReacting = false;
+    peekUntil = 0;
+    face.transitionTo(EXPR_CHILL, 800);
+    #ifdef HAS_SOUND
+    botSounds.play(SEQ_SLEEP_DESCEND);
+    #endif
+    state = BOT_SLEEPING;
+    stateEnteredTime = millis();
   }
 
   // Wake from any sleep/idle state
@@ -306,6 +340,7 @@ struct BotModeState {
 
   // Called when bot receives a tap
   void onTap() {
+    if (asleep()) { peek(); return; }
     registerInteraction();
 
     // Pick a random reaction expression
@@ -334,6 +369,7 @@ struct BotModeState {
 
   // Called on strong shake
   void onShake() {
+    if (asleep()) { peek(); return; }
     registerInteraction();
     face.transitionTo(EXPR_DIZZY, 150);
     if (partyBlob.active) partyBlob.shake(millis());   // spikes all round
@@ -356,20 +392,23 @@ struct BotModeState {
 
   // Set expression from external source (web UI, etc.)
   void setExpression(uint8_t exprIndex, uint16_t duration = 0) {
-    registerInteraction();
+    if (asleep()) return;   // his eyes are shut; the morning face is neutral
+    registerInteraction(false);
     face.transitionTo(exprIndex, duration);
     shakeReacting = false;
   }
 
   // Show a custom saying (from web UI)
   void showSaying(const char* text, uint16_t durationMs = 4000) {
-    registerInteraction();
+    if (asleep()) return;   // no words in his sleep
+    registerInteraction(false);
     speechBubble.show(text, durationMs);
   }
 
   // Schedule LCD bubble after WLED pre-delay (called from showBotSaying after wledQueueText)
   void scheduleSaying(const char* text, uint16_t durationMs) {
-    registerInteraction();
+    if (asleep()) return;
+    registerInteraction(false);
     strncpy(pendingSayText, text, MAX_SAY_LEN - 1);
     pendingSayText[MAX_SAY_LEN - 1] = '\0';
     pendingSayDuration = durationMs;
@@ -422,7 +461,8 @@ void voiceShowBubble(const char* text, uint32_t ms) {
 // ============================================================================
 
 void botStepEyes(unsigned long now) {
-  botEyes.sleeping = (botMode.state == BOT_SLEEPING);   // shut via the model, no blinks
+  // Shut via the model, no blinks; a peek opens them for a moment
+  botEyes.sleeping = botMode.asleep() && (long)(now - botMode.peekUntil) >= 0;
   #ifdef HAS_LOW_POWER_MODE
   botEyes.pendant = lowPowerMode;
   #endif
@@ -449,7 +489,7 @@ void updateBotMode() {
   if (menuVisible) return;
 
   // ---- State machine: activity level transitions (personality-driven) ----
-  // Sleep is disabled for now — bot stays active or idle, never sleeps.
+  // SLEEPING is entered and left only by the sleep owner (bot_sleep.h).
   const RuntimePersonality* p = botMode.personality;
   switch (botMode.state) {
     case BOT_ACTIVE:
@@ -466,8 +506,6 @@ void updateBotMode() {
       break;
 
     case BOT_SLEEPING:
-      // If somehow in a sleep state, wake immediately
-      botMode.wake();
       break;
   }
 
@@ -480,7 +518,7 @@ void updateBotMode() {
   }
 
   // ---- Personality rotation timer ----
-  if (botMode.personalityRotIntervalMs > 0 &&
+  if (botMode.personalityRotIntervalMs > 0 && !botMode.asleep() &&
       (now - botMode.lastPersonalityRotMs) >= botMode.personalityRotIntervalMs) {
     botMode.lastPersonalityRotMs = now;
     uint8_t count = botMode.personalityListCount > 0 ? botMode.personalityListCount : runtimePersonalityCount;
@@ -514,7 +552,7 @@ void updateBotMode() {
   // ---- Idle chirp: small sound + face after a long quiet spell (1.69 piezo) ----
   #ifdef BUZZER_PIN
   if (timeSinceInteraction >= IDLE_CHIRP_AFTER_MS && now >= botMode.nextIdleChirp &&
-      !voiceHoldsFace && !botMode.shakeReacting && !botSounds.playing) {
+      !botMode.asleep() && !voiceHoldsFace && !botMode.shakeReacting && !botSounds.playing) {
     botMode.nextIdleChirp = now + random(IDLE_CHIRP_MIN_MS, IDLE_CHIRP_MAX_MS);
     struct tm t;
     bool quiet = getLocalTime(&t, 0) &&
@@ -863,7 +901,7 @@ void renderBotMode() {
 
   // Album art from vizbrain covers the face for a few seconds (album_art.h),
   // with his face still on, small, in a black circle in the top right corner.
-  if (artRender()) {
+  if (!botMode.asleep() && artRender()) {
     // In party mode the cover's face circle sits in his corner
     uint8_t c = (partyWanted() && partyBlob.haveCorner) ? partyBlob.corner : 0;
     const int16_t r = ART_FACE_R, ccx = partyRight(c) ? LCD_WIDTH - r - 3 : r + 3, ccy = partyTop(c) ? r + 3 : LCD_HEIGHT - r - 3;
@@ -886,8 +924,8 @@ void renderBotMode() {
   if (codeBackdrop.alpha > 0) {
     // Code mode: its scrolling code minimap replaces the background (the blob draws it)
     gfx->fillScreen(BOT_COLOR_BG);
-  } else if (botBackgroundStyle == 0) {
-    // Solid black
+  } else if (botBackgroundStyle == 0 || botMode.asleep()) {
+    // Solid black (always, asleep: no scene glowing in the dark)
     gfx->fillScreen(BOT_COLOR_BG);
   } else if (botBackgroundStyle == 1) {
     // Subtle gradient
@@ -947,7 +985,8 @@ void renderBotMode() {
   bool partyPaused = false;
   #endif
   // Code mode uses the same blob, party mode or not.
-  bool blobWanted = partyWanted() || partyBlob.codeOn;
+  // Asleep, the blob goes back to the middle and becomes his sleeping face.
+  bool blobWanted = (partyWanted() || partyBlob.codeOn) && !botMode.asleep();
   if (!partyPaused && (blobWanted || partyBlob.active)) {
     if (blobWanted) partyBlob.cancelExit(); else if (partyBlob.active) partyBlob.beginExit(frameNow);
     partyBlob.holdCorner = voiceHoldsFace || (botMode.speechBubble.active && botMode.speechBubble.voice);
@@ -1098,6 +1137,7 @@ uint8_t getBotBackgroundStyle() {
 }
 
 void showBotSaying(const char* text, uint16_t durationMs) {
+  if (botMode.asleep()) return;   // no words in his sleep, on the LCD or the WLED matrix
   // Interrupt scheduled content if running
   extern void schedOnSpeechStart();
   schedOnSpeechStart();
@@ -1120,7 +1160,7 @@ void setBotPersonality(uint8_t index) {
   if (index >= runtimePersonalityCount) index = 0;
   botMode.personalityIndex = index;
   botMode.personality = &runtimePersonalities[index];
-  botMode.registerInteraction();
+  botMode.registerInteraction(false);   // rotation and web picks: no person at the bot
 
   // Show notification
   char buf[MAX_SAY_LEN];

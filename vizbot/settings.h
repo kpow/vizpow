@@ -142,6 +142,17 @@ void loadSettings() {
   lcdBrightness = 255;
   #endif
 
+  #ifdef HAS_SLEEP_SCHEDULE
+  {
+    sleepsched::Config sc = sleepsched::kDefaults;
+    sc.enabled  = prefs.getBool  ("slpOn",   sc.enabled);
+    sc.sleepMin = prefs.getUShort("slpAt",   sc.sleepMin);
+    sc.wakeMin  = prefs.getUShort("slpWake", sc.wakeMin);
+    sc.napMin   = prefs.getUChar ("slpNap",  sc.napMin);
+    botSleepBegin(sc);   // sanitizes anything out of range
+  }
+  #endif
+
   prefs.end();
 
   Serial.println("Settings loaded from NVS");
@@ -195,6 +206,15 @@ void saveSettings() {
   #ifdef BOARD_HAS_STACKCHAN_BASE
   prefs.putUChar("chillMin", scChillMinutes);
   #endif
+  #endif
+  #ifdef HAS_SLEEP_SCHEDULE
+  {
+    const sleepsched::Config& sc = botSleepConfig();
+    prefs.putBool  ("slpOn",   sc.enabled);
+    prefs.putUShort("slpAt",   sc.sleepMin);
+    prefs.putUShort("slpWake", sc.wakeMin);
+    prefs.putUChar ("slpNap",  sc.napMin);
+  }
   #endif
 
   prefs.end();

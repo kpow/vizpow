@@ -237,6 +237,26 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         </div>
       </div>
 
+      <div class="card" id="sleepCard" style="display:none">
+        <h2 class="shdr" onclick="tgl('secSleep')">Sleep <span class="chv">&#9662;</span></h2>
+        <div class="sbody" id="secSleep">
+          <div class="trow"><span>Sleep schedule</span><div class="tog" id="sleepToggle" onclick="toggleSleep()"></div></div>
+          <div class="trow"><span>Bedtime</span><input type="time" id="sleepAt" class="sel" onchange="setSleep('at', this.value)"></div>
+          <div class="trow"><span>Wake up</span><input type="time" id="sleepWake" class="sel" onchange="setSleep('wake', this.value)"></div>
+          <div class="trow"><span>Nods off after</span>
+            <select id="sleepNap" class="sel" onchange="setSleep('nap', this.value)">
+              <option value="0">Never</option><option value="5">5 min</option><option value="10">10 min</option>
+              <option value="20">20 min</option><option value="30">30 min</option><option value="60">60 min</option>
+            </select>
+          </div>
+          <div class="srow"><span id="sleepStatus">&nbsp;</span></div>
+          <div class="row" style="margin-top:8px">
+            <button onclick="api('/bot/sleep?do=sleep')" class="flex1">Sleep now</button>
+            <button onclick="api('/bot/sleep?do=wake')" class="btn-start flex1">Wake up</button>
+          </div>
+        </div>
+      </div>
+
       <div class="card" id="soundsCard" style="display:none">
         <h2 class="shdr" onclick="tgl('secSounds')">Sounds <span class="chv">&#9662;</span></h2>
         <div class="sbody" id="secSounds">
@@ -604,6 +624,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
     function setTimezone(tz) {
       api('/settings/timezone?tz=' + encodeURIComponent(tz));
     }
+    let sleepOn = false;
+    function toggleSleep() {
+      sleepOn = !sleepOn;
+      document.getElementById('sleepToggle').className = 'tog ' + (sleepOn ? 'on' : '');
+      api('/bot/sleep?on=' + (sleepOn ? 1 : 0));
+    }
+    function setSleep(k, v) {
+      api('/bot/sleep?' + k + '=' + encodeURIComponent(v));
+    }
     let hiResOn = false;
     function toggleHiRes() {
       hiResOn = !hiResOn;
@@ -728,6 +757,19 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;heigh
         if (state.timezone) {
           var tzSel = document.getElementById('tzSelect');
           if (tzSel) tzSel.value = state.timezone;
+        }
+        if (state.sleep) {
+          var sl = state.sleep;
+          document.getElementById('sleepCard').style.display = '';
+          sleepOn = sl.on;
+          document.getElementById('sleepToggle').className = 'tog ' + (sleepOn ? 'on' : '');
+          ['sleepAt', 'sleepWake', 'sleepNap'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (document.activeElement === el) return;   // don't fight the user's edit
+            el.value = id === 'sleepAt' ? sl.at : id === 'sleepWake' ? sl.wake : String(sl.nap);
+          });
+          document.getElementById('sleepStatus').textContent =
+            (sl.asleep ? 'Asleep (' + sl.cause + ')' : 'Awake') + (sl.clock ? '' : ' \u00b7 no clock: schedule waits for the time');
         }
         if (state.hiRes !== undefined) {
           hiResOn = state.hiRes;
@@ -1363,6 +1405,9 @@ void handleState() {
                 ",\"weatherLat\":\"" + String(weatherLat) + "\"" +
                 ",\"weatherLon\":\"" + String(weatherLon) + "\"" +
                 ",\"timezone\":\"" + String(timezoneTZ) + "\"" +
+#ifdef HAS_SLEEP_SCHEDULE
+                ",\"sleep\":" + botSleepJson() +
+#endif
                 ",\"device\":\"" + String(apSSID) + "\"" +
                 ",\"hostname\":\"" + String(mdnsHostname) + ".local\"" +
                 ",\"deviceName\":\"" + String(deviceName) + "\"" +   // stored name; device/hostname above follow it on the next boot
@@ -1522,6 +1567,67 @@ void handleSetTimezone() {
   }
   server.send(200, "text/plain", "OK");
 }
+
+#ifdef HAS_SLEEP_SCHEDULE
+// {"on":true,"at":"23:00","wake":"08:00","nap":10,"asleep":false,"cause":"none","clock":true}
+String botSleepJson() {
+  const BotSleepSnapshot s = botSleepSnapshot();
+  char at[8], wk[8], buf[128];
+  botSleepFormatHHMM(s.cfg.sleepMin, at, sizeof(at));
+  botSleepFormatHHMM(s.cfg.wakeMin, wk, sizeof(wk));
+  snprintf(buf, sizeof(buf),
+           "{\"on\":%s,\"at\":\"%s\",\"wake\":\"%s\",\"nap\":%u,\"asleep\":%s,\"cause\":\"%s\",\"clock\":%s}",
+           s.cfg.enabled ? "true" : "false", at, wk, (unsigned)s.cfg.napMin,
+           s.asleep ? "true" : "false", botSleepCauseName(s.cause), s.clockKnown ? "true" : "false");
+  return String(buf);
+}
+
+// GET /bot/sleep                        -> state JSON
+//     ?on=0|1 &at=HH:MM &wake=HH:MM &nap=0..120   (any subset) -> sets them
+//     ?do=sleep | ?do=wake                          -> sleep now / wake now
+// Every argument is checked before anything is applied: one bad value and
+// nothing changes (400).
+void handleBotSleep() {
+  BotSleepPatch p = { 0, sleepsched::kDefaults };
+  if (server.hasArg("on")) {
+    const String v = server.arg("on");
+    if (v != "0" && v != "1") { server.send(400, "text/plain", "on must be 0 or 1"); return; }
+    p.cfg.enabled = v == "1";
+    p.mask |= SLEEP_F_ON;
+  }
+  if (server.hasArg("at")) {
+    const int16_t m = botSleepParseHHMM(server.arg("at").c_str());
+    if (m < 0) { server.send(400, "text/plain", "at must be HH:MM"); return; }
+    p.cfg.sleepMin = (uint16_t)m;
+    p.mask |= SLEEP_F_AT;
+  }
+  if (server.hasArg("wake")) {
+    const int16_t m = botSleepParseHHMM(server.arg("wake").c_str());
+    if (m < 0) { server.send(400, "text/plain", "wake must be HH:MM"); return; }
+    p.cfg.wakeMin = (uint16_t)m;
+    p.mask |= SLEEP_F_WAKE;
+  }
+  if (server.hasArg("nap")) {
+    const String v = server.arg("nap");
+    const long n = v.toInt();
+    if ((n == 0 && v != "0") || n < 0 || n > sleepsched::kNapMaxMin) {
+      server.send(400, "text/plain", "nap must be 0-120"); return;
+    }
+    p.cfg.napMin = (uint8_t)n;
+    p.mask |= SLEEP_F_NAP;
+  }
+  int8_t act = -1;   // 1 sleep, 0 wake
+  if (server.hasArg("do")) {
+    const String v = server.arg("do");
+    if (v == "sleep") act = 1;
+    else if (v == "wake") act = 0;
+    else { server.send(400, "text/plain", "do must be sleep or wake"); return; }
+  }
+  if (p.mask) cmdSleepConfig(p);
+  if (act >= 0) cmdSleepRequest(act == 1);
+  server.send(200, "application/json", botSleepJson());   // as of now: changes land next frame
+}
+#endif
 
 extern void cmdSetHiResMode(bool enabled);
 
@@ -3283,6 +3389,9 @@ void setupWebServer() {
   #endif
   server.on("/bot/time", handleBotTime);
   server.on("/settings/timezone", handleSetTimezone);
+#ifdef HAS_SLEEP_SCHEDULE
+  server.on("/bot/sleep", handleBotSleep);
+#endif
   server.on("/bot/hires", handleBotHiRes);
   server.on("/bot/background", handleBotBackground);
   server.on("/bot/ambient", handleBotAmbient);
