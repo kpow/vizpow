@@ -24,7 +24,7 @@ import urllib.request
 
 RAM_FLOOR = 16384          # same as the soak bar (scorecard.py)
 LOOP_STALL_MAX_MS = 200    # longest loop period allowed during a test
-MK_GESTURE, MK_RECOVER = 2, 3   # ScMotionKind (stackchan_base.h)
+MK_GESTURE, MK_RECOVER, MK_REST, MK_WAKE = 2, 3, 4, 5   # ScMotionKind (stackchan_base.h)
 RESULTS = []
 HOST = ""
 
@@ -232,6 +232,54 @@ def t_reinit():
                                       f"touch reference {'re-taken' if ref else 'NOT re-taken'}")
 
 
+# ---- sleep (docs/plan-sleep.md) ------------------------------------------------------------
+
+def resting():
+    return bool(((req("/state") or {}).get("stackchan") or {}).get("servosResting"))
+
+
+def t_sleep():
+    """Sleep now parks the head (MotionAO rest), wake brings it back live with a
+    fresh touch reference: the whole path a bedtime and a morning take."""
+    if req("/bot/sleep") is None:
+        return True, "no /bot/sleep on this firmware (skipped)"
+    t = up_ms()
+    req("/bot/sleep?do=sleep")
+    rest = wait(lambda: motion_ends(t, MK_REST), 8)
+    asleep = (req("/bot/sleep") or {}).get("asleep")
+    parked = resting()
+    starts = [e for e in timeline() if e[0] >= t and e[1] == "sleepStart"]
+    t2 = up_ms()
+    req("/bot/sleep?do=wake")
+    woke = wait(lambda: motion_ends(t2, MK_WAKE), 10)
+    ref = wait(lambda: [x for x in timeline() if x[0] > t2 and x[1] == "touchRef"], 15)
+    awake = (req("/bot/sleep") or {}).get("asleep") is False
+    ok = bool(rest) and rest[0][4] == 1 and asleep is True and parked and bool(starts) and \
+        bool(woke) and woke[0][4] == 1 and awake and not resting() and bool(ref)
+    return ok, (f"rest {'ok' if rest else 'MISSING'}, asleep={asleep}, parked={parked}, "
+                f"sleepStart {'seen' if starts else 'MISSING'}; wake {'ok=' + str(woke[0][4]) if woke else 'MISSING'}, "
+                f"awake={awake}, touch reference {'re-taken' if ref else 'NOT re-taken'}")
+
+
+def hold_schedule_off():
+    """The suite needs him awake: switch the schedule off for the run (and wake
+    him if it is night). Returns what to put back."""
+    s = req("/bot/sleep")
+    if not s:
+        return None
+    t = up_ms()
+    req("/bot/sleep?on=0&do=wake")
+    if s.get("asleep"):
+        wait(lambda: motion_ends(t, MK_WAKE), 10)
+        wait(lambda: not touch()["needRef"], 15)
+    return s
+
+
+def restore_schedule(saved):
+    if saved and saved.get("on"):
+        req("/bot/sleep?on=1")
+
+
 # ---- camera, screen, LEDs, FX, cloud ----------------------------------------------------
 
 def t_photos():
@@ -371,6 +419,7 @@ TESTS = [
     ("fx", "Audio FX on/off", t_fx),
     ("cloud", "Cloud: manual sync", t_cloud),
     ("combo", "All at once: voice + cloud + nod + photo + LEDs + screen", t_combo),
+    ("sleep", "Sleep: head rests, wakes live, touch re-referenced", t_sleep),
 ]
 TOUCH_TESTS = [
     ("touch", "Touch: front pat", t_touch_front),
@@ -384,7 +433,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("host")
     ap.add_argument("--touch", action="store_true", help="add the guided touch tests")
-    ap.add_argument("--only", default="", help="comma list: boot,voice,head,camera,screen,leds,fx,cloud,combo,touch,idle")
+    ap.add_argument("--only", default="", help="comma list: boot,voice,head,camera,screen,leds,fx,cloud,combo,sleep,touch,idle")
     ap.add_argument("--no-idle", action="store_true", help="skip the 3-minute hands-off check")
     a = ap.parse_args()
     HOST = a.host
@@ -394,12 +443,16 @@ def main():
     start = snapshot()
     print(f"vizBot {HOST}  fw {start['fw']}  up {start['upSec']} s")
     plan = TESTS + (TOUCH_TESTS if a.touch or "touch" in only else [])
-    for group, name, fn in plan:
-        if only and group not in only:
-            continue
-        run(name, fn, touch_ok=(group == "touch"))
-    if not a.no_idle and (not only or "idle" in only):
-        run("Hands off for 3 min: no phantom taps", t_hands_off)
+    saved = hold_schedule_off()
+    try:
+        for group, name, fn in plan:
+            if only and group not in only:
+                continue
+            run(name, fn, touch_ok=(group == "touch"))
+        if not a.no_idle and (not only or "idle" in only):
+            run("Hands off for 3 min: no phantom taps", t_hands_off)
+    finally:
+        restore_schedule(saved)
 
     end = snapshot()
     n_pass = sum(r["pass"] for r in RESULTS)

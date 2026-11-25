@@ -369,6 +369,11 @@ volatile bool scServosResting = false;
 enum ScMoveClass  : uint8_t { SC_MC_APP = 0, SC_MC_IDLE = 1 };
 enum ScGesture    : uint8_t { SC_G_NOD = 1, SC_G_SHAKE = 2 };
 enum ScRestFlags  : uint8_t { SC_REST_POWEROFF = 1, SC_REST_LEARN_5V = 2 };
+// Why the head rests: SIG_MOTION_REST / SIG_MOTION_WAKE carry one in b.
+// MotionAO keeps the set and wakes the head only once it is empty, so battery
+// care and sleep never wake each other's rest.
+enum ScRestReason : uint8_t { SC_RR_BATTERY = 1, SC_RR_SLEEP = 2, SC_RR_OFF = 4 };
+uint8_t scRestReasons = 0;   // MotionAO's (loop thread); others read it
 enum ScMotionKind : uint8_t { SC_MK_MOVE = 0, SC_MK_IDLE, SC_MK_GESTURE, SC_MK_RECOVER, SC_MK_REST, SC_MK_WAKE };
 static AoActive scMotionAO;
 // Last commanded angles (tenths), for /state: reading the servos from the web
@@ -724,21 +729,23 @@ inline void scBatteryCareTick() {
     }
     // MotionAO parks, cuts the rails, then switches off. Asked every check
     // until it happens: a busy AO (mid-recovery) refuses and is asked again.
-    aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_POWER, SC_REST_POWEROFF));
+    aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_POWER, SC_REST_POWEROFF, SC_RR_OFF));
     return;
   }
   // Each ask needs a fresh run of checks (10 s): longer than a rest or wake takes.
-  if (!scServosResting && low >= SC_BATT_CHECKS) {
+  // Only its own rest: sleep may have the head down too (scRestReasons).
+  const bool battRest = scRestReasons & SC_RR_BATTERY;
+  if (!battRest && low >= SC_BATT_CHECKS) {
     low = good = 0;
     const uint8_t flags = (sc5vWanted && !onUsb) ? SC_REST_LEARN_5V : 0;
-    if (!aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_POWER, flags))) return;
+    if (!aoPost(scMotionAO, aoEvt(SIG_MOTION_REST, SRC_POWER, flags, SC_RR_BATTERY))) return;
     plogRow("BATT_REST", "battery low: head parked, servo rail and LEDs off");
     DBGLN("Battery low: resting the servos and LEDs");
-  } else if (scServosResting && good >= SC_BATT_CHECKS &&
+  } else if (battRest && good >= SC_BATT_CHECKS &&
              millis() - scRestSinceMs >= SC_BATT_MIN_REST_MS) {
     low = good = 0;
-    if (!aoPost(scMotionAO, aoEvt(SIG_MOTION_WAKE, SRC_POWER))) return;
-    plogRow("BATT_WAKE", "battery recovered: servo rail and LEDs back on");
+    if (!aoPost(scMotionAO, aoEvt(SIG_MOTION_WAKE, SRC_POWER, 0, SC_RR_BATTERY))) return;
+    plogRow("BATT_WAKE", "battery recovered: battery rest over (the head stays down if he is asleep)");
   }
 }
 
@@ -990,6 +997,19 @@ inline void scMotionStartRest(uint8_t flags, uint32_t now) {
   scMo.atMs = now + 1300;
 }
 
+inline void scMotionStartWake(uint32_t now) {
+  scMo.state = SC_MS_WAKE;
+  scMo.sub = SC_SUB_RAIL_OFF;
+  scMo.atMs = now;
+}
+
+// Parked. Every reason may have gone while it parked (a hold-to-wake one second
+// into the rest): then straight into a wake rather than resting for nobody.
+inline void scMotionRested() {
+  scMotionEnd(SC_MK_REST, true, SC_MS_RESTED);
+  if (scRestReasons == 0) scMotionStartWake(millis());
+}
+
 inline void scMotionRestTick(uint32_t now) {
   if (!scMotionDue(now)) return;
   switch (scMo.sub) {
@@ -1003,12 +1023,12 @@ inline void scMotionRestTick(uint32_t now) {
       scTouchAskRestart(1500);        // rails were switched: fresh touch reference
       if (scMo.restFlags & SC_REST_POWEROFF) { scMo.sub = SC_SUB_POWEROFF; scMo.atMs = now + 300; }
       else if (scMo.restFlags & SC_REST_LEARN_5V) { scMo.sub = SC_SUB_LEARN; scMo.atMs = now + 400; }
-      else scMotionEnd(SC_MK_REST, true, SC_MS_RESTED);
+      else scMotionRested();
       return;
     }
     case SC_SUB_LEARN:
       sc5vLearnAtRest();
-      scMotionEnd(SC_MK_REST, true, SC_MS_RESTED);
+      scMotionRested();
       return;
     case SC_SUB_POWEROFF: {
       ScI2cLock lock(SC_MOTION_RAIL_LOCK_MS);
@@ -1072,23 +1092,37 @@ inline void scMotionOnEvent(const AoEvt& e) {
       if (st != SC_MS_STILL && st != SC_MS_GESTURE) { scMotionDrop(SC_MK_RECOVER); return; }
       scMotionStartRecover(e.a == 1, e.b == 1, now);
       return;
-    case SIG_MOTION_REST:
+    case SIG_MOTION_REST: {
+      const uint8_t why = e.b ? (uint8_t)e.b : (uint8_t)SC_RR_OFF;
       if (st == SC_MS_RESTED && (e.a & SC_REST_POWEROFF)) {   // already parked: just switch off
+        scRestReasons |= why;
         scMo.state = SC_MS_REST; scMo.sub = SC_SUB_POWEROFF; scMo.atMs = now;
         return;
       }
-      if (st == SC_MS_REST && (e.a & SC_REST_POWEROFF)) { scMo.restFlags |= SC_REST_POWEROFF; return; }  // finish it, then off
-      if (st == SC_MS_REST || st == SC_MS_RESTED) return;        // already on it
+      if (st == SC_MS_REST && (e.a & SC_REST_POWEROFF)) { scMo.restFlags |= SC_REST_POWEROFF; scRestReasons |= why; return; }  // finish it, then off
+      // Already parked (sleep, say) when battery care asks to learn the 5 V
+      // choice: the rails are off, so learn it now rather than drop the ask.
+      if (st == SC_MS_RESTED && (e.a & SC_REST_LEARN_5V)) {
+        scRestReasons |= why;
+        scMo.state = SC_MS_REST; scMo.sub = SC_SUB_LEARN; scMo.atMs = now;
+        return;
+      }
+      if (st == SC_MS_REST && (e.a & SC_REST_LEARN_5V)) { scMo.restFlags |= SC_REST_LEARN_5V; scRestReasons |= why; return; }
+      if (st == SC_MS_REST || st == SC_MS_RESTED) { scRestReasons |= why; return; }   // already on it
       // A switch-off beats a rail cycle or a wake: it ends with every rail off
-      // anyway. A plain rest is dropped there; battery care asks again.
+      // anyway. A plain rest is dropped there (no reason recorded); its owner
+      // asks again.
       if ((st == SC_MS_RECOVER || st == SC_MS_WAKE) && !(e.a & SC_REST_POWEROFF)) { scMotionDrop(SC_MK_REST); return; }
+      scRestReasons |= why;
       scMotionStartRest(e.a, now);                                // beats a gesture
       return;
+    }
     case SIG_MOTION_WAKE:
-      if (st != SC_MS_RESTED) return;
-      scMo.state = SC_MS_WAKE;
-      scMo.sub = SC_SUB_RAIL_OFF;
-      scMo.atMs = now;
+      // Clears one reason; the head comes up only when none is left. Mid-park,
+      // scMotionRested() makes the same check when the park ends.
+      scRestReasons &= (uint8_t)~(uint8_t)e.b;
+      if (st != SC_MS_RESTED || scRestReasons != 0) return;
+      scMotionStartWake(now);
       return;
     case SIG_TICK:
       switch (st) {

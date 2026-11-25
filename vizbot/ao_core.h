@@ -64,6 +64,11 @@ enum AoSig : uint16_t {
   SIG_MOTION_END,        // a = kind (ScMotionKind), b = 1 ok
   SIG_MOTION_DROPPED,    // a = kind refused, b = the state that refused it
   SIG_SERVO_DEAF,        // the watchdog gave up on the servos: recovery starts
+  // Sleep (bot_sleep_owner.h). START/END are published: backlight, mic and the
+  // head rest all change with them (rule 4). WAKE is a command to SleepAO.
+  SIG_SLEEP_START,       // a = cause (1 schedule, 2 manual)
+  SIG_SLEEP_END,
+  SIG_SLEEP_WAKE,        // command: hold-to-wake
   SIG_COUNT
 };
 
@@ -75,6 +80,7 @@ static const char* const AO_SIG_NAMES[SIG_COUNT] = {
   "touchRestart", "bootReady",
   "motionMove", "motionGesture", "motionRecover", "motionRest", "motionWake",
   "motionEnd", "motionDropped", "servoDeaf",
+  "sleepStart", "sleepEnd", "sleepWake",
 };
 
 // Who sent it (timeline column). Not an AO id: shims publish too.

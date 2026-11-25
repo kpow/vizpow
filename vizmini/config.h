@@ -18,7 +18,7 @@
 // on a tiny one-color screen.
 // ============================================================================
 
-#define FIRMWARE_VERSION "0.8.1"
+#define FIRMWARE_VERSION "0.9.0"
 
 // ---- Hardware pins (ESP32-C3 Super Mini) -----------------------------------
 // NOTE: GPIO8/GPIO9 are C3 strapping pins. The onboard WS2812 NeoPixel is

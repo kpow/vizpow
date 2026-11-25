@@ -920,8 +920,16 @@ static void voicePollSenses() {
 // speaker holds the shared I2S port. With Audio FX on, the stream is the mic's
 // only reader and feeds the analyzer through wakeTapBuf (audio_spectrum.h).
 
+// Set by the sleep owner (bot_sleep_owner.h): asleep, nothing reads the mic
+// (no wake stream, no FX tap) and any turn or reply asked for is dropped. The
+// mic driver itself stays loaded, as it does all day: ending it frees its I2S
+// buffers and its 4 KB task stack, and the restart in the morning puts them
+// back elsewhere, often inside the one ~31 KB internal block the camera's
+// 30 KB DMA buffer needs, and photos fail.
+volatile bool voiceSleeping = false;
+
 static bool wakeShouldRun() {
-  return voice.enabled && wake.enabled && voice.state == VOICE_IDLE &&
+  return voice.enabled && wake.enabled && !voiceSleeping && voice.state == VOICE_IDLE &&
          !voice.listenRequested && !voice.playRequested &&
          !M5.Speaker.isRunning() && WiFi.isConnected();
 }
@@ -1184,6 +1192,7 @@ static StaticTask_t voiceTaskTCB;
 
 void voiceTask(void*) {
   for (;;) {
+    if (voiceSleeping) voice.listenRequested = voice.playRequested = false;
     if (voice.listenRequested) {
       wakeStop();
       voice.listenRequested = false;
@@ -1202,12 +1211,13 @@ void voiceTask(void*) {
         continue;
       }
       if (wake.active) wakeStop();
-      if (audioSpectrum.enabled && voice.state == VOICE_IDLE && !M5.Speaker.isRunning()) {
+      if (audioSpectrum.enabled && !voiceSleeping && voice.state == VOICE_IDLE && !M5.Speaker.isRunning()) {
         audioTapStep();        // FX without the wake stream: paced by the mic
         continue;
       }
       wakeTapActive = false;
-      if (M5.Mic.isRunning() && voice.state == VOICE_IDLE) voiceMicEnd();   // nobody wants it
+      // Nobody wants the mic: end it, except asleep (see voiceSleeping).
+      if (M5.Mic.isRunning() && voice.state == VOICE_IDLE && !voiceSleeping) voiceMicEnd();
     }
     vTaskDelay(pdMS_TO_TICKS(20));
   }

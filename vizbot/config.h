@@ -203,7 +203,7 @@
 // ============================================================================
 // Firmware Identity (used for OTA validation + cloud reporting)
 // ============================================================================
-#define FIRMWARE_VERSION "3.12.2"
+#define FIRMWARE_VERSION "3.13.0"
 
 // Audio-reactive ambient effects — global drama / sensitivity (0..200).
 // 0 = effects render as if no audio; 100 = tasteful default (audio fields
@@ -284,13 +284,18 @@
 #endif
 
 // Sleep schedule (bot_sleep.h, docs/plan-sleep.md). The window maths live in
-// sleep_schedule.h; these are the board's effects. 1.69 only for now: StackChan
-// gets its own owner (MotionAO rest) in a later PR.
-#ifdef BOARD_ESP32S3_LCD_169
+// sleep_schedule.h; these are the board's effects. The 1.69 ticks it from the
+// loop; StackChan from SleepAO, which rests the head through MotionAO.
+#if defined(BOARD_ESP32S3_LCD_169) || defined(BOARD_HAS_STACKCHAN_BASE)
   #define HAS_SLEEP_SCHEDULE
   #define SLEEP_BL_PERCENT      8    // asleep, the backlight runs at this % of the setting
   #define SLEEP_STEP_MIN       30    // touch UI bedtime/wake steps
   #define SLEEP_CLOCK_POLL_MS 1000   // how often the local time is re-read
+#endif
+#ifdef BOARD_HAS_STACKCHAN_BASE
+  // StackChan: SleepAO (bot_sleep_owner.h) asks MotionAO to rest the head.
+  #define SLEEP_AO_TICK_MS     100   // schedule + effect reconcile period
+  #define SLEEP_REST_ASK_MS   2000   // a refused rest/wake is asked again this often
 #endif
 #define SLEEP_PEEK_MS        1200   // asleep, a tap opens his eyes this long (bot_mode.h)
 
