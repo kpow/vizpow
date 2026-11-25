@@ -22,6 +22,15 @@ on a one-color 128×64 screen. The v2 plan and status live in `PLAN-v2.md`.
 - **Inside lights** (`strip_leds.h`) — mood (colour + motion per expression,
   dims with blinks), ambient show, or off; a Spark button lays a rainbow
   burst over either. Brightness and mode are saved per bot.
+  The 12 LEDs are his body: 1 and 8 hands, 2–3 and 6–7 arms, 4 + 5 head,
+  9 and 12 legs, 10 + 11 belly. Most moods light a body part (thinking: head;
+  happy: right hand waves; love: belly heartbeat; angry: fists; surprised: a
+  flash to every tip; sad: a drip from the head; excited: jazz hands; neutral:
+  a breath from the feet up), and ambient adds walk, juggle, charge, clap and
+  halo. Every LED stays at least `LED_BODY_FLOOR` lit, so the whole body
+  glows. The classic whole-strip motions stay but are rare:
+  `LED_CLASSIC_EVERY` (one 10 s mood turn in 6) and `LED_CLASSIC_PCT`
+  (20% of ambient auto picks).
 - **Button** (optional; GPIO3 → GND, internal pull-up, active-LOW, debounced):
   - **Press** → cycle to the next expression; the ambient light show jumps to a new pattern and palette
   - **Long-press or double-press** → enter **Time / Weather** mode
